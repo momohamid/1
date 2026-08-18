@@ -1,4 +1,4 @@
-name: U Drive Prototype Test
+name: U Drive Filesystem Test
 
 "on":
   workflow_dispatch:
@@ -11,8 +11,8 @@ jobs:
       - name: Install WinFsp
         shell: pwsh
         run: |
-          $url = "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
           $msi = "$env:TEMP\winfsp.msi"
+          $url = "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
 
           Invoke-WebRequest `
             -Uri $url `
@@ -26,46 +26,125 @@ jobs:
 
           Remove-Item $msi -Force
 
-      - name: Verify WinFsp
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+
+      - name: Download go-winfsp
         shell: pwsh
         run: |
-          $paths = @(
-            "C:\Program Files (x86)\WinFsp",
-            "C:\Program Files\WinFsp"
-          )
+          git clone --depth 1 https://github.com/winfsp/go-winfsp.git "$env:RUNNER_TEMP\go-winfsp"
 
-          $found = $false
-
-          foreach ($p in $paths) {
-            if (Test-Path $p) {
-              Write-Host "FOUND: $p"
-              $found = $true
-            }
-          }
-
-          if (-not $found) {
-            Write-Error "WinFsp was not installed."
-            exit 1
-          }
-
-          Write-Host "WINFSP INSTALLATION SUCCESS"
-
-      - name: Check U drive
+      - name: Build filesystem
         shell: pwsh
         run: |
+          Set-Location "$env:RUNNER_TEMP\go-winfsp"
+
+          go build `
+            -o "$env:RUNNER_TEMP\persistent-passthrough.exe" `
+            ./examples/passthrough/cmd/main.go
+
+          if (-not (Test-Path "$env:RUNNER_TEMP\persistent-passthrough.exe")) {
+            throw "Filesystem build failed."
+          }
+
+          Write-Host "FILESYSTEM BUILD SUCCESS"
+
+      - name: Prepare backing storage
+        shell: pwsh
+        run: |
+          $root = "$env:RUNNER_TEMP\persistent_u_storage"
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Test" `
+            -Force | Out-Null
+
+          "Persistent-RDP U Drive Test" |
+            Set-Content "$root\Test\source.txt" -Encoding UTF8
+
+          "U_BACKING_ROOT=$root" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Mount U drive
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          Start-Process `
+            -FilePath $exe `
+            -ArgumentList "-m","U:","$env:U_BACKING_ROOT"
+
+          Start-Sleep -Seconds 5
+
           $u = Get-Volume -DriveLetter U -ErrorAction SilentlyContinue
 
           if ($null -eq $u) {
-            Write-Host "U: is currently unused."
+            throw "U: was not mounted."
           }
-          else {
-            Write-Host "U: already exists."
-            $u | Format-List
+
+          Write-Host "U DRIVE MOUNT SUCCESS"
+          Get-Volume -DriveLetter U
+
+      - name: Test read and write
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "U:\Test" -Force | Out-Null
+
+          $content = "Hello from Persistent-RDP $(Get-Date -Format o)"
+
+          [IO.File]::WriteAllText(
+            "U:\Test\hello.txt",
+            $content,
+            [Text.Encoding]::UTF8
+          )
+
+          $readBack = [IO.File]::ReadAllText(
+            "U:\Test\hello.txt",
+            [Text.Encoding]::UTF8
+          )
+
+          if ($readBack -ne $content) {
+            throw "READ/WRITE CONTENT MISMATCH"
           }
+
+          Write-Host "U READ SUCCESS"
+          Write-Host "U WRITE SUCCESS"
+
+      - name: SHA256 verification
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash "U:\Test\hello.txt" -Algorithm SHA256).Hash
+
+          if ($hash.Length -ne 64) {
+            throw "Invalid SHA256."
+          }
+
+          Write-Host "SHA256=$hash"
+          Write-Host "SHA256 SUCCESS"
+
+      - name: Verify backing storage
+        shell: pwsh
+        run: |
+          $path = "$env:U_BACKING_ROOT\Test\hello.txt"
+
+          if (-not (Test-Path $path)) {
+            throw "Backing storage did not receive hello.txt"
+          }
+
+          $hash2 = (Get-FileHash $path -Algorithm SHA256).Hash
+
+          Write-Host "BACKING_SHA256=$hash2"
+          Write-Host "BACKING STORAGE SUCCESS"
 
       - name: Final
         shell: pwsh
         run: |
-          Write-Host "================================"
-          Write-Host "U DRIVE PROTOTYPE PRECHECK OK"
-          Write-Host "================================"
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "U DRIVE FILESYSTEM TEST SUCCESS"
+          Write-Host "READ/WRITE SUCCESS"
+          Write-Host "SHA256 SUCCESS"
+          Write-Host "BACKING STORAGE SUCCESS"
+          Write-Host "======================================"
