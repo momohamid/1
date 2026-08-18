@@ -1,1 +1,78 @@
+name: U Drive Prototype Test
 
+on:
+  workflow_dispatch:
+
+jobs:
+  u-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Install WinFsp
+        shell: pwsh
+        run: |
+          $url = "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
+          $msi = "$env:TEMP\winfsp.msi"
+
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $msi `
+            -ErrorAction Stop
+
+          Start-Process `
+            msiexec.exe `
+            -ArgumentList "/i","`"$msi`"","/quiet","/norestart" `
+            -Wait
+
+          Remove-Item $msi -Force
+
+      - name: Verify WinFsp
+        shell: pwsh
+        run: |
+          Write-Host "===== WINFSP ====="
+
+          $paths = @(
+            "C:\Program Files (x86)\WinFsp",
+            "C:\Program Files\WinFsp"
+          )
+
+          $found = $false
+
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "FOUND: $p"
+              Get-ChildItem $p -Recurse -File |
+                Select-Object -First 30 FullName
+              $found = $true
+            }
+          }
+
+          if (-not $found) {
+            Write-Error "WinFsp was not installed."
+            exit 1
+          }
+
+          Write-Host "WINFSP INSTALLATION SUCCESS"
+
+      - name: Check U drive
+        shell: pwsh
+        run: |
+          Write-Host "===== CURRENT U DRIVE ====="
+
+          $u = Get-Volume -DriveLetter U -ErrorAction SilentlyContinue
+
+          if ($null -eq $u) {
+            Write-Host "U: is currently unused."
+          }
+          else {
+            Write-Host "U: already exists:"
+            $u | Format-List
+          }
+
+      - name: Final
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "================================"
+          Write-Host "U DRIVE PROTOTYPE PRECHECK OK"
+          Write-Host "================================"
