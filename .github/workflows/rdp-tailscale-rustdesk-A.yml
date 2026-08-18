@@ -52,7 +52,7 @@ defaults:
 jobs:
 
   # ============================================================
-  # TELEGRAM STORAGE + METADATA TEST
+  # TELEGRAM STORAGE + METADATA + FILE INDEX TEST
   # ============================================================
   telegram-test:
     runs-on: ubuntu-latest
@@ -76,7 +76,7 @@ jobs:
           echo "Original SHA256:"
           sha256sum TEST.txt
 
-      - name: Upload + metadata + download + verify
+      - name: Upload + metadata + file index + download + verify
         shell: bash
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -139,12 +139,12 @@ jobs:
               print(f"ORIGINAL_SHA256={original_hash}")
 
               # ------------------------------------------------
-              # UPLOAD
+              # UPLOAD FILE
               # ------------------------------------------------
               message = await client.send_file(
                   "me",
                   original_file,
-                  caption="Persistent-RDP TEST"
+                  caption="Persistent-RDP FILE"
               )
 
               message_id = message.id
@@ -153,10 +153,11 @@ jobs:
               print(f"MESSAGE_ID={message_id}")
 
               # ------------------------------------------------
-              # CREATE METADATA
+              # CREATE FILE METADATA
               # ------------------------------------------------
               metadata = {
                   "name": original_file,
+                  "path": "/" + original_file,
                   "size": original_size,
                   "sha256": original_hash,
                   "telegram": {
@@ -181,6 +182,7 @@ jobs:
                   )
 
               print("METADATA CREATED")
+
               print(
                   json.dumps(
                       metadata,
@@ -206,7 +208,118 @@ jobs:
               print("METADATA READ SUCCESS")
 
               # ------------------------------------------------
-              # FIND MESSAGE USING MESSAGE ID
+              # CREATE FILE INDEX
+              # ------------------------------------------------
+              index = {
+                  "version": 1,
+                  "updated_at": datetime.now(
+                      timezone.utc
+                  ).isoformat(),
+                  "files": [
+                      {
+                          "name": original_file,
+                          "path": "/" + original_file,
+                          "size": original_size,
+                          "sha256": original_hash,
+                          "telegram_message_id": message_id
+                      }
+                  ]
+              }
+
+              with open(
+                  "file_index.json",
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+                  json.dump(
+                      index,
+                      f,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+
+              print("FILE INDEX CREATED")
+
+              # ------------------------------------------------
+              # UPLOAD FILE INDEX TO TELEGRAM
+              # ------------------------------------------------
+              index_message = await client.send_file(
+                  "me",
+                  "file_index.json",
+                  caption="PERSISTENT-RDP-FILE-INDEX"
+              )
+
+              index_message_id = index_message.id
+
+              print("FILE INDEX UPLOAD SUCCESS")
+              print(
+                  f"INDEX_MESSAGE_ID={index_message_id}"
+              )
+
+              # ------------------------------------------------
+              # FIND THE INDEX MESSAGE AGAIN
+              # ------------------------------------------------
+              index_message_found = None
+
+              async for msg in client.iter_messages(
+                  "me",
+                  search="PERSISTENT-RDP-FILE-INDEX",
+                  limit=20
+              ):
+                  if msg.id == index_message_id:
+                      index_message_found = msg
+                      break
+
+              if not index_message_found:
+                  print("FILE INDEX LOOKUP FAILED")
+                  raise SystemExit(1)
+
+              print("FILE INDEX LOOKUP SUCCESS")
+
+              # ------------------------------------------------
+              # DOWNLOAD INDEX
+              # ------------------------------------------------
+              downloaded_index = "file_index_downloaded.json"
+
+              await client.download_media(
+                  index_message_found,
+                  file=downloaded_index
+              )
+
+              print("FILE INDEX DOWNLOAD SUCCESS")
+
+              # ------------------------------------------------
+              # READ INDEX
+              # ------------------------------------------------
+              with open(
+                  downloaded_index,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+                  restored_index = json.load(f)
+
+              if restored_index["version"] != 1:
+                  print("FILE INDEX VERSION FAILED")
+                  raise SystemExit(1)
+
+              if not restored_index["files"]:
+                  print("FILE INDEX EMPTY")
+                  raise SystemExit(1)
+
+              restored_file = restored_index["files"][0]
+
+              if restored_file["telegram_message_id"] != message_id:
+                  print("FILE INDEX MESSAGE ID FAILED")
+                  raise SystemExit(1)
+
+              if restored_file["sha256"] != original_hash:
+                  print("FILE INDEX SHA256 FAILED")
+                  raise SystemExit(1)
+
+              print("FILE INDEX READ SUCCESS")
+
+              # ------------------------------------------------
+              # FIND ORIGINAL FILE MESSAGE
               # ------------------------------------------------
               stored_message = await client.get_messages(
                   "me",
@@ -220,7 +333,7 @@ jobs:
               print("MESSAGE LOOKUP SUCCESS")
 
               # ------------------------------------------------
-              # DOWNLOAD
+              # DOWNLOAD ORIGINAL FILE
               # ------------------------------------------------
               await client.download_media(
                   stored_message,
@@ -267,7 +380,7 @@ jobs:
               client.loop.run_until_complete(main())
           PY
 
-      - name: Display metadata
+      - name: Display metadata and file index
         shell: bash
         run: |
           echo "=============================="
@@ -275,12 +388,20 @@ jobs:
           echo "=============================="
           cat metadata.json
 
+          echo ""
+          echo "=============================="
+          echo "FILE INDEX"
+          echo "=============================="
+          cat file_index.json
+
       - name: Upload metadata artifact
         uses: actions/upload-artifact@v4
         with:
           name: telegram-storage-metadata
           path: |
             metadata.json
+            file_index.json
+            file_index_downloaded.json
             TEST.txt
             TEST_DOWNLOADED.txt
 
