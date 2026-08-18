@@ -61,9 +61,11 @@ jobs:
 
     steps:
       - name: Install Telethon
+        shell: bash
         run: python3 -m pip install telethon
 
       - name: Create test file
+        shell: bash
         run: |
           echo "Persistent-RDP test $(date -u)" > TEST.txt
           sha256sum TEST.txt
@@ -80,8 +82,10 @@ jobs:
           import base64
           from telethon import TelegramClient
 
+          session_b64 = os.environ["SESSION_B64"]
+
           with open("unlim_session.session", "wb") as f:
-              f.write(base64.b64decode(os.environ["SESSION_B64"]))
+              f.write(base64.b64decode(session_b64))
 
           client = TelegramClient(
               "unlim_session",
@@ -91,15 +95,82 @@ jobs:
 
           async def main():
               await client.start()
+
               await client.send_file(
                   "me",
                   "TEST.txt",
                   caption="Persistent-RDP TEST"
               )
 
+              print("UPLOAD SUCCESS")
+
           with client:
               client.loop.run_until_complete(main())
           PY
+
+      - name: Download TEST.txt from Telegram
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import base64
+          from telethon import TelegramClient
+
+          session_b64 = os.environ["SESSION_B64"]
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(session_b64))
+
+          client = TelegramClient(
+              "unlim_session",
+              int(os.environ["API_ID"]),
+              os.environ["API_HASH"]
+          )
+
+          async def main():
+              await client.start()
+
+              messages = await client.get_messages(
+                  "me",
+                  limit=20
+              )
+
+              for message in messages:
+                  if (
+                      message.file
+                      and message.file.name == "TEST.txt"
+                  ):
+                      await message.download_media(
+                          file="RESTORED_TEST.txt"
+                      )
+
+                      print("DOWNLOAD SUCCESS")
+                      return
+
+              raise RuntimeError(
+                  "TEST.txt was not found in Saved Messages"
+              )
+
+          with client:
+              client.loop.run_until_complete(main())
+          PY
+
+      - name: Verify restored file
+        shell: bash
+        run: |
+          echo "Original:"
+          sha256sum TEST.txt
+
+          echo "Restored:"
+          sha256sum RESTORED_TEST.txt
+
+          cmp TEST.txt RESTORED_TEST.txt
+
+          echo "PERSISTENT STORAGE TEST SUCCESS"
 
   # ============================================================
   # ORIGINAL SETUP
@@ -122,8 +193,14 @@ jobs:
             $n = 1
           } else {
             $n = [int]"${{ inputs.rdp_count }}"
-            if ($n -lt 1) { $n = 1 }
-            if ($n -gt 10) { $n = 10 }
+
+            if ($n -lt 1) {
+              $n = 1
+            }
+
+            if ($n -gt 10) {
+              $n = 10
+            }
           }
 
           $inc = @()
@@ -133,10 +210,18 @@ jobs:
           }
 
           $json = @{ include = $inc } | ConvertTo-Json -Compress
-          "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          $multi = if ($n -gt 1) { '1' } else { '0' }
-          "multi=$multi" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "matrix=$json" |
+            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+          $multi = if ($n -gt 1) {
+            '1'
+          } else {
+            '0'
+          }
+
+          "multi=$multi" |
+            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
   # ============================================================
   # WINDOWS RDP
@@ -164,9 +249,11 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-            "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV
+            "CRD_ENABLED=1" |
+              Out-File -Append $env:GITHUB_ENV
           } else {
-            "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV
+            "CRD_ENABLED=0" |
+              Out-File -Append $env:GITHUB_ENV
           }
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
@@ -194,6 +281,7 @@ jobs:
                 -Wait
 
               Remove-Item $exePath -Force
+
               $ok = $true
             }
             catch {
@@ -284,7 +372,8 @@ jobs:
             $hn = "bullet"
           }
 
-          "TS_HOSTNAME=$hn" | Out-File -Append $env:GITHUB_ENV
+          "TS_HOSTNAME=$hn" |
+            Out-File -Append $env:GITHUB_ENV
 
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
@@ -298,7 +387,10 @@ jobs:
             }
           }
 
-          $runtime = IntOr("${{ inputs.runtime_minutes }}",355)
+          $runtime = IntOr(
+            "${{ inputs.runtime_minutes }}",
+            355
+          )
 
           if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
@@ -315,7 +407,8 @@ jobs:
             $runtime = 355
           }
 
-          "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
+          "RUNTIME_MINUTES=$runtime" |
+            Out-File -Append $env:GITHUB_ENV
 
       - name: Purge bullet* devices
         if: ${{ needs.setup.outputs.multi == '0' }}
@@ -327,10 +420,14 @@ jobs:
           if (Yes("${{ inputs.do_purge }}")) {
             try {
               $auth = [Convert]::ToBase64String(
-                [Text.Encoding]::ASCII.GetBytes("${{ inputs.ts_api_key }}:")
+                [Text.Encoding]::ASCII.GetBytes(
+                  "${{ inputs.ts_api_key }}:"
+                )
               )
 
-              $tn = [uri]::EscapeDataString("${{ inputs.ts_tailnet }}")
+              $tn = [uri]::EscapeDataString(
+                "${{ inputs.ts_tailnet }}"
+              )
 
               $list = Invoke-RestMethod `
                 -Uri "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
@@ -383,9 +480,11 @@ jobs:
             --accept-dns=true `
             --accept-routes=true
 
-          $ip4 = & $ts ip -4 | Select-Object -First 1
+          $ip4 = & $ts ip -4 |
+            Select-Object -First 1
 
-          "TAILSCALE_IP=$ip4" | Out-File -Append $env:GITHUB_ENV
+          "TAILSCALE_IP=$ip4" |
+            Out-File -Append $env:GITHUB_ENV
 
       - name: Enable RDP user + firewall
         run: |
