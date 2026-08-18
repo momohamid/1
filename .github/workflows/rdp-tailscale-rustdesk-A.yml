@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + (Optional) Chrome Remote Desktop (A)
+name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (A)
 
 on:
   workflow_dispatch:
@@ -7,39 +7,37 @@ on:
         description: "Tailscale tailnet (e.g. you@gmail.com)"
         required: true
       ts_api_key:
-        description: "Tailscale API key (device admin, no Bearer)"
+        description: "Tailscale API key"
         required: true
       ts_authkey:
-        description: "Tailscale Auth key (reusable or ephemeral)"
+        description: "Tailscale Auth key"
         required: true
       quick_test:
         description: "Run 5-minute test"
         type: boolean
         default: false
       runtime_minutes:
-        description: "Runtime (max 360; default 355 when not test)"
+        description: "Runtime (max 360; default 355)"
         required: false
         default: "355"
       do_purge:
-        description: "Purge bullet* devices at start (single instance only)"
+        description: "Purge bullet* devices at start"
         required: false
         default: "true"
       cycles:
-        description: "0=stop after A; N=handoffs left incl this run"
+        description: "0=stop after A; N=handoffs left"
         required: false
         default: "0"
       rdp_count:
-        description: "How many RDP instances (1-10) [ignored if CRD provided]"
+        description: "How many RDP instances (1-10)"
         required: false
         default: "1"
       crd_code:
-        description: >-
-          Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL
-          containing --code="4/...". If provided -> single instance; CRD launches first.
+        description: "Chrome Remote Desktop code"
         required: false
         default: ""
       crd_pin:
-        description: "CRD PIN (6–12 digits). Used when launching CRD to avoid interactive prompt."
+        description: "CRD PIN (6-12 digits)"
         required: false
         default: "123456"
 
@@ -54,8 +52,7 @@ defaults:
 jobs:
 
   # ============================================================
-  # TELEGRAM PERSISTENT STORAGE TEST
-  # Upload -> Message ID -> Download -> SHA256 verification
+  # TELEGRAM STORAGE + METADATA TEST
   # ============================================================
   telegram-test:
     runs-on: ubuntu-latest
@@ -79,7 +76,7 @@ jobs:
           echo "Original SHA256:"
           sha256sum TEST.txt
 
-      - name: Upload download and verify Telegram storage
+      - name: Upload + metadata + download + verify
         shell: bash
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -90,6 +87,8 @@ jobs:
           import os
           import base64
           import hashlib
+          import json
+          from datetime import datetime, timezone
           from telethon import TelegramClient
 
           api_id = int(os.environ["API_ID"])
@@ -126,59 +125,167 @@ jobs:
 
               print("TELEGRAM CONNECTED")
 
+              original_file = "TEST.txt"
+              downloaded_file = "TEST_DOWNLOADED.txt"
+
+              # ------------------------------------------------
+              # ORIGINAL FILE INFORMATION
+              # ------------------------------------------------
+              original_size = os.path.getsize(original_file)
+              original_hash = sha256(original_file)
+
+              print(f"ORIGINAL_NAME={original_file}")
+              print(f"ORIGINAL_SIZE={original_size}")
+              print(f"ORIGINAL_SHA256={original_hash}")
+
               # ------------------------------------------------
               # UPLOAD
               # ------------------------------------------------
               message = await client.send_file(
                   "me",
-                  "TEST.txt",
+                  original_file,
                   caption="Persistent-RDP TEST"
               )
 
+              message_id = message.id
+
               print("UPLOAD SUCCESS")
-              print(f"MESSAGE_ID={message.id}")
+              print(f"MESSAGE_ID={message_id}")
+
+              # ------------------------------------------------
+              # CREATE METADATA
+              # ------------------------------------------------
+              metadata = {
+                  "name": original_file,
+                  "size": original_size,
+                  "sha256": original_hash,
+                  "telegram": {
+                      "chat": "me",
+                      "message_id": message_id
+                  },
+                  "created_at": datetime.now(
+                      timezone.utc
+                  ).isoformat()
+              }
+
+              with open(
+                  "metadata.json",
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+                  json.dump(
+                      metadata,
+                      f,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+
+              print("METADATA CREATED")
+              print(
+                  json.dumps(
+                      metadata,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+              )
+
+              # ------------------------------------------------
+              # READ METADATA BACK
+              # ------------------------------------------------
+              with open(
+                  "metadata.json",
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+                  loaded_metadata = json.load(f)
+
+              if loaded_metadata["telegram"]["message_id"] != message_id:
+                  print("METADATA TEST FAILED")
+                  raise SystemExit(1)
+
+              print("METADATA READ SUCCESS")
+
+              # ------------------------------------------------
+              # FIND MESSAGE USING MESSAGE ID
+              # ------------------------------------------------
+              stored_message = await client.get_messages(
+                  "me",
+                  ids=message_id
+              )
+
+              if not stored_message:
+                  print("MESSAGE LOOKUP FAILED")
+                  raise SystemExit(1)
+
+              print("MESSAGE LOOKUP SUCCESS")
 
               # ------------------------------------------------
               # DOWNLOAD
               # ------------------------------------------------
-              downloaded_path = "TEST_DOWNLOADED.txt"
-
               await client.download_media(
-                  message,
-                  file=downloaded_path
+                  stored_message,
+                  file=downloaded_file
               )
 
               print("DOWNLOAD SUCCESS")
 
               # ------------------------------------------------
-              # SHA256
+              # VERIFY DOWNLOADED FILE
               # ------------------------------------------------
-              original_hash = sha256("TEST.txt")
-              downloaded_hash = sha256(downloaded_path)
+              downloaded_size = os.path.getsize(
+                  downloaded_file
+              )
 
-              print(f"ORIGINAL_SHA256={original_hash}")
-              print(f"DOWNLOADED_SHA256={downloaded_hash}")
+              downloaded_hash = sha256(
+                  downloaded_file
+              )
+
+              print(
+                  f"DOWNLOADED_SIZE={downloaded_size}"
+              )
+
+              print(
+                  f"DOWNLOADED_SHA256={downloaded_hash}"
+              )
 
               # ------------------------------------------------
-              # VERIFY
+              # FINAL VERIFICATION
               # ------------------------------------------------
-              if original_hash != downloaded_hash:
-                  print("PERSISTENT STORAGE TEST FAILED")
+              if original_size != downloaded_size:
+                  print("SIZE VERIFICATION FAILED")
                   raise SystemExit(1)
 
+              if original_hash != downloaded_hash:
+                  print("SHA256 VERIFICATION FAILED")
+                  raise SystemExit(1)
+
+              print("SIZE VERIFICATION SUCCESS")
+              print("SHA256 VERIFICATION SUCCESS")
               print("PERSISTENT STORAGE TEST SUCCESS")
 
           with client:
               client.loop.run_until_complete(main())
           PY
 
-      - name: Show Telegram test result
+      - name: Display metadata
         shell: bash
         run: |
-          echo "Telegram persistent-storage test completed successfully."
+          echo "=============================="
+          echo "METADATA"
+          echo "=============================="
+          cat metadata.json
+
+      - name: Upload metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telegram-storage-metadata
+          path: |
+            metadata.json
+            TEST.txt
+            TEST_DOWNLOADED.txt
 
   # ============================================================
-  # ORIGINAL SETUP
+  # SETUP
   # ============================================================
   setup:
     runs-on: ubuntu-latest
@@ -192,6 +299,7 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -200,6 +308,7 @@ jobs:
             $n = 1
           }
           else {
+
             $n = [int]"${{ inputs.rdp_count }}"
 
             if ($n -lt 1) {
@@ -217,10 +326,14 @@ jobs:
             $inc += @{ id = $i }
           }
 
-          $json = @{ include = $inc } | ConvertTo-Json -Compress
+          $json = @{
+            include = $inc
+          } | ConvertTo-Json -Compress
 
           "matrix=$json" |
-            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Out-File $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
 
           $multi = if ($n -gt 1) {
             '1'
@@ -230,7 +343,9 @@ jobs:
           }
 
           "multi=$multi" |
-            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+            Out-File $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
 
   # ============================================================
   # WINDOWS RDP
@@ -254,9 +369,10 @@ jobs:
       # --------------------------------------------------------
       # CRD FLAG
       # --------------------------------------------------------
-      - name: Set CRD flag early (safe read)
+      - name: Set CRD flag early
         shell: pwsh
         run: |
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -273,22 +389,21 @@ jobs:
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
       # --------------------------------------------------------
-      # CHROME REMOTE DESKTOP
+      # INSTALL CRD
       # --------------------------------------------------------
-      - name: Install Chrome Remote Desktop Host (if missing)
+      - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
+
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
 
-            Write-Host "CRD host not found, attempting install..."
-
             $exePath = "$env:TEMP\chromeremotedesktophost.exe"
-            $ok = $false
 
             try {
+
               Invoke-WebRequest `
                 -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile $exePath `
@@ -301,43 +416,35 @@ jobs:
 
               Remove-Item $exePath -Force
 
-              $ok = $true
             }
             catch {
-              Write-Host "EXE installer failed: $($_.Exception.Message)"
-            }
 
-            if (-not $ok) {
+              Write-Host "EXE installer failed."
 
               $msi = "$env:TEMP\chromeremotedesktophost.msi"
 
-              try {
-                Invoke-WebRequest `
-                  -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
-                  -OutFile $msi `
-                  -ErrorAction Stop
+              Invoke-WebRequest `
+                -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+                -OutFile $msi `
+                -ErrorAction Stop
 
-                Start-Process `
-                  msiexec.exe `
-                  -ArgumentList "/i","`"$msi`"","/quiet","/norestart" `
-                  -Wait
+              Start-Process `
+                msiexec.exe `
+                -ArgumentList "/i","`"$msi`"","/quiet","/norestart" `
+                -Wait
 
-                Remove-Item $msi -Force
-              }
-              catch {
-                Write-Error "CRD MSI fallback failed: $($_.Exception.Message)"
-                exit 1
-              }
+              Remove-Item $msi -Force
             }
           }
 
       # --------------------------------------------------------
       # START CRD
       # --------------------------------------------------------
-      - name: Run Chrome Remote Desktop with PIN
+      - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
+
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -345,7 +452,7 @@ jobs:
           $pin = "${{ inputs.crd_pin }}".Trim()
 
           if ($pin -notmatch '^\d{6,12}$') {
-            Write-Error "crd_pin must be 6–12 digits."
+            Write-Error "crd_pin must be 6-12 digits."
             exit 1
           }
 
@@ -372,29 +479,24 @@ jobs:
 
           }
 
-          if ($code) {
-
-            $redir = "https://remotedesktop.google.com/_/oauthredirect"
-            $name = $Env:COMPUTERNAME
-
-            $args = @(
-              "--code=""$code""",
-              "--redirect-url=""$redir""",
-              "--name=""$name""",
-              "--pin=""$pin"""
-            )
-
-            Start-Process `
-              -FilePath $starter `
-              -ArgumentList $args
-
-          }
-          else {
-
+          if (-not $code) {
             Write-Error "Could not detect CRD code."
             exit 1
-
           }
+
+          $redir = "https://remotedesktop.google.com/_/oauthredirect"
+          $name = $Env:COMPUTERNAME
+
+          $args = @(
+            "--code=""$code""",
+            "--redirect-url=""$redir""",
+            "--name=""$name""",
+            "--pin=""$pin"""
+          )
+
+          Start-Process `
+            -FilePath $starter `
+            -ArgumentList $args
 
       # --------------------------------------------------------
       # HOSTNAME + RUNTIME
@@ -451,9 +553,9 @@ jobs:
             Out-File -Append $env:GITHUB_ENV
 
       # --------------------------------------------------------
-      # PURGE
+      # PURGE TAILSCALE DEVICES
       # --------------------------------------------------------
-      - name: Purge bullet* devices
+      - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         shell: pwsh
         run: |
@@ -600,7 +702,7 @@ jobs:
             Out-Null
 
       # --------------------------------------------------------
-      # PYTHON
+      # PYTHON LIBRARIES
       # --------------------------------------------------------
       - name: Install Python libs
         shell: pwsh
@@ -698,7 +800,7 @@ jobs:
           }
 
       # --------------------------------------------------------
-      # NEXT / STOP
+      # STOP / NEXT
       # --------------------------------------------------------
       - name: Dispatch next or stop
         if: always()
