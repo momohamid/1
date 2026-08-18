@@ -1,0 +1,613 @@
+name: Telegram Persistent Sync Engine Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+
+  telegram-sync-test:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 20
+
+    steps:
+
+      - name: Install Telethon
+        shell: bash
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install telethon
+
+      - name: Create test environment
+        shell: bash
+        run: |
+          rm -rf sync_test
+          mkdir -p sync_test/Projects/AE
+          mkdir -p sync_test/Assets/Fonts
+
+          printf 'Persistent-RDP Telegram Sync Test\n' \
+            > sync_test/Projects/AE/hello.txt
+
+          printf 'Persistent-RDP Font Test\n' \
+            > sync_test/Assets/Fonts/test-font.txt
+
+          echo "===== ORIGINAL FILES ====="
+          find sync_test -type f -print
+
+      - name: Upload files and create persistent index
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import base64
+          import hashlib
+          import json
+          import math
+          from datetime import datetime, timezone
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(SESSION_B64))
+
+          client = TelegramClient(
+              "unlim_session",
+              API_ID,
+              API_HASH
+          )
+
+          ROOT = "sync_test"
+          INDEX = "persistent_index.json"
+
+          CHUNK_SIZE = 1024 * 1024
+
+          def sha256(path):
+              h = hashlib.sha256()
+
+              with open(path, "rb") as f:
+                  while True:
+                      data = f.read(1024 * 1024)
+
+                      if not data:
+                          break
+
+                      h.update(data)
+
+              return h.hexdigest()
+
+          def now():
+              return datetime.now(
+                  timezone.utc
+              ).isoformat()
+
+          async def main():
+
+              await client.start()
+
+              print("TELEGRAM CONNECTED")
+
+              records = []
+
+              for root, dirs, files in os.walk(ROOT):
+
+                  dirs.sort()
+                  files.sort()
+
+                  for name in files:
+
+                      path = os.path.join(
+                          root,
+                          name
+                      )
+
+                      relative = os.path.relpath(
+                          path,
+                          ROOT
+                      ).replace("\\", "/")
+
+                      size = os.path.getsize(path)
+                      file_hash = sha256(path)
+
+                      chunk_count = max(
+                          1,
+                          math.ceil(
+                              size / CHUNK_SIZE
+                          )
+                      )
+
+                      record = {
+                          "path": "/" + relative,
+                          "name": name,
+                          "size": size,
+                          "sha256": file_hash,
+                          "chunk_size": CHUNK_SIZE,
+                          "chunk_count": chunk_count,
+                          "chunks": [],
+                          "updated_at": now()
+                      }
+
+                      print("")
+                      print("FILE:", record["path"])
+                      print("SIZE:", size)
+                      print("SHA256:", file_hash)
+
+                      with open(path, "rb") as source:
+
+                          for index in range(chunk_count):
+
+                              data = source.read(
+                                  CHUNK_SIZE
+                              )
+
+                              chunk_file = (
+                                  "sync_chunk_"
+                                  + str(index)
+                                  + ".bin"
+                              )
+
+                              with open(
+                                  chunk_file,
+                                  "wb"
+                              ) as out:
+                                  out.write(data)
+
+                              chunk_hash = sha256(
+                                  chunk_file
+                              )
+
+                              message = await client.send_file(
+                                  "me",
+                                  chunk_file,
+                                  caption=(
+                                      "PERSISTENT-RDP-SYNC-CHUNK\n"
+                                      f"path={record['path']}\n"
+                                      f"chunk={index}\n"
+                                      f"chunks={chunk_count}\n"
+                                      f"sha256={chunk_hash}"
+                                  )
+                              )
+
+                              record["chunks"].append({
+                                  "index": index,
+                                  "size": len(data),
+                                  "sha256": chunk_hash,
+                                  "telegram_message_id": message.id
+                              })
+
+                              print(
+                                  "UPLOAD SUCCESS:",
+                                  record["path"],
+                                  f"chunk {index + 1}/{chunk_count}",
+                                  "message_id=",
+                                  message.id
+                              )
+
+                              os.remove(chunk_file)
+
+                      records.append(record)
+
+              index = {
+                  "version": 1,
+                  "type": "persistent-rdp-sync-index",
+                  "updated_at": now(),
+                  "chunk_size": CHUNK_SIZE,
+                  "files": records
+              }
+
+              with open(
+                  INDEX,
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+                  json.dump(
+                      index,
+                      f,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+
+              index_message = await client.send_file(
+                  "me",
+                  INDEX,
+                  caption="PERSISTENT-RDP-SYNC-INDEX"
+              )
+
+              print("")
+              print("INDEX UPLOAD SUCCESS")
+              print(
+                  "INDEX MESSAGE ID:",
+                  index_message.id
+              )
+
+              with open(
+                  "telegram_index_message_id.txt",
+                  "w"
+              ) as f:
+                  f.write(str(index_message.id))
+
+              print("")
+              print("======================================")
+              print("UPLOAD + INDEX SUCCESS")
+              print("======================================")
+
+          with client:
+              client.loop.run_until_complete(main())
+          PY
+
+      - name: Verify uploaded index exists
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import base64
+          import json
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(SESSION_B64))
+
+          client = TelegramClient(
+              "unlim_session",
+              API_ID,
+              API_HASH
+          )
+
+          async def main():
+
+              await client.start()
+
+              target_id = int(
+                  open(
+                      "telegram_index_message_id.txt"
+                  ).read().strip()
+              )
+
+              found = None
+
+              async for msg in client.iter_messages(
+                  "me",
+                  search="PERSISTENT-RDP-SYNC-INDEX",
+                  limit=100
+              ):
+
+                  if msg.id == target_id:
+                      found = msg
+                      break
+
+              if not found:
+                  raise SystemExit(
+                      "INDEX MESSAGE NOT FOUND"
+                  )
+
+              print(
+                  "INDEX LOOKUP SUCCESS:",
+                  found.id
+              )
+
+              await client.download_media(
+                  found,
+                  file="downloaded_index.json"
+              )
+
+              print(
+                  "INDEX DOWNLOAD SUCCESS"
+              )
+
+              with open(
+                  "downloaded_index.json",
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+                  index = json.load(f)
+
+              if index.get("version") != 1:
+                  raise SystemExit(
+                      "INDEX VERSION FAILED"
+                  )
+
+              if index.get("type") != (
+                  "persistent-rdp-sync-index"
+              ):
+                  raise SystemExit(
+                      "INDEX TYPE FAILED"
+                  )
+
+              if not index.get("files"):
+                  raise SystemExit(
+                      "INDEX FILE LIST EMPTY"
+                  )
+
+              print(
+                  "INDEX READ SUCCESS:",
+                  len(index["files"]),
+                  "files"
+              )
+
+          with client:
+              client.loop.run_until_complete(main())
+          PY
+
+      - name: Simulate lost local cache
+        shell: bash
+        run: |
+          echo "===== BEFORE CACHE DELETE ====="
+
+          find sync_test \
+            -type f \
+            -print
+
+          rm -rf sync_test
+
+          echo ""
+          echo "===== LOCAL CACHE DELETED ====="
+
+          if [ -d sync_test ]; then
+            echo "CACHE DELETE FAILED"
+            exit 1
+          fi
+
+          echo "LOCAL CACHE LOSS SIMULATION SUCCESS"
+
+      - name: Restore cache completely from Telegram
+        shell: bash
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import base64
+          import json
+          import hashlib
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(SESSION_B64))
+
+          client = TelegramClient(
+              "unlim_session",
+              API_ID,
+              API_HASH
+          )
+
+          ROOT = "sync_test"
+
+          def sha256(path):
+              h = hashlib.sha256()
+
+              with open(path, "rb") as f:
+                  while True:
+                      data = f.read(1024 * 1024)
+
+                      if not data:
+                          break
+
+                      h.update(data)
+
+              return h.hexdigest()
+
+          async def main():
+
+              await client.start()
+
+              with open(
+                  "downloaded_index.json",
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+                  index = json.load(f)
+
+              os.makedirs(
+                  ROOT,
+                  exist_ok=True
+              )
+
+              for record in index["files"]:
+
+                  relative = record["path"].lstrip("/")
+
+                  destination = os.path.join(
+                      ROOT,
+                      *relative.split("/")
+                  )
+
+                  os.makedirs(
+                      os.path.dirname(destination),
+                      exist_ok=True
+                  )
+
+                  with open(
+                      destination,
+                      "wb"
+                  ) as output:
+
+                      ordered_chunks = sorted(
+                          record["chunks"],
+                          key=lambda x: x["index"]
+                      )
+
+                      for chunk in ordered_chunks:
+
+                          message_id = chunk[
+                              "telegram_message_id"
+                          ]
+
+                          message = await client.get_messages(
+                              "me",
+                              ids=message_id
+                          )
+
+                          if not message:
+                              raise SystemExit(
+                                  "CHUNK MESSAGE NOT FOUND: "
+                                  + str(message_id)
+                              )
+
+                          temporary = (
+                              "restore_chunk_"
+                              + str(chunk["index"])
+                              + ".bin"
+                          )
+
+                          await client.download_media(
+                              message,
+                              file=temporary
+                          )
+
+                          restored_hash = sha256(
+                              temporary
+                          )
+
+                          if (
+                              restored_hash
+                              != chunk["sha256"]
+                          ):
+                              raise SystemExit(
+                                  "CHUNK SHA256 MISMATCH"
+                              )
+
+                          with open(
+                              temporary,
+                              "rb"
+                          ) as chunk_file:
+                              while True:
+                                  data = chunk_file.read(
+                                      1024 * 1024
+                                  )
+
+                                  if not data:
+                                      break
+
+                                  output.write(data)
+
+                          os.remove(temporary)
+
+                          print(
+                              "CHUNK RESTORE SUCCESS:",
+                              record["path"],
+                              chunk["index"]
+                          )
+
+                  final_hash = sha256(
+                      destination
+                  )
+
+                  if final_hash != record["sha256"]:
+                      raise SystemExit(
+                          "FILE SHA256 MISMATCH: "
+                          + record["path"]
+                      )
+
+                  print(
+                      "FILE RESTORE SUCCESS:",
+                      record["path"]
+                  )
+
+              print("")
+              print("======================================")
+              print("TELEGRAM CACHE RESTORE SUCCESS")
+              print("======================================")
+
+          with client:
+              client.loop.run_until_complete(main())
+          PY
+
+      - name: Final read write and SHA256 verification
+        shell: bash
+        run: |
+          echo "===== RESTORED FILE TREE ====="
+
+          find sync_test \
+            -type f \
+            -print
+
+          echo ""
+          echo "===== VERIFY FILES ====="
+
+          test -f sync_test/Projects/AE/hello.txt
+          test -f sync_test/Assets/Fonts/test-font.txt
+
+          echo "ALL EXPECTED FILES RESTORED"
+
+          echo ""
+          echo "===== VERIFY CONTENT ====="
+
+          grep -Fx \
+            "Persistent-RDP Telegram Sync Test" \
+            sync_test/Projects/AE/hello.txt
+
+          grep -Fx \
+            "Persistent-RDP Font Test" \
+            sync_test/Assets/Fonts/test-font.txt
+
+          echo "CONTENT VERIFICATION SUCCESS"
+
+          echo ""
+          echo "===== TEST WRITE AFTER RESTORE ====="
+
+          printf 'New data written after restore\n' \
+            > sync_test/Projects/AE/write-after-restore.txt
+
+          test -f \
+            sync_test/Projects/AE/write-after-restore.txt
+
+          echo "WRITE AFTER RESTORE SUCCESS"
+
+          echo ""
+          echo "===== SHA256 ====="
+
+          sha256sum \
+            sync_test/Projects/AE/hello.txt
+
+          sha256sum \
+            sync_test/Assets/Fonts/test-font.txt
+
+          sha256sum \
+            sync_test/Projects/AE/write-after-restore.txt
+
+      - name: Final result
+        shell: bash
+        run: |
+          echo ""
+          echo "=================================================="
+          echo "TELEGRAM PERSISTENT SYNC ENGINE TEST SUCCESS"
+          echo "=================================================="
+          echo "TELEGRAM CONNECTION       : SUCCESS"
+          echo "FILE UPLOAD               : SUCCESS"
+          echo "CHUNK UPLOAD              : SUCCESS"
+          echo "INDEX CREATION            : SUCCESS"
+          echo "INDEX LOOKUP              : SUCCESS"
+          echo "INDEX DOWNLOAD            : SUCCESS"
+          echo "LOCAL CACHE LOSS          : SUCCESS"
+          echo "CACHE RESTORE             : SUCCESS"
+          echo "CHUNK SHA256              : SUCCESS"
+          echo "FILE SHA256               : SUCCESS"
+          echo "RESTORED READ             : SUCCESS"
+          echo "RESTORED WRITE            : SUCCESS"
+          echo "=================================================="
+          echo "PERSISTENT SYNC ENGINE READY FOR INTEGRATION"
+          echo "=================================================="
