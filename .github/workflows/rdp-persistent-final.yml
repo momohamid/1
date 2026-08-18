@@ -133,6 +133,7 @@ jobs:
               ).isoformat()
 
           def build_file_record(local_path):
+
               relative_path = os.path.relpath(
                   local_path,
                   STORAGE_ROOT
@@ -161,6 +162,7 @@ jobs:
               file_record,
               local_path
           ):
+
               with open(local_path, "rb") as f:
                   data = f.read()
 
@@ -237,6 +239,7 @@ jobs:
               for root, dirs, filenames in os.walk(
                   STORAGE_ROOT
               ):
+
                   dirs.sort()
                   filenames.sort()
 
@@ -305,6 +308,7 @@ jobs:
                   "w",
                   encoding="utf-8"
               ) as f:
+
                   json.dump(
                       index,
                       f,
@@ -334,11 +338,14 @@ jobs:
                   search="PERSISTENT-RDP-FILE-INDEX",
                   limit=50
               ):
+
                   if msg.id == index_message_id:
+
                       found_index_message = msg
                       break
 
               if not found_index_message:
+
                   print("FILE INDEX LOOKUP FAILED")
                   raise SystemExit(1)
 
@@ -360,13 +367,16 @@ jobs:
                   "r",
                   encoding="utf-8"
               ) as f:
+
                   restored_index = json.load(f)
 
               if restored_index["version"] != 2:
+
                   print("INDEX VERSION FAILED")
                   raise SystemExit(1)
 
               if len(restored_index["files"]) != len(files):
+
                   print("INDEX FILE COUNT FAILED")
                   raise SystemExit(1)
 
@@ -408,6 +418,7 @@ jobs:
                   ]
 
                   if actual_indexes != expected_indexes:
+
                       print("CHUNK INDEX FAILED")
                       raise SystemExit(1)
 
@@ -416,15 +427,19 @@ jobs:
                       if not chunk.get(
                           "telegram_message_id"
                       ):
+
                           print(
                               "CHUNK MESSAGE ID FAILED"
                           )
+
                           raise SystemExit(1)
 
                       if len(chunk["sha256"]) != 64:
+
                           print(
                               "CHUNK SHA256 FAILED"
                           )
+
                           raise SystemExit(1)
 
               print("CHUNK METADATA SUCCESS")
@@ -440,6 +455,7 @@ jobs:
               )
 
               if not first_chunk_message:
+
                   print("CHUNK LOOKUP FAILED")
                   raise SystemExit(1)
 
@@ -458,6 +474,7 @@ jobs:
                   restored_chunk_hash
                   != first_chunk["sha256"]
               ):
+
                   print("CHUNK SHA256 FAILED")
                   raise SystemExit(1)
 
@@ -491,10 +508,12 @@ jobs:
             file_index_restored.json
             test_workspace
 
+
   # ============================================================
   # SETUP
   # ============================================================
   setup:
+
     runs-on: ubuntu-latest
 
     outputs:
@@ -554,11 +573,14 @@ jobs:
               -Append `
               -Encoding utf8
 
+
   # ============================================================
   # WINDOWS RDP
   # ============================================================
   rdp:
+
     needs: setup
+
     runs-on: windows-latest
 
     strategy:
@@ -571,8 +593,12 @@ jobs:
       RDP_USER: Yousif190
       RDP_PASS: Yousif1990
 
+
     steps:
 
+      # ========================================================
+      # CRD FLAG
+      # ========================================================
       - name: Set CRD flag early
         shell: pwsh
         run: |
@@ -582,16 +608,24 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
+
             "CRD_ENABLED=1" |
               Out-File -Append $env:GITHUB_ENV
+
           }
           else {
+
             "CRD_ENABLED=0" |
               Out-File -Append $env:GITHUB_ENV
+
           }
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
+
+      # ========================================================
+      # INSTALL CRD
+      # ========================================================
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         shell: pwsh
@@ -638,6 +672,10 @@ jobs:
             }
           }
 
+
+      # ========================================================
+      # START CRD
+      # ========================================================
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         shell: pwsh
@@ -650,6 +688,7 @@ jobs:
           $pin = "${{ inputs.crd_pin }}".Trim()
 
           if ($pin -notmatch '^\d{6,12}$') {
+
             Write-Error "crd_pin must be 6-12 digits."
             exit 1
           }
@@ -657,6 +696,7 @@ jobs:
           $starter = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $starter)) {
+
             Write-Error "remoting_start_host.exe not found."
             exit 1
           }
@@ -678,6 +718,7 @@ jobs:
           }
 
           if (-not $code) {
+
             Write-Error "Could not detect CRD code."
             exit 1
           }
@@ -696,6 +737,10 @@ jobs:
             -FilePath $starter `
             -ArgumentList $args
 
+
+      # ========================================================
+      # HOSTNAME + RUNTIME
+      # ========================================================
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
@@ -747,6 +792,10 @@ jobs:
           "RUNTIME_MINUTES=$runtime" |
             Out-File -Append $env:GITHUB_ENV
 
+
+      # ========================================================
+      # PURGE TAILSCALE DEVICES
+      # ========================================================
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         shell: pwsh
@@ -793,10 +842,13 @@ jobs:
             catch {
 
               Write-Host "Purge warning: $($_.Exception.Message)"
-
             }
           }
 
+
+      # ========================================================
+      # TAILSCALE
+      # ========================================================
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
@@ -834,6 +886,10 @@ jobs:
           "TAILSCALE_IP=$ip4" |
             Out-File -Append $env:GITHUB_ENV
 
+
+      # ========================================================
+      # RDP USER
+      # ========================================================
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
@@ -887,6 +943,275 @@ jobs:
             -DisplayGroup "Remote Desktop" |
             Out-Null
 
+
+      # ========================================================
+      # WINFSP + GO + PERSISTENT FILESYSTEM
+      # ========================================================
+      - name: Prepare Persistent U Drive
+        shell: pwsh
+        run: |
+
+          Write-Host "=========================================="
+          Write-Host "PREPARE PERSISTENT U DRIVE"
+          Write-Host "=========================================="
+
+          # ----------------------------------------------------
+          # Install WinFSP
+          # ----------------------------------------------------
+
+          $installed = Get-ItemProperty `
+            "HKLM:\SOFTWARE\WOW6432Node\WinFsp" `
+            -ErrorAction SilentlyContinue
+
+          if (-not $installed) {
+
+            choco install winfsp `
+              -y `
+              --no-progress
+          }
+
+          $winfspPaths = @(
+            "$env:ProgramFiles\WinFsp\bin\winfsp-x64.dll",
+            "${env:ProgramFiles(x86)}\WinFsp\bin\winfsp-x64.dll"
+          )
+
+          $found = $false
+
+          foreach ($p in $winfspPaths) {
+
+            if (Test-Path $p) {
+
+              Write-Host "WinFSP FOUND: $p"
+              $found = $true
+            }
+          }
+
+          if (-not $found) {
+            throw "WinFSP was not found."
+          }
+
+          Write-Host "WINFSP READY"
+
+          # ----------------------------------------------------
+          # Clone go-winfsp
+          # ----------------------------------------------------
+
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+
+          if (Test-Path $src) {
+
+            Remove-Item `
+              $src `
+              -Recurse `
+              -Force
+          }
+
+          git clone `
+            --depth 1 `
+            https://github.com/winfsp/go-winfsp.git `
+            $src
+
+          if (-not (Test-Path $src)) {
+            throw "go-winfsp source was not downloaded."
+          }
+
+          # ----------------------------------------------------
+          # Build
+          # ----------------------------------------------------
+
+          $buildExe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          Set-Location $src
+
+          go version
+
+          go build `
+            -o $buildExe `
+            ./examples/passthrough/cmd/main.go
+
+          if (-not (Test-Path $buildExe)) {
+            throw "persistent-passthrough.exe was not created."
+          }
+
+          Write-Host "BUILD SUCCESS"
+
+          # ----------------------------------------------------
+          # Stable directory for RDP user
+          # ----------------------------------------------------
+
+          $stable = "C:\Persistent-RDP"
+
+          if (Test-Path $stable) {
+
+            Remove-Item `
+              $stable `
+              -Recurse `
+              -Force
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $stable `
+            -Force | Out-Null
+
+          $exe = "$stable\persistent-passthrough.exe"
+          $root = "$stable\persistent_u_storage"
+
+          Copy-Item `
+            $buildExe `
+            $exe `
+            -Force
+
+          New-Item `
+            -ItemType Directory `
+            -Path $root `
+            -Force | Out-Null
+
+          # ----------------------------------------------------
+          # Give RDP user access
+          # ----------------------------------------------------
+
+          icacls $stable `
+            /grant "${env:RDP_USER}:(OI)(CI)M" `
+            /T `
+            /C | Out-Null
+
+          # ----------------------------------------------------
+          # Test data
+          # ----------------------------------------------------
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Test" `
+            -Force | Out-Null
+
+          Write-Host "EXE: $exe"
+          Write-Host "BACKING: $root"
+          Write-Host "PERSISTENT U FILESYSTEM READY"
+
+
+      # ========================================================
+      # CREATE RDP LOGIN MOUNT TASK
+      # ========================================================
+      - name: Install U Drive at RDP Login
+        shell: pwsh
+        run: |
+
+          Write-Host "=========================================="
+          Write-Host "INSTALL U DRIVE LOGIN TASK"
+          Write-Host "=========================================="
+
+          $stable = "C:\Persistent-RDP"
+          $exe = "$stable\persistent-passthrough.exe"
+          $root = "$stable\persistent_u_storage"
+          $launcher = "$stable\mount-u.ps1"
+
+          if (-not (Test-Path $exe)) {
+            throw "Persistent filesystem executable missing."
+          }
+
+          if (-not (Test-Path $root)) {
+            throw "Persistent backing storage missing."
+          }
+
+          # ----------------------------------------------------
+          # Launcher
+          # ----------------------------------------------------
+
+          $launcherContent = @"
+          `$ErrorActionPreference = 'SilentlyContinue'
+
+          `$exe = '$exe'
+          `$root = '$root'
+
+          Start-Sleep -Seconds 3
+
+          # If U already exists, do nothing.
+          if (Test-Path 'U:\') {
+              exit 0
+          }
+
+          # Start WinFSP passthrough in the INTERACTIVE
+          # RDP USER session.
+          Start-Process `
+            -FilePath `$exe `
+            -ArgumentList @('-m','U:',`$root) `
+            -WindowStyle Hidden
+
+          # Wait briefly for mount.
+          for (`$i = 0; `$i -lt 30; `$i++) {
+
+              Start-Sleep -Seconds 1
+
+              if (Test-Path 'U:\') {
+                  break
+              }
+          }
+          "@
+
+          Set-Content `
+            -Path $launcher `
+            -Value $launcherContent `
+            -Encoding UTF8
+
+          # ----------------------------------------------------
+          # Remove old task
+          # ----------------------------------------------------
+
+          schtasks.exe `
+            /Delete `
+            /TN "Persistent-RDP-U-Drive" `
+            /F 2>$null
+
+          # ----------------------------------------------------
+          # Create ONLOGON task
+          # ----------------------------------------------------
+
+          $taskRun = (
+            'powershell.exe -NoProfile ' +
+            '-ExecutionPolicy Bypass ' +
+            '-File "' +
+            $launcher +
+            '"'
+          )
+
+          schtasks.exe `
+            /Create `
+            /TN "Persistent-RDP-U-Drive" `
+            /TR $taskRun `
+            /SC ONLOGON `
+            /RU "$env:RDP_USER" `
+            /RP "$env:RDP_PASS" `
+            /RL HIGHEST `
+            /F
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create U drive logon task."
+          }
+
+          Write-Host "U DRIVE LOGIN TASK CREATED"
+
+          # ----------------------------------------------------
+          # Show task
+          # ----------------------------------------------------
+
+          schtasks.exe `
+            /Query `
+            /TN "Persistent-RDP-U-Drive" `
+            /V `
+            /FO LIST
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "U DRIVE WILL MOUNT INSIDE RDP SESSION"
+          Write-Host "USER: $env:RDP_USER"
+          Write-Host "DRIVE: U:"
+          Write-Host "=========================================="
+
+
+      # ========================================================
+      # PYTHON LIBRARIES
+      # ========================================================
       - name: Install Python libs
         shell: pwsh
         run: |
@@ -899,6 +1224,10 @@ jobs:
             pynput `
             pillow
 
+
+      # ========================================================
+      # RUSTDESK
+      # ========================================================
       - name: Install RustDesk
         shell: pwsh
         run: |
@@ -922,6 +1251,10 @@ jobs:
             Remove-Item $installerPath -Force
           }
 
+
+      # ========================================================
+      # RUSTDESK PORTS
+      # ========================================================
       - name: Open RustDesk ports
         shell: pwsh
         run: |
@@ -941,6 +1274,10 @@ jobs:
               localport=$p
           }
 
+
+      # ========================================================
+      # LAUNCH RUSTDESK
+      # ========================================================
       - name: Launch RustDesk
         shell: pwsh
         run: |
@@ -953,205 +1290,43 @@ jobs:
 
           Start-Sleep -Seconds 5
 
+
       # ========================================================
-      # WINFSP PERSISTENT U DRIVE
+      # U DRIVE STATUS - RUNNER ONLY
       # ========================================================
-
-      - name: Prepare WinFSP persistent U drive
+      - name: Persistent U installation status
         shell: pwsh
-        run: |
-
-          Write-Host "===== PREPARE WINFSP U DRIVE ====="
-
-          $root = "$env:RUNNER_TEMP\persistent_u_storage"
-          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
-
-          if (Test-Path $root) {
-            Remove-Item `
-              $root `
-              -Recurse `
-              -Force
-          }
-
-          New-Item `
-            -ItemType Directory `
-            -Path $root `
-            -Force |
-            Out-Null
-
-          Write-Host "BACKING STORAGE: $root"
-
-          # Install WinFSP if necessary
-          $winfsp = Get-ItemProperty `
-            "HKLM:\SOFTWARE\WOW6432Node\WinFsp" `
-            -ErrorAction SilentlyContinue
-
-          if (-not $winfsp) {
-            choco install winfsp -y --no-progress
-          }
-
-          # Download source
-          $src = "$env:RUNNER_TEMP\go-winfsp"
-
-          if (Test-Path $src) {
-            Remove-Item `
-              $src `
-              -Recurse `
-              -Force
-          }
-
-          git clone `
-            --depth 1 `
-            https://github.com/winfsp/go-winfsp.git `
-            $src
-
-          Set-Location $src
-
-          # Build filesystem
-          go build `
-            -o $exe `
-            ./examples/passthrough/cmd/main.go
-
-          if (-not (Test-Path $exe)) {
-            throw "persistent-passthrough.exe was not created."
-          }
-
-          Write-Host "FILESYSTEM BUILD SUCCESS"
-
-          # Create launcher script for the RDP user's own logon session.
-          $launcher = "$env:RUNNER_TEMP\mount-u-for-rdp.ps1"
-
-          @"
-          `$exe = "$exe"
-          `$root = "$root"
-
-          Start-Sleep -Seconds 5
-
-          if (-not (Test-Path `$exe)) {
-              exit 1
-          }
-
-          if (-not (Test-Path `$root)) {
-              New-Item -ItemType Directory -Path `$root -Force | Out-Null
-          }
-
-          try {
-              `$old = Get-PSDrive U -ErrorAction SilentlyContinue
-
-              if (`$old) {
-                  exit 0
-              }
-          }
-          catch {
-          }
-
-          Start-Process `
-              -FilePath `$exe `
-              -ArgumentList @("-m","U:",`$root) `
-              -WindowStyle Hidden
-          "@ |
-            Set-Content `
-              -Path $launcher `
-              -Encoding UTF8
-
-          Write-Host "LAUNCHER: $launcher"
-
-          # Create scheduled task which executes in the RDP user's
-          # interactive logon session.
-          $taskName = "Persistent-RDP-U-Mount"
-
-          schtasks.exe `
-            /Delete `
-            /TN $taskName `
-            /F 2>$null | Out-Null
-
-          $taskCommand = `
-            "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcher`""
-
-          schtasks.exe `
-            /Create `
-            /TN $taskName `
-            /TR $taskCommand `
-            /SC ONLOGON `
-            /RU "$env:RDP_USER" `
-            /RP "$env:RDP_PASS" `
-            /RL HIGHEST `
-            /F
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create RDP U mount scheduled task."
-          }
-
-          Write-Host "SCHEDULED TASK CREATED"
-
-          # Also start it once now. This allows the current RDP
-          # logon session to receive U: immediately if already logged in.
-          schtasks.exe `
-            /Run `
-            /TN $taskName
-
-          Start-Sleep -Seconds 8
-
-          Write-Host "U DRIVE PREPARATION COMPLETE"
-
-      - name: Verify U backing storage
-        shell: pwsh
-        run: |
-
-          Write-Host "===== U BACKING STORAGE ====="
-
-          $root = "$env:RUNNER_TEMP\persistent_u_storage"
-
-          if (-not (Test-Path $root)) {
-            throw "Persistent U backing storage does not exist."
-          }
-
-          Write-Host "BACKING STORAGE EXISTS"
-          Write-Host "PATH: $root"
-
-      - name: Display persistent U status
-        shell: pwsh
-        continue-on-error: true
         run: |
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENT U DRIVE STATUS"
+          Write-Host "PERSISTENT U DRIVE INSTALLATION STATUS"
           Write-Host "=========================================="
 
-          try {
-            Get-PSDrive U -ErrorAction Stop
-            Write-Host "U DRIVE VISIBLE IN RUNNER SESSION"
-          }
-          catch {
-            Write-Host "U DRIVE IS NOT VISIBLE IN RUNNER SESSION."
-            Write-Host "This is expected if the mount belongs to the RDP logon session."
-          }
+          Write-Host "Filesystem:"
+          Test-Path "C:\Persistent-RDP\persistent-passthrough.exe"
 
           Write-Host ""
-          Write-Host "BACKING STORAGE:"
-
-          Get-ChildItem `
-            "$env:RUNNER_TEMP\persistent_u_storage" `
-            -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue
+          Write-Host "Backing storage:"
+          Test-Path "C:\Persistent-RDP\persistent_u_storage"
 
           Write-Host ""
-          Write-Host "RDP U MOUNT TASK:"
+          Write-Host "Login task:"
+
           schtasks.exe `
             /Query `
-            /TN "Persistent-RDP-U-Mount" `
-            /FO LIST `
-            /V `
-            2>$null
+            /TN "Persistent-RDP-U-Drive" `
+            /FO LIST
 
           Write-Host ""
-          Write-Host "PERSISTENT U SETUP COMPLETE"
+          Write-Host "IMPORTANT:"
+          Write-Host "U: is intentionally mounted in the RDP USER session."
+          Write-Host "The GitHub runner session is NOT the RDP session."
 
-      # --------------------------------------------------------
+
+      # ========================================================
       # KEEP ALIVE
-      # --------------------------------------------------------
+      # ========================================================
       - name: Keep alive
         shell: pwsh
         run: |
@@ -1169,9 +1344,10 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # --------------------------------------------------------
+
+      # ========================================================
       # STOP / NEXT
-      # --------------------------------------------------------
+      # ========================================================
       - name: Dispatch next or stop
         if: always()
         shell: pwsh
