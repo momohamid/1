@@ -20,10 +20,6 @@ jobs:
 
     steps:
 
-      # ============================================================
-      # 1. INSTALL WINFSP
-      # ============================================================
-
       - name: Install WinFSP
         shell: pwsh
         run: |
@@ -58,15 +54,10 @@ jobs:
           Write-Host "WINFSP INSTALL SUCCESS"
 
 
-      # ============================================================
-      # 2. PREPARE GO
-      # ============================================================
-
       - name: Prepare Go
         shell: pwsh
         run: |
           Write-Host "===== GO ====="
-
           go version
 
           if ($LASTEXITCODE -ne 0) {
@@ -75,10 +66,6 @@ jobs:
 
           Write-Host "GO AVAILABLE"
 
-
-      # ============================================================
-      # 3. DOWNLOAD GO-WINFSP
-      # ============================================================
 
       - name: Download go-winfsp
         shell: pwsh
@@ -104,10 +91,6 @@ jobs:
           Write-Host "SOURCE: $src"
           Write-Host "GO-WINFSP DOWNLOAD SUCCESS"
 
-
-      # ============================================================
-      # 4. BUILD PERSISTENT PASSTHROUGH
-      # ============================================================
 
       - name: Build persistent-passthrough.exe
         shell: pwsh
@@ -137,10 +120,6 @@ jobs:
           Write-Host "FILESYSTEM BUILD SUCCESS"
 
 
-      # ============================================================
-      # 5. CREATE BACKING STORAGE
-      # ============================================================
-
       - name: Create backing storage
         shell: pwsh
         run: |
@@ -167,11 +146,7 @@ jobs:
           Write-Host "BACKING STORAGE SUCCESS"
 
 
-      # ============================================================
-      # 6. MOUNT + WRITE + READ + SHA256
-      # ============================================================
-
-      - name: Mount U and test read/write
+      - name: Mount U and test persistence
         shell: pwsh
         run: |
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
@@ -191,14 +166,23 @@ jobs:
           }
 
           # --------------------------------------------------------
-          # Remove any previous U mapping
+          # CLEAN POSSIBLE OLD MAPPING
           # --------------------------------------------------------
 
-          subst U: /D 2>$null
-          net use U: /delete /y 2>$null
+          try {
+            subst U: /D 2>$null
+          }
+          catch {
+          }
+
+          try {
+            net use U: /delete /y 2>$null
+          }
+          catch {
+          }
 
           # --------------------------------------------------------
-          # Start filesystem
+          # START FILESYSTEM
           # --------------------------------------------------------
 
           Write-Host "===== START FILESYSTEM ====="
@@ -206,7 +190,11 @@ jobs:
           $stdout = "$env:RUNNER_TEMP\persistent_u_stdout.log"
           $stderr = "$env:RUNNER_TEMP\persistent_u_stderr.log"
 
-          Remove-Item $stdout,$stderr -Force -ErrorAction SilentlyContinue
+          Remove-Item `
+            $stdout,
+            $stderr `
+            -Force `
+            -ErrorAction SilentlyContinue
 
           $process = Start-Process `
             -FilePath $exe `
@@ -223,7 +211,7 @@ jobs:
           Write-Host "PROCESS ID: $($process.Id)"
 
           # --------------------------------------------------------
-          # Wait for U:
+          # WAIT FOR U:
           # --------------------------------------------------------
 
           $mounted = $false
@@ -233,6 +221,7 @@ jobs:
             Start-Sleep -Seconds 1
 
             if ($process.HasExited) {
+
               Write-Host "PROCESS EXITED: YES"
               Write-Host "EXIT CODE: $($process.ExitCode)"
 
@@ -284,7 +273,7 @@ jobs:
           Write-Host "U DRIVE MOUNT SUCCESS"
 
           # --------------------------------------------------------
-          # WRITE TEST
+          # WRITE
           # --------------------------------------------------------
 
           Write-Host "===== WRITE TEST ====="
@@ -310,7 +299,7 @@ jobs:
           Write-Host "WRITE SUCCESS"
 
           # --------------------------------------------------------
-          # READ TEST
+          # READ
           # --------------------------------------------------------
 
           Write-Host "===== READ TEST ====="
@@ -326,7 +315,7 @@ jobs:
           Write-Host "READ SUCCESS"
 
           # --------------------------------------------------------
-          # SHA256 TEST
+          # SHA256
           # --------------------------------------------------------
 
           Write-Host "===== SHA256 TEST ====="
@@ -346,7 +335,7 @@ jobs:
           Write-Host "SHA256 SUCCESS"
 
           # --------------------------------------------------------
-          # STOP FILESYSTEM
+          # STOP FIRST FILESYSTEM
           # --------------------------------------------------------
 
           Write-Host "===== STOP FILESYSTEM ====="
@@ -378,6 +367,15 @@ jobs:
 
           Write-Host "===== REMOUNT ====="
 
+          $stdout2 = "$env:RUNNER_TEMP\persistent_u_stdout_2.log"
+          $stderr2 = "$env:RUNNER_TEMP\persistent_u_stderr_2.log"
+
+          Remove-Item `
+            $stdout2,
+            $stderr2 `
+            -Force `
+            -ErrorAction SilentlyContinue
+
           $process2 = Start-Process `
             -FilePath $exe `
             -ArgumentList @(
@@ -385,8 +383,8 @@ jobs:
               "U:",
               $root
             ) `
-            -RedirectStandardOutput "$env:RUNNER_TEMP\persistent_u_stdout_2.log" `
-            -RedirectStandardError "$env:RUNNER_TEMP\persistent_u_stderr_2.log" `
+            -RedirectStandardOutput $stdout2 `
+            -RedirectStandardError $stderr2 `
             -PassThru `
             -WindowStyle Hidden
 
@@ -397,6 +395,19 @@ jobs:
             Start-Sleep -Seconds 1
 
             if ($process2.HasExited) {
+
+              Write-Host "===== REMOUNT STDOUT ====="
+
+              if (Test-Path $stdout2) {
+                Get-Content $stdout2
+              }
+
+              Write-Host "===== REMOUNT STDERR ====="
+
+              if (Test-Path $stderr2) {
+                Get-Content $stderr2
+              }
+
               throw "Filesystem exited during remount."
             }
 
@@ -419,7 +430,7 @@ jobs:
           Write-Host "U DRIVE REMOUNT SUCCESS"
 
           # --------------------------------------------------------
-          # RESTORED FILE TEST
+          # RESTORED FILE
           # --------------------------------------------------------
 
           Write-Host "===== RESTORED FILE TEST ====="
@@ -452,7 +463,7 @@ jobs:
           Write-Host "RESTORED SHA256 SUCCESS"
 
           # --------------------------------------------------------
-          # FINAL
+          # SUCCESS
           # --------------------------------------------------------
 
           Write-Host ""
@@ -468,18 +479,24 @@ jobs:
           Write-Host "=============================================="
 
           # --------------------------------------------------------
-          # CLEANUP
+          # SAFE CLEANUP
           # --------------------------------------------------------
 
-          Stop-Process `
-            -Id $process2.Id `
-            -Force `
-            -ErrorAction SilentlyContinue
+          try {
+            if ($process2 -and -not $process2.HasExited) {
+              Stop-Process `
+                -Id $process2.Id `
+                -Force `
+                -ErrorAction SilentlyContinue
+            }
+          }
+          catch {
+            Write-Host "Cleanup warning ignored."
+          }
 
+          Write-Host "CLEANUP COMPLETE"
+          exit 0
 
-      # ============================================================
-      # 7. DISPLAY FINAL BACKING STORAGE
-      # ============================================================
 
       - name: Display backing storage
         shell: pwsh
@@ -498,22 +515,22 @@ jobs:
 
           $file = "$root\Test\hello.txt"
 
-          if (Test-Path $file) {
-
-            Write-Host "FILE EXISTS: True"
-
-            Write-Host "CONTENT:"
-            Get-Content $file
-
-            Write-Host "SHA256:"
-
-            (
-              Get-FileHash `
-                -Path $file `
-                -Algorithm SHA256
-            ).Hash
-
-          }
-          else {
+          if (-not (Test-Path $file)) {
             throw "Final persistence file was not found."
           }
+
+          Write-Host "FILE EXISTS: True"
+
+          Write-Host "CONTENT:"
+          Get-Content $file
+
+          Write-Host "SHA256:"
+
+          (
+            Get-FileHash `
+              -Path $file `
+              -Algorithm SHA256
+          ).Hash
+
+          Write-Host ""
+          Write-Host "FINAL BACKING STORAGE CHECK SUCCESS"
