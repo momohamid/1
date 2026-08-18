@@ -26,6 +26,29 @@ jobs:
 
           Remove-Item $msi -Force
 
+      - name: Verify WinFsp
+        shell: pwsh
+        run: |
+          $paths = @(
+            "C:\Program Files (x86)\WinFsp",
+            "C:\Program Files\WinFsp"
+          )
+
+          $found = $false
+
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "FOUND: $p"
+              $found = $true
+            }
+          }
+
+          if (-not $found) {
+            throw "WinFsp was not installed."
+          }
+
+          Write-Host "WINFSP INSTALLATION SUCCESS"
+
       - name: Install Go
         uses: actions/setup-go@v5
         with:
@@ -34,12 +57,20 @@ jobs:
       - name: Download go-winfsp
         shell: pwsh
         run: |
-          git clone --depth 1 https://github.com/winfsp/go-winfsp.git "$env:RUNNER_TEMP\go-winfsp"
+          git clone `
+            --depth 1 `
+            https://github.com/winfsp/go-winfsp.git `
+            "$env:RUNNER_TEMP\go-winfsp"
 
       - name: Build filesystem
         shell: pwsh
         run: |
           Set-Location "$env:RUNNER_TEMP\go-winfsp"
+
+          Write-Host "===== GO VERSION ====="
+          go version
+
+          Write-Host "===== BUILD ====="
 
           go build `
             -o "$env:RUNNER_TEMP\persistent-passthrough.exe" `
@@ -62,35 +93,124 @@ jobs:
             -Force | Out-Null
 
           "Persistent-RDP U Drive Test" |
-            Set-Content "$root\Test\source.txt" -Encoding UTF8
+            Set-Content `
+              "$root\Test\source.txt" `
+              -Encoding UTF8
 
           "U_BACKING_ROOT=$root" |
-            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+            Out-File `
+              $env:GITHUB_ENV `
+              -Append `
+              -Encoding utf8
 
-      - name: Mount U drive
+          Write-Host "BACKING STORAGE: $root"
+
+      - name: Inspect filesystem executable
         shell: pwsh
         run: |
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
 
-          Start-Process `
+          Write-Host "===== EXECUTABLE ====="
+          Write-Host "PATH: $exe"
+          Write-Host "EXISTS: $(Test-Path $exe)"
+
+          Write-Host "===== HELP ====="
+
+          & $exe --help 2>&1 |
+            Tee-Object "$env:RUNNER_TEMP\help.log"
+
+          Write-Host "===== HELP LOG ====="
+
+          Get-Content `
+            "$env:RUNNER_TEMP\help.log" `
+            -ErrorAction SilentlyContinue
+
+      - name: Mount U drive diagnostic
+        shell: pwsh
+        run: |
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          Write-Host "===== MOUNT INFORMATION ====="
+          Write-Host "EXE: $exe"
+          Write-Host "EXISTS: $(Test-Path $exe)"
+          Write-Host "BACKING: $env:U_BACKING_ROOT"
+
+          Write-Host "===== START FILESYSTEM ====="
+
+          $process = Start-Process `
             -FilePath $exe `
-            -ArgumentList "-m","U:","$env:U_BACKING_ROOT"
+            -ArgumentList @(
+              "-m",
+              "U:",
+              "$env:U_BACKING_ROOT"
+            ) `
+            -PassThru `
+            -RedirectStandardOutput "$env:RUNNER_TEMP\mount.stdout.log" `
+            -RedirectStandardError "$env:RUNNER_TEMP\mount.stderr.log"
 
-          Start-Sleep -Seconds 5
+          Start-Sleep -Seconds 8
 
-          $u = Get-Volume -DriveLetter U -ErrorAction SilentlyContinue
+          Write-Host "PROCESS ID: $($process.Id)"
 
-          if ($null -eq $u) {
-            throw "U: was not mounted."
+          if ($process.HasExited) {
+            Write-Host "PROCESS EXITED: YES"
+            Write-Host "EXIT CODE: $($process.ExitCode)"
+          }
+          else {
+            Write-Host "PROCESS EXITED: NO"
+            Write-Host "PROCESS IS STILL RUNNING"
+          }
+
+          Write-Host ""
+          Write-Host "===== STDOUT ====="
+
+          Get-Content `
+            "$env:RUNNER_TEMP\mount.stdout.log" `
+            -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "===== STDERR ====="
+
+          Get-Content `
+            "$env:RUNNER_TEMP\mount.stderr.log" `
+            -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "===== U DRIVE CHECK ====="
+
+          Get-PSDrive U `
+            -ErrorAction SilentlyContinue
+
+          Get-Volume `
+            -DriveLetter U `
+            -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "===== ROOT CHECK ====="
+
+          Test-Path "U:\" -ErrorAction SilentlyContinue
+
+          if (-not (Test-Path "U:\")) {
+            Write-Host ""
+            Write-Host "U: WAS NOT MOUNTED."
+            Write-Host "Diagnostic information collected above."
+
+            if ($process.HasExited) {
+              throw "Filesystem process exited with code $($process.ExitCode)."
+            }
+
+            throw "Filesystem process is running but U: is not visible."
           }
 
           Write-Host "U DRIVE MOUNT SUCCESS"
-          Get-Volume -DriveLetter U
 
       - name: Test read and write
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path "U:\Test" -Force | Out-Null
+          New-Item `
+            -ItemType Directory `
+            -Path "U:\Test" `
+            -Force | Out-Null
 
           $content = "Hello from Persistent-RDP $(Get-Date -Format o)"
 
@@ -115,7 +235,11 @@ jobs:
       - name: SHA256 verification
         shell: pwsh
         run: |
-          $hash = (Get-FileHash "U:\Test\hello.txt" -Algorithm SHA256).Hash
+          $hash = (
+            Get-FileHash `
+              "U:\Test\hello.txt" `
+              -Algorithm SHA256
+          ).Hash
 
           if ($hash.Length -ne 64) {
             throw "Invalid SHA256."
@@ -133,7 +257,11 @@ jobs:
             throw "Backing storage did not receive hello.txt"
           }
 
-          $hash2 = (Get-FileHash $path -Algorithm SHA256).Hash
+          $hash2 = (
+            Get-FileHash `
+              $path `
+              -Algorithm SHA256
+          ).Hash
 
           Write-Host "BACKING_SHA256=$hash2"
           Write-Host "BACKING STORAGE SUCCESS"
