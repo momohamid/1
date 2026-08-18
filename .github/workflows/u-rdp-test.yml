@@ -1,1 +1,507 @@
+name: Persistent-RDP U Drive RDP Test
 
+on:
+  workflow_dispatch:
+    inputs:
+      ts_tailnet:
+        description: "Tailscale tailnet"
+        required: true
+      ts_api_key:
+        description: "Tailscale API key"
+        required: true
+      ts_authkey:
+        description: "Tailscale Auth key"
+        required: true
+      runtime_minutes:
+        description: "Runtime"
+        required: false
+        default: "10"
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+
+  u-rdp-test:
+
+    runs-on: windows-latest
+
+    timeout-minutes: 30
+
+    env:
+      RDP_USER: Yousif190
+      RDP_PASS: Yousif1990
+      TS_HOSTNAME: persistent-u-test
+
+    steps:
+
+      # ============================================================
+      # WINFSP
+      # ============================================================
+
+      - name: Install WinFSP
+        run: |
+
+          Write-Host "===== INSTALL WINFSP ====="
+
+          $installed = Get-ItemProperty `
+            "HKLM:\SOFTWARE\WOW6432Node\WinFsp" `
+            -ErrorAction SilentlyContinue
+
+          if (-not $installed) {
+
+            choco install winfsp -y --no-progress
+
+          }
+
+          $paths = @(
+            "$env:ProgramFiles\WinFsp\bin\winfsp-x64.dll",
+            "${env:ProgramFiles(x86)}\WinFsp\bin\winfsp-x64.dll"
+          )
+
+          $found = $false
+
+          foreach ($p in $paths) {
+
+            if (Test-Path $p) {
+
+              Write-Host "WINFSP FOUND: $p"
+
+              $found = $true
+
+            }
+          }
+
+          if (-not $found) {
+
+            throw "WinFSP was not found."
+
+          }
+
+          Write-Host "WINFSP SUCCESS"
+
+
+      # ============================================================
+      # GO
+      # ============================================================
+
+      - name: Download and build filesystem
+        run: |
+
+          Write-Host "===== DOWNLOAD SOURCE ====="
+
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+
+          if (Test-Path $src) {
+
+            Remove-Item `
+              $src `
+              -Recurse `
+              -Force
+
+          }
+
+          git clone `
+            --depth 1 `
+            https://github.com/winfsp/go-winfsp.git `
+            $src
+
+          if (-not (Test-Path $src)) {
+
+            throw "go-winfsp download failed."
+
+          }
+
+          Write-Host "SOURCE READY"
+
+          Write-Host "===== BUILD ====="
+
+          Set-Location $src
+
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          go build `
+            -o $exe `
+            ./examples/passthrough/cmd/main.go
+
+          if (-not (Test-Path $exe)) {
+
+            throw "Filesystem executable was not created."
+
+          }
+
+          Write-Host "BUILD SUCCESS"
+          Write-Host "EXE: $exe"
+
+
+      # ============================================================
+      # BACKING STORAGE
+      # ============================================================
+
+      - name: Create persistent backing storage
+        run: |
+
+          $root = "$env:RUNNER_TEMP\persistent_u_storage"
+
+          if (Test-Path $root) {
+
+            Remove-Item `
+              $root `
+              -Recurse `
+              -Force
+
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $root `
+            -Force | Out-Null
+
+          Write-Host "BACKING STORAGE: $root"
+
+          if (-not (Test-Path $root)) {
+
+            throw "Backing storage failed."
+
+          }
+
+
+      # ============================================================
+      # MOUNT U
+      # ============================================================
+
+      - name: Mount U drive
+        run: |
+
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+          $root = "$env:RUNNER_TEMP\persistent_u_storage"
+
+          Write-Host "===== MOUNT ====="
+
+          Write-Host "EXE: $exe"
+          Write-Host "ROOT: $root"
+
+          if (-not (Test-Path $exe)) {
+
+            throw "Filesystem executable missing."
+
+          }
+
+          if (-not (Test-Path $root)) {
+
+            throw "Backing storage missing."
+
+          }
+
+          $stdout = "$env:RUNNER_TEMP\u_stdout.log"
+          $stderr = "$env:RUNNER_TEMP\u_stderr.log"
+
+          Remove-Item `
+            $stdout,
+            $stderr `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $process = Start-Process `
+            -FilePath $exe `
+            -ArgumentList @(
+              "-m",
+              "U:",
+              $root
+            ) `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru `
+            -WindowStyle Hidden
+
+          Write-Host "PROCESS: $($process.Id)"
+
+          $mounted = $false
+
+          for ($i = 1; $i -le 30; $i++) {
+
+            Start-Sleep -Seconds 1
+
+            try {
+
+              $drive = Get-PSDrive U `
+                -ErrorAction Stop
+
+              if ($drive.Root -eq "U:\") {
+
+                $mounted = $true
+
+                break
+
+              }
+
+            }
+            catch {
+
+            }
+          }
+
+          if (-not $mounted) {
+
+            Write-Host "===== STDOUT ====="
+
+            if (Test-Path $stdout) {
+
+              Get-Content $stdout
+
+            }
+
+            Write-Host "===== STDERR ====="
+
+            if (Test-Path $stderr) {
+
+              Get-Content $stderr
+
+            }
+
+            throw "U: was not mounted."
+
+          }
+
+          Write-Host "U DRIVE MOUNT SUCCESS"
+
+          Get-PSDrive U
+
+
+      # ============================================================
+      # TEST U
+      # ============================================================
+
+      - name: Test U drive
+        run: |
+
+          Write-Host "===== U DRIVE TEST ====="
+
+          if (-not (Test-Path "U:\")) {
+
+            throw "U: does not exist."
+
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path "U:\RDP-Test" `
+            -Force | Out-Null
+
+          $file = "U:\RDP-Test\rdp-test.txt"
+
+          $content = @"
+Persistent-RDP
+U DRIVE
+RDP TEST
+$(Get-Date -Format o)
+"@
+
+          Set-Content `
+            -Path $file `
+            -Value $content `
+            -Encoding UTF8
+
+          if (-not (Test-Path $file)) {
+
+            throw "File creation failed."
+
+          }
+
+          $read = Get-Content `
+            -Path $file `
+            -Raw
+
+          if ($read.Trim() -ne $content.Trim()) {
+
+            throw "Read verification failed."
+
+          }
+
+          $hash = (
+            Get-FileHash `
+              -Path $file `
+              -Algorithm SHA256
+          ).Hash
+
+          Write-Host "SHA256: $hash"
+
+          Write-Host "U DRIVE READ/WRITE SUCCESS"
+
+
+      # ============================================================
+      # RDP USER
+      # ============================================================
+
+      - name: Configure RDP
+        run: |
+
+          Write-Host "===== CONFIGURE RDP ====="
+
+          $u = $env:RDP_USER
+          $p = $env:RDP_PASS
+
+          $sec = ConvertTo-SecureString `
+            $p `
+            -AsPlainText `
+            -Force
+
+          if (-not (
+            Get-LocalUser `
+              -Name $u `
+              -ErrorAction SilentlyContinue
+          )) {
+
+            New-LocalUser `
+              -Name $u `
+              -Password $sec `
+              -AccountNeverExpires
+
+          }
+          else {
+
+            Set-LocalUser `
+              -Name $u `
+              -Password $sec `
+              -AccountNeverExpires
+
+            Enable-LocalUser `
+              -Name $u
+
+          }
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
+
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop"
+
+          Write-Host "RDP CONFIGURED"
+
+
+      # ============================================================
+      # TAILSCALE
+      # ============================================================
+
+      - name: Install Tailscale
+        run: |
+
+          Write-Host "===== TAILSCALE ====="
+
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $ts)) {
+
+            $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+
+            $dst = "$env:TEMP\tailscale.msi"
+
+            Invoke-WebRequest `
+              -Uri $url `
+              -OutFile $dst
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList `
+                "/i",
+                "`"$dst`"",
+                "/quiet",
+                "/norestart" `
+              -Wait
+
+            Remove-Item `
+              $dst `
+              -Force
+
+          }
+
+          & $ts logout 2>$null
+
+          & $ts up `
+            --authkey "${{ inputs.ts_authkey }}" `
+            --hostname "$env:TS_HOSTNAME" `
+            --accept-dns=true `
+            --accept-routes=true
+
+          $ip = & $ts ip -4 |
+            Select-Object -First 1
+
+          Write-Host "TAILSCALE IP: $ip"
+
+          "TAILSCALE_IP=$ip" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host "TAILSCALE SUCCESS"
+
+
+      # ============================================================
+      # RDP CONNECTION INFORMATION
+      # ============================================================
+
+      - name: Display RDP information
+        run: |
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP U DRIVE TEST"
+          Write-Host "=========================================="
+          Write-Host "RDP USER: $env:RDP_USER"
+          Write-Host "TAILSCALE IP: $env:TAILSCALE_IP"
+          Write-Host "U DRIVE: U:\"
+          Write-Host "=========================================="
+          Write-Host ""
+
+
+      # ============================================================
+      # KEEP ALIVE
+      # ============================================================
+
+      - name: Keep RDP session alive
+        run: |
+
+          $minutes = [int]"${{ inputs.runtime_minutes }}"
+
+          if ($minutes -lt 1) {
+
+            $minutes = 10
+
+          }
+
+          if ($minutes -gt 20) {
+
+            $minutes = 20
+
+          }
+
+          $end = (Get-Date).AddMinutes($minutes)
+
+          while ((Get-Date) -lt $end) {
+
+            Write-Host (
+              "RDP TEST HEARTBEAT " +
+              (Get-Date).ToString("HH:mm:ss")
+            )
+
+            Start-Sleep -Seconds 30
+
+          }
+
+          Write-Host "RDP TEST COMPLETE"
