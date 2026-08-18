@@ -1,6 +1,6 @@
 name: U Drive Prototype Test
 
-on:
+"on":
   workflow_dispatch:
 
 jobs:
@@ -29,8 +29,6 @@ jobs:
       - name: Verify WinFsp
         shell: pwsh
         run: |
-          Write-Host "===== WINFSP ====="
-
           $paths = @(
             "C:\Program Files (x86)\WinFsp",
             "C:\Program Files\WinFsp"
@@ -41,8 +39,6 @@ jobs:
           foreach ($p in $paths) {
             if (Test-Path $p) {
               Write-Host "FOUND: $p"
-              Get-ChildItem $p -Recurse -File |
-                Select-Object -First 30 FullName
               $found = $true
             }
           }
@@ -57,22 +53,19 @@ jobs:
       - name: Check U drive
         shell: pwsh
         run: |
-          Write-Host "===== CURRENT U DRIVE ====="
-
           $u = Get-Volume -DriveLetter U -ErrorAction SilentlyContinue
 
           if ($null -eq $u) {
             Write-Host "U: is currently unused."
           }
           else {
-            Write-Host "U: already exists:"
+            Write-Host "U: already exists."
             $u | Format-List
           }
 
       - name: Final
         shell: pwsh
         run: |
-          Write-Host ""
           Write-Host "================================"
           Write-Host "U DRIVE PROTOTYPE PRECHECK OK"
           Write-Host "================================"
