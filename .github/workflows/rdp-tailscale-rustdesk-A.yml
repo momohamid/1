@@ -54,28 +54,51 @@ defaults:
 jobs:
 
   # ============================================================
-  # OUTSIDE WINDOWS — persistent-storage test
+  # OUTSIDE WINDOWS — Telegram persistent-storage TEST
   # ============================================================
   telegram-test:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Create persistent-storage test file
+      - name: Install Telethon
+        run: python3 -m pip install telethon
+
+      - name: Create test file
         run: |
           echo "Persistent-RDP test $(date -u)" > TEST.txt
           sha256sum TEST.txt
 
-      - name: Upload TEST.txt to Telegram
-        uses: mnicolas94/telegram-file-uploader@main
-        with:
-          session-name: ${{ secrets.TELEGRAM_SESSION }}
-          api-id: ${{ secrets.TELEGRAM_API_ID }}
-          api-hash: ${{ secrets.TELEGRAM_API_HASH }}
-          bot-token: ${{ secrets.TELEGRAM_TOKEN }}
-          chat-id: ${{ secrets.TELEGRAM_CHAT_ID }}
-          file-path: TEST.txt
-          message: "Persistent-RDP TEST"
-          cache-session: "false"
+      - name: Upload test file to Telegram Saved Messages
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python3 <<'PY'
+          import os
+          import base64
+          from telethon import TelegramClient
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(os.environ["SESSION_B64"]))
+
+          client = TelegramClient(
+              "unlim_session",
+              int(os.environ["API_ID"]),
+              os.environ["API_HASH"]
+          )
+
+          async def main():
+              await client.start()
+              await client.send_file(
+                  "me",
+                  "TEST.txt",
+                  caption="Persistent-RDP TEST"
+              )
+
+          with client:
+              client.loop.run_until_complete(main())
+          PY
 
   # ============================================================
   # ORIGINAL SETUP
