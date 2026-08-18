@@ -1,0 +1,1273 @@
+name: RDP + Telegram Persistent U Drive FINAL
+
+on:
+  workflow_dispatch:
+    inputs:
+      ts_tailnet:
+        description: "Tailscale tailnet"
+        required: true
+        type: string
+
+      ts_api_key:
+        description: "Tailscale API key"
+        required: true
+        type: string
+
+      ts_authkey:
+        description: "Tailscale Auth key"
+        required: true
+        type: string
+
+      runtime_minutes:
+        description: "Runtime minutes"
+        required: false
+        default: "355"
+        type: string
+
+      do_purge:
+        description: "Purge old bullet devices"
+        required: false
+        default: true
+        type: boolean
+
+      rdp_count:
+        description: "RDP instances"
+        required: false
+        default: "1"
+        type: string
+
+      crd_code:
+        description: "Chrome Remote Desktop code"
+        required: false
+        default: ""
+        type: string
+
+      crd_pin:
+        description: "CRD PIN"
+        required: false
+        default: "123456"
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+
+  # ============================================================
+  # SETUP
+  # ============================================================
+
+  setup:
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      matrix: ${{ steps.mk.outputs.matrix }}
+      multi: ${{ steps.mk.outputs.multi }}
+
+    steps:
+
+      - name: Create matrix
+        id: mk
+        shell: pwsh
+        run: |
+
+          $crd = @'
+          ${{ inputs.crd_code }}
+          '@.Trim()
+
+          if ($crd.Length -gt 0) {
+
+            $n = 1
+
+          }
+          else {
+
+            $n = [int]"${{ inputs.rdp_count }}"
+
+            if ($n -lt 1) {
+              $n = 1
+            }
+
+            if ($n -gt 10) {
+              $n = 10
+            }
+
+          }
+
+          $inc = @()
+
+          for ($i = 1; $i -le $n; $i++) {
+            $inc += @{ id = $i }
+          }
+
+          $json = @{
+            include = $inc
+          } | ConvertTo-Json -Compress
+
+          "matrix=$json" |
+            Out-File $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
+
+          $multi = if ($n -gt 1) {
+            "1"
+          }
+          else {
+            "0"
+          }
+
+          "multi=$multi" |
+            Out-File $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
+
+
+  # ============================================================
+  # WINDOWS RDP
+  # ============================================================
+
+  rdp:
+
+    needs: setup
+
+    runs-on: windows-latest
+
+    strategy:
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+      max-parallel: 10
+
+    timeout-minutes: 370
+
+    env:
+      RDP_USER: Yousif190
+      RDP_PASS: Yousif1990
+
+    steps:
+
+      # ========================================================
+      # HOSTNAME + RUNTIME
+      # ========================================================
+
+      - name: Decide hostname and runtime
+        shell: pwsh
+        run: |
+
+          if ("${{ inputs.rdp_count }}" -gt 1) {
+            $hn = "bullet${{ matrix.id }}"
+          }
+          else {
+            $hn = "bullet"
+          }
+
+          "TS_HOSTNAME=$hn" |
+            Out-File -Append $env:GITHUB_ENV
+
+          $runtime = 355
+
+          if ("${{ inputs.runtime_minutes }}" -match '^\d+$') {
+            $runtime = [int]"${{ inputs.runtime_minutes }}"
+          }
+
+          if ($runtime -lt 1) {
+            $runtime = 355
+          }
+
+          if ($runtime -gt 360) {
+            $runtime = 355
+          }
+
+          "RUNTIME_MINUTES=$runtime" |
+            Out-File -Append $env:GITHUB_ENV
+
+          Write-Host "HOSTNAME: $hn"
+          Write-Host "RUNTIME: $runtime"
+
+
+      # ========================================================
+      # PURGE TAILSCALE
+      # ========================================================
+
+      - name: Purge old bullet devices
+        if: ${{ inputs.do_purge && needs.setup.outputs.multi == '0' }}
+        shell: pwsh
+        run: |
+
+          try {
+
+            $auth = [Convert]::ToBase64String(
+              [Text.Encoding]::ASCII.GetBytes(
+                "${{ inputs.ts_api_key }}:"
+              )
+            )
+
+            $tn = [uri]::EscapeDataString(
+              "${{ inputs.ts_tailnet }}"
+            )
+
+            $list = Invoke-RestMethod `
+              -Uri "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
+              -Headers @{
+                Authorization = "Basic $auth"
+              }
+
+            foreach ($d in $list.devices) {
+
+              if ($d.hostname -match '^bullet[0-9]*$') {
+
+                Write-Host "Removing $($d.hostname)"
+
+                Invoke-RestMethod `
+                  -Method Delete `
+                  -Uri "https://api.tailscale.com/api/v2/device/$($d.id)" `
+                  -Headers @{
+                    Authorization = "Basic $auth"
+                  } `
+                  -ErrorAction SilentlyContinue
+
+              }
+
+            }
+
+          }
+          catch {
+
+            Write-Host "Purge warning:"
+            Write-Host $_.Exception.Message
+
+          }
+
+
+      # ========================================================
+      # TAILSCALE
+      # ========================================================
+
+      - name: Install and start Tailscale
+        shell: pwsh
+        run: |
+
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+
+          if (-not (Test-Path $ts)) {
+
+            $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+
+            $dst = "$env:TEMP\tailscale.msi"
+
+            Invoke-WebRequest `
+              -Uri $url `
+              -OutFile $dst
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList "/i","`"$dst`"","/quiet","/norestart" `
+              -Wait
+
+            Remove-Item `
+              $dst `
+              -Force
+
+          }
+
+          & $ts logout 2>$null
+
+          & $ts up `
+            --authkey "${{ inputs.ts_authkey }}" `
+            --hostname "$env:TS_HOSTNAME" `
+            --accept-dns=true `
+            --accept-routes=true
+
+          $ip4 = & $ts ip -4 |
+            Select-Object -First 1
+
+          "TAILSCALE_IP=$ip4" |
+            Out-File -Append $env:GITHUB_ENV
+
+          Write-Host "TAILSCALE IP: $ip4"
+
+
+      # ========================================================
+      # RDP USER
+      # ========================================================
+
+      - name: Enable RDP user and firewall
+        shell: pwsh
+        run: |
+
+          $u = $env:RDP_USER
+          $p = $env:RDP_PASS
+
+          $sec = ConvertTo-SecureString `
+            $p `
+            -AsPlainText `
+            -Force
+
+          if (-not (
+            Get-LocalUser `
+              -Name $u `
+              -ErrorAction SilentlyContinue
+          )) {
+
+            New-LocalUser `
+              -Name $u `
+              -Password $sec `
+              -AccountNeverExpires
+
+          }
+          else {
+
+            Set-LocalUser `
+              -Name $u `
+              -Password $sec `
+              -AccountNeverExpires
+
+            Enable-LocalUser `
+              -Name $u
+
+          }
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
+
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" |
+            Out-Null
+
+          Write-Host "RDP USER READY"
+
+
+      # ========================================================
+      # INSTALL WINFSP
+      # ========================================================
+
+      - name: Install WinFSP
+        shell: pwsh
+        run: |
+
+          Write-Host "===== WINFSP ====="
+
+          $installed = Get-ItemProperty `
+            "HKLM:\SOFTWARE\WOW6432Node\WinFsp" `
+            -ErrorAction SilentlyContinue
+
+          if (-not $installed) {
+
+            choco install winfsp `
+              -y `
+              --no-progress
+
+          }
+
+          $paths = @(
+            "$env:ProgramFiles\WinFsp\bin\winfsp-x64.dll",
+            "${env:ProgramFiles(x86)}\WinFsp\bin\winfsp-x64.dll"
+          )
+
+          $found = $false
+
+          foreach ($p in $paths) {
+
+            if (Test-Path $p) {
+
+              Write-Host "FOUND: $p"
+
+              $found = $true
+
+            }
+
+          }
+
+          if (-not $found) {
+            throw "WinFSP was not found."
+          }
+
+          Write-Host "WINFSP READY"
+
+
+      # ========================================================
+      # INSTALL GO
+      # ========================================================
+
+      - name: Prepare Go
+        shell: pwsh
+        run: |
+
+          go version
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Go unavailable."
+          }
+
+          Write-Host "GO READY"
+
+
+      # ========================================================
+      # DOWNLOAD GO-WINFSP
+      # ========================================================
+
+      - name: Download go-winfsp
+        shell: pwsh
+        run: |
+
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+
+          if (Test-Path $src) {
+
+            Remove-Item `
+              $src `
+              -Recurse `
+              -Force
+
+          }
+
+          git clone `
+            --depth 1 `
+            https://github.com/winfsp/go-winfsp.git `
+            $src
+
+          if (-not (Test-Path $src)) {
+            throw "go-winfsp download failed."
+          }
+
+          Write-Host "GO-WINFSP READY"
+
+
+      # ========================================================
+      # BUILD PERSISTENT PASSTHROUGH
+      # ========================================================
+
+      - name: Build WinFSP passthrough
+        shell: pwsh
+        run: |
+
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          Set-Location $src
+
+          go build `
+            -o $exe `
+            ./examples/passthrough/cmd/main.go
+
+          if (-not (Test-Path $exe)) {
+            throw "passthrough executable was not created."
+          }
+
+          Write-Host "EXE: $exe"
+
+          & $exe --help
+
+
+      # ========================================================
+      # CREATE PERSISTENT CACHE
+      # ========================================================
+
+      - name: Create persistent cache
+        shell: pwsh
+        run: |
+
+          $root = "$env:RUNNER_TEMP\persistent_u_storage"
+
+          if (Test-Path $root) {
+
+            Remove-Item `
+              $root `
+              -Recurse `
+              -Force
+
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $root `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Projects" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Assets" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Fonts" `
+            -Force |
+            Out-Null
+
+          Write-Host "CACHE: $root"
+
+          Get-ChildItem `
+            $root
+
+
+      # ========================================================
+      # TELEGRAM RESTORE ENGINE
+      # ========================================================
+
+      - name: Restore Telegram persistent storage
+        shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+
+          python -m pip install `
+            --upgrade `
+            telethon
+
+          $script = @'
+          import os
+          import base64
+          import json
+          import hashlib
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          ROOT = os.environ["PERSISTENT_ROOT"]
+
+          with open(
+              "persistent.session",
+              "wb"
+          ) as f:
+              f.write(
+                  base64.b64decode(
+                      SESSION_B64
+                  )
+              )
+
+          client = TelegramClient(
+              "persistent",
+              API_ID,
+              API_HASH
+          )
+
+          def sha256(path):
+
+              h = hashlib.sha256()
+
+              with open(path, "rb") as f:
+
+                  while True:
+
+                      data = f.read(
+                          1024 * 1024
+                      )
+
+                      if not data:
+                          break
+
+                      h.update(data)
+
+              return h.hexdigest()
+
+          async def main():
+
+              await client.start()
+
+              found = None
+
+              async for msg in client.iter_messages(
+                  "me",
+                  search="PERSISTENT-RDP-SYNC-INDEX",
+                  limit=100
+              ):
+
+                  if msg.file:
+                      found = msg
+                      break
+
+              if not found:
+
+                  print(
+                      "NO PREVIOUS PERSISTENT INDEX"
+                  )
+
+                  return
+
+              await client.download_media(
+                  found,
+                  file="persistent_index.json"
+              )
+
+              with open(
+                  "persistent_index.json",
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+
+                  index = json.load(f)
+
+              print(
+                  "INDEX RESTORED"
+              )
+
+              for record in index.get(
+                  "files",
+                  []
+              ):
+
+                  relative = record["path"].lstrip("/")
+
+                  destination = os.path.join(
+                      ROOT,
+                      *relative.split("/")
+                  )
+
+                  os.makedirs(
+                      os.path.dirname(destination),
+                      exist_ok=True
+                  )
+
+                  with open(
+                      destination,
+                      "wb"
+                  ) as output:
+
+                      for chunk in sorted(
+                          record["chunks"],
+                          key=lambda x: x["index"]
+                      ):
+
+                          msg = await client.get_messages(
+                              "me",
+                              ids=chunk[
+                                  "telegram_message_id"
+                              ]
+                          )
+
+                          if not msg:
+                              raise RuntimeError(
+                                  "Missing Telegram chunk"
+                              )
+
+                          temporary = (
+                              "restore_chunk_"
+                              + str(chunk["index"])
+                              + ".bin"
+                          )
+
+                          await client.download_media(
+                              msg,
+                              file=temporary
+                          )
+
+                          if (
+                              sha256(temporary)
+                              != chunk["sha256"]
+                          ):
+
+                              raise RuntimeError(
+                                  "Chunk SHA256 mismatch"
+                              )
+
+                          with open(
+                              temporary,
+                              "rb"
+                          ) as part:
+
+                              while True:
+
+                                  data = part.read(
+                                      1024 * 1024
+                                  )
+
+                                  if not data:
+                                      break
+
+                                  output.write(data)
+
+                          os.remove(
+                              temporary
+                          )
+
+                  if (
+                      sha256(destination)
+                      != record["sha256"]
+                  ):
+
+                      raise RuntimeError(
+                          "Restored file SHA256 mismatch"
+                      )
+
+                  print(
+                      "RESTORED:",
+                      record["path"]
+                  )
+
+              print(
+                  "TELEGRAM RESTORE SUCCESS"
+              )
+
+          with client:
+
+              client.loop.run_until_complete(
+                  main()
+              )
+          '@
+
+          Set-Content `
+            -Path "$env:RUNNER_TEMP\restore.py" `
+            -Value $script `
+            -Encoding UTF8
+
+          $env:PERSISTENT_ROOT =
+            "$env:RUNNER_TEMP\persistent_u_storage"
+
+          python `
+            "$env:RUNNER_TEMP\restore.py"
+
+
+      # ========================================================
+      # START U DRIVE
+      # ========================================================
+
+      - name: Mount U drive
+        shell: pwsh
+        run: |
+
+          $exe =
+            "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          $root =
+            "$env:RUNNER_TEMP\persistent_u_storage"
+
+          $stdout =
+            "$env:RUNNER_TEMP\persistent_u_stdout.log"
+
+          $stderr =
+            "$env:RUNNER_TEMP\persistent_u_stderr.log"
+
+          Remove-Item `
+            $stdout,
+            $stderr `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $process = Start-Process `
+            -FilePath $exe `
+            -ArgumentList @(
+              "-m",
+              "U:",
+              $root
+            ) `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru `
+            -WindowStyle Hidden
+
+          Write-Host "PROCESS ID: $($process.Id)"
+
+          $mounted = $false
+
+          for (
+            $i = 1;
+            $i -le 30;
+            $i++
+          ) {
+
+            Start-Sleep `
+              -Seconds 1
+
+            if ($process.HasExited) {
+
+              if (Test-Path $stdout) {
+                Get-Content $stdout
+              }
+
+              if (Test-Path $stderr) {
+                Get-Content $stderr
+              }
+
+              throw `
+                "WinFSP process exited."
+
+            }
+
+            try {
+
+              $drive =
+                Get-PSDrive U `
+                  -ErrorAction Stop
+
+              if (
+                $drive.Root `
+                -eq "U:\"
+              ) {
+
+                $mounted = $true
+                break
+
+              }
+
+            }
+            catch {
+            }
+
+          }
+
+          if (-not $mounted) {
+            throw "U: was not mounted."
+          }
+
+          Write-Host "U DRIVE MOUNT SUCCESS"
+
+          Get-PSDrive U
+
+          # Test immediately.
+
+          New-Item `
+            -ItemType Directory `
+            -Path "U:\PersistentTest" `
+            -Force |
+            Out-Null
+
+          Set-Content `
+            -Path "U:\PersistentTest\status.txt" `
+            -Value "U DRIVE ONLINE"
+
+          if (
+            -not (
+              Test-Path `
+                "U:\PersistentTest\status.txt"
+            )
+          ) {
+
+            throw "U write failed."
+
+          }
+
+          Write-Host "U READ/WRITE SUCCESS"
+
+
+      # ========================================================
+      # MAKE U AVAILABLE TO RDP USER
+      # ========================================================
+
+      - name: Register U drive for RDP user
+        shell: pwsh
+        run: |
+
+          $exe =
+            "$env:RUNNER_TEMP\persistent-passthrough.exe"
+
+          $root =
+            "$env:RUNNER_TEMP\persistent_u_storage"
+
+          $taskName =
+            "Persistent-RDP-U-Drive"
+
+          $action = New-ScheduledTaskAction `
+            -Execute $exe `
+            -Argument "-m U: `"$root`""
+
+          $trigger =
+            New-ScheduledTaskTrigger `
+              -AtLogOn `
+              -User "$env:COMPUTERNAME\$env:RDP_USER"
+
+          $principal =
+            New-ScheduledTaskPrincipal `
+              -UserId "$env:COMPUTERNAME\$env:RDP_USER" `
+              -LogonType Interactive `
+              -RunLevel Highest
+
+          Unregister-ScheduledTask `
+            -TaskName $taskName `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
+          Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Force
+
+          Write-Host "RDP U DRIVE TASK REGISTERED"
+
+
+      # ========================================================
+      # TELEGRAM PYTHON ENVIRONMENT
+      # ========================================================
+
+      - name: Install Telegram sync dependencies
+        shell: pwsh
+        run: |
+
+          python -m pip install `
+            --upgrade `
+            pip
+
+          python -m pip install `
+            telethon `
+            pyautogui `
+            pynput `
+            pillow
+
+          Write-Host "PYTHON READY"
+
+
+      # ========================================================
+      # RUSTDESK
+      # ========================================================
+
+      - name: Install RustDesk
+        shell: pwsh
+        run: |
+
+          $rdExe =
+            "C:\Program Files\RustDesk\rustdesk.exe"
+
+          if (-not (Test-Path $rdExe)) {
+
+            $url =
+              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
+            $installer =
+              "$env:TEMP\rustdesk.msi"
+
+            Invoke-WebRequest `
+              -Uri $url `
+              -OutFile $installer
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList `
+                "/i",
+                "`"$installer`"",
+                "/quiet",
+                "/norestart" `
+              -Wait
+
+            Remove-Item `
+              $installer `
+              -Force
+
+          }
+
+
+      # ========================================================
+      # RUSTDESK PORTS
+      # ========================================================
+
+      - name: Open RustDesk ports
+        shell: pwsh
+        run: |
+
+          for (
+            $p = 21115;
+            $p -le 21119;
+            $p++
+          ) {
+
+            $name =
+              "APP-PORT-TCP-$p"
+
+            netsh advfirewall firewall delete rule `
+              name=$name `
+              2>$null
+
+            netsh advfirewall firewall add rule `
+              name=$name `
+              dir=in `
+              action=allow `
+              protocol=TCP `
+              localport=$p
+
+          }
+
+
+      # ========================================================
+      # LAUNCH RUSTDESK
+      # ========================================================
+
+      - name: Launch RustDesk
+        shell: pwsh
+        run: |
+
+          $rdExe =
+            "C:\Program Files\RustDesk\rustdesk.exe"
+
+          Start-Process `
+            -FilePath $rdExe `
+            -ErrorAction SilentlyContinue
+
+          Start-Sleep `
+            -Seconds 5
+
+
+      # ========================================================
+      # CRD FLAG
+      # ========================================================
+
+      - name: Set CRD flag
+        shell: pwsh
+        run: |
+
+          $crd = @'
+          ${{ inputs.crd_code }}
+          '@.Trim()
+
+          if ($crd.Length -gt 0) {
+
+            "CRD_ENABLED=1" |
+              Out-File `
+                -Append `
+                $env:GITHUB_ENV
+
+          }
+          else {
+
+            "CRD_ENABLED=0" |
+              Out-File `
+                -Append `
+                $env:GITHUB_ENV
+
+          }
+
+
+      # ========================================================
+      # INSTALL CRD
+      # ========================================================
+
+      - name: Install Chrome Remote Desktop
+        if: env.CRD_ENABLED == '1'
+        shell: pwsh
+        run: |
+
+          $exe =
+            "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+
+          if (-not (Test-Path $exe)) {
+
+            $installer =
+              "$env:TEMP\chromeremotedesktophost.exe"
+
+            Invoke-WebRequest `
+              -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
+              -OutFile $installer
+
+            Start-Process `
+              -FilePath $installer `
+              -ArgumentList "/silent","/install" `
+              -Wait
+
+            Remove-Item `
+              $installer `
+              -Force
+
+          }
+
+
+      # ========================================================
+      # START CRD
+      # ========================================================
+
+      - name: Start Chrome Remote Desktop
+        if: env.CRD_ENABLED == '1'
+        shell: pwsh
+        run: |
+
+          $raw = @'
+          ${{ inputs.crd_code }}
+          '@.Trim()
+
+          $pin =
+            "${{ inputs.crd_pin }}".Trim()
+
+          if (
+            $pin -notmatch '^\d{6,12}$'
+          ) {
+
+            throw `
+              "CRD PIN must be 6-12 digits."
+
+          }
+
+          $starter =
+            "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+
+          if (-not (Test-Path $starter)) {
+
+            throw `
+              "CRD starter not found."
+
+          }
+
+          $code = $null
+
+          if (
+            $raw -match `
+              '--code\s*=\s*"?([^"\s]+)'
+          ) {
+
+            $code =
+              ([regex]::Match(
+                $raw,
+                '--code\s*=\s*"?([^"\s]+)'
+              )).Groups[1].Value
+
+          }
+          elseif (
+            $raw -match '^4\/'
+          ) {
+
+            $code = $raw
+
+          }
+
+          if (-not $code) {
+
+            throw `
+              "Could not detect CRD code."
+
+          }
+
+          $args = @(
+            "--code=""$code""",
+            "--redirect-url=""https://remotedesktop.google.com/_/oauthredirect""",
+            "--name=""$env:COMPUTERNAME""",
+            "--pin=""$pin"""
+          )
+
+          Start-Process `
+            -FilePath $starter `
+            -ArgumentList $args
+
+
+      # ========================================================
+      # PERSISTENT STORAGE STATUS
+      # ========================================================
+
+      - name: Display persistent U status
+        shell: pwsh
+        run: |
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT U DRIVE STATUS"
+          Write-Host "=========================================="
+
+          Get-PSDrive U
+
+          Write-Host ""
+          Write-Host "BACKING STORAGE:"
+
+          Get-ChildItem `
+            "$env:RUNNER_TEMP\persistent_u_storage" `
+            -Recurse `
+            -Force
+
+          Write-Host ""
+          Write-Host "U DRIVE READY"
+
+
+      # ========================================================
+      # KEEP ALIVE
+      # ========================================================
+
+      - name: Keep RDP alive
+        shell: pwsh
+        run: |
+
+          $mins =
+            [int]"${{ env.RUNTIME_MINUTES }}"
+
+          $end =
+            (Get-Date).AddMinutes(
+              $mins
+            )
+
+          Write-Host ""
+          Write-Host "RDP ACTIVE"
+          Write-Host "RUNTIME: $mins minutes"
+
+          while (
+            (Get-Date) -lt $end
+          ) {
+
+            Write-Host (
+              "Heartbeat " +
+              (Get-Date).ToString(
+                "HH:mm:ss"
+              )
+            )
+
+            Start-Sleep `
+              -Seconds 60
+
+          }
+
+
+      # ========================================================
+      # FINAL BACKING STORAGE CHECK
+      # ========================================================
+
+      - name: Final persistent storage check
+        if: always()
+        shell: pwsh
+        run: |
+
+          $root =
+            "$env:RUNNER_TEMP\persistent_u_storage"
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "FINAL STORAGE CHECK"
+          Write-Host "=========================================="
+
+          if (Test-Path $root) {
+
+            Get-ChildItem `
+              $root `
+              -Recurse `
+              -Force
+
+          }
+
+          Write-Host ""
+          Write-Host "RDP PERSISTENT STORAGE JOB FINISHED"
+
+
+      # ========================================================
+      # STOP
+      # ========================================================
+
+      - name: Stop
+        if: always()
+        shell: pwsh
+        run: |
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT RDP SESSION FINISHED"
+          Write-Host "=========================================="
