@@ -52,7 +52,7 @@ defaults:
 jobs:
 
   # ============================================================
-  # TELEGRAM STORAGE + METADATA + FILE INDEX TEST
+  # TELEGRAM STORAGE + FILE MANAGER TEST
   # ============================================================
   telegram-test:
     runs-on: ubuntu-latest
@@ -65,18 +65,22 @@ jobs:
           python3 -m pip install --upgrade pip
           python3 -m pip install telethon
 
-      - name: Create test file
+      - name: Create test files
         shell: bash
         run: |
-          echo "Persistent-RDP test $(date -u)" > TEST.txt
+          mkdir -p test_workspace/Projects/AE
+          mkdir -p test_workspace/Assets/Fonts
 
-          echo "Original file:"
-          cat TEST.txt
+          echo "Persistent-RDP test $(date -u)" \
+            > test_workspace/Projects/AE/project.txt
 
-          echo "Original SHA256:"
-          sha256sum TEST.txt
+          echo "Persistent-RDP asset $(date -u)" \
+            > test_workspace/Assets/Fonts/test-font.txt
 
-      - name: Upload + metadata + file index + download + verify
+          echo "Created test tree:"
+          find test_workspace -type f -print
+
+      - name: Telegram persistent storage test
         shell: bash
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -88,6 +92,7 @@ jobs:
           import base64
           import hashlib
           import json
+          import math
           from datetime import datetime, timezone
           from telethon import TelegramClient
 
@@ -95,7 +100,9 @@ jobs:
           api_hash = os.environ["API_HASH"]
           session_b64 = os.environ["SESSION_B64"]
 
-          # Restore Telegram session
+          # ------------------------------------------------
+          # RESTORE TELEGRAM SESSION
+          # ------------------------------------------------
           with open("unlim_session.session", "wb") as f:
               f.write(base64.b64decode(session_b64))
 
@@ -104,6 +111,13 @@ jobs:
               api_id,
               api_hash
           )
+
+          STORAGE_ROOT = "test_workspace"
+          INDEX_FILE = "file_index.json"
+
+          # Small test chunk size.
+          # This is only for testing the storage engine.
+          CHUNK_SIZE = 1024 * 1024
 
           def sha256(path):
               h = hashlib.sha256()
@@ -119,115 +133,196 @@ jobs:
 
               return h.hexdigest()
 
+          def utc_now():
+              return datetime.now(
+                  timezone.utc
+              ).isoformat()
+
+          def build_file_record(local_path):
+              relative_path = os.path.relpath(
+                  local_path,
+                  STORAGE_ROOT
+              ).replace("\\", "/")
+
+              size = os.path.getsize(local_path)
+              file_hash = sha256(local_path)
+
+              chunk_count = max(
+                  1,
+                  math.ceil(size / CHUNK_SIZE)
+              )
+
+              return {
+                  "path": "/" + relative_path,
+                  "name": os.path.basename(local_path),
+                  "size": size,
+                  "sha256": file_hash,
+                  "chunk_size": CHUNK_SIZE,
+                  "chunk_count": chunk_count,
+                  "chunks": [],
+                  "created_at": utc_now()
+              }
+
+          async def upload_file(
+              file_record,
+              local_path
+          ):
+              with open(local_path, "rb") as f:
+                  data = f.read()
+
+              total_size = len(data)
+
+              if total_size == 0:
+                  chunk_count = 1
+              else:
+                  chunk_count = math.ceil(
+                      total_size / CHUNK_SIZE
+                  )
+
+              file_record["chunk_count"] = chunk_count
+
+              for index in range(chunk_count):
+
+                  start = index * CHUNK_SIZE
+                  end = min(
+                      start + CHUNK_SIZE,
+                      total_size
+                  )
+
+                  chunk_data = data[start:end]
+
+                  if not chunk_data:
+                      chunk_data = b""
+
+                  chunk_name = (
+                      "persistent_chunk_"
+                      + str(index)
+                      + ".bin"
+                  )
+
+                  with open(
+                      chunk_name,
+                      "wb"
+                  ) as chunk_file:
+                      chunk_file.write(chunk_data)
+
+                  chunk_hash = sha256(chunk_name)
+
+                  message = await client.send_file(
+                      "me",
+                      chunk_name,
+                      caption=(
+                          "PERSISTENT-RDP-CHUNK\n"
+                          f"path={file_record['path']}\n"
+                          f"chunk={index}\n"
+                          f"chunks={chunk_count}\n"
+                          f"sha256={chunk_hash}"
+                      )
+                  )
+
+                  file_record["chunks"].append({
+                      "index": index,
+                      "size": len(chunk_data),
+                      "sha256": chunk_hash,
+                      "telegram_message_id": message.id
+                  })
+
+                  print(
+                      "CHUNK UPLOAD SUCCESS "
+                      f"{index + 1}/{chunk_count} "
+                      f"message_id={message.id}"
+                  )
+
+                  os.remove(chunk_name)
+
           async def main():
 
               await client.start()
 
               print("TELEGRAM CONNECTED")
 
-              original_file = "TEST.txt"
-              downloaded_file = "TEST_DOWNLOADED.txt"
-
               # ------------------------------------------------
-              # ORIGINAL FILE INFORMATION
+              # DISCOVER FILES
               # ------------------------------------------------
-              original_size = os.path.getsize(original_file)
-              original_hash = sha256(original_file)
+              files = []
 
-              print(f"ORIGINAL_NAME={original_file}")
-              print(f"ORIGINAL_SIZE={original_size}")
-              print(f"ORIGINAL_SHA256={original_hash}")
+              for root, dirs, filenames in os.walk(
+                  STORAGE_ROOT
+              ):
+                  dirs.sort()
+                  filenames.sort()
 
-              # ------------------------------------------------
-              # UPLOAD FILE
-              # ------------------------------------------------
-              message = await client.send_file(
-                  "me",
-                  original_file,
-                  caption="Persistent-RDP FILE"
-              )
+                  for filename in filenames:
 
-              message_id = message.id
+                      local_path = os.path.join(
+                          root,
+                          filename
+                      )
 
-              print("UPLOAD SUCCESS")
-              print(f"MESSAGE_ID={message_id}")
+                      files.append(local_path)
 
-              # ------------------------------------------------
-              # CREATE FILE METADATA
-              # ------------------------------------------------
-              metadata = {
-                  "name": original_file,
-                  "path": "/" + original_file,
-                  "size": original_size,
-                  "sha256": original_hash,
-                  "telegram": {
-                      "chat": "me",
-                      "message_id": message_id
-                  },
-                  "created_at": datetime.now(
-                      timezone.utc
-                  ).isoformat()
-              }
-
-              with open(
-                  "metadata.json",
-                  "w",
-                  encoding="utf-8"
-              ) as f:
-                  json.dump(
-                      metadata,
-                      f,
-                      indent=2,
-                      ensure_ascii=False
-                  )
-
-              print("METADATA CREATED")
-
-              print(
-                  json.dumps(
-                      metadata,
-                      indent=2,
-                      ensure_ascii=False
-                  )
-              )
-
-              # ------------------------------------------------
-              # READ METADATA BACK
-              # ------------------------------------------------
-              with open(
-                  "metadata.json",
-                  "r",
-                  encoding="utf-8"
-              ) as f:
-                  loaded_metadata = json.load(f)
-
-              if loaded_metadata["telegram"]["message_id"] != message_id:
-                  print("METADATA TEST FAILED")
+              if not files:
+                  print("NO TEST FILES FOUND")
                   raise SystemExit(1)
 
-              print("METADATA READ SUCCESS")
+              print(
+                  f"FILE DISCOVERY SUCCESS: {len(files)} files"
+              )
 
               # ------------------------------------------------
-              # CREATE FILE INDEX
+              # BUILD INDEX
               # ------------------------------------------------
               index = {
-                  "version": 1,
-                  "updated_at": datetime.now(
-                      timezone.utc
-                  ).isoformat(),
-                  "files": [
-                      {
-                          "name": original_file,
-                          "path": "/" + original_file,
-                          "size": original_size,
-                          "sha256": original_hash,
-                          "telegram_message_id": message_id
-                      }
-                  ]
+                  "version": 2,
+                  "type": "persistent-rdp-file-index",
+                  "updated_at": utc_now(),
+                  "storage": {
+                      "logical_capacity": "10 TB",
+                      "chunk_size": CHUNK_SIZE
+                  },
+                  "files": []
               }
 
+              # ------------------------------------------------
+              # UPLOAD EVERY TEST FILE
+              # ------------------------------------------------
+              for local_path in files:
+
+                  record = build_file_record(
+                      local_path
+                  )
+
+                  print(
+                      "FILE:"
+                      f" {record['path']}"
+                  )
+
+                  print(
+                      "SIZE:"
+                      f" {record['size']}"
+                  )
+
+                  print(
+                      "SHA256:"
+                      f" {record['sha256']}"
+                  )
+
+                  await upload_file(
+                      record,
+                      local_path
+                  )
+
+                  index["files"].append(
+                      record
+                  )
+
+              print("FILE UPLOADS SUCCESS")
+
+              # ------------------------------------------------
+              # SAVE INDEX
+              # ------------------------------------------------
               with open(
-                  "file_index.json",
+                  INDEX_FILE,
                   "w",
                   encoding="utf-8"
               ) as f:
@@ -241,11 +336,11 @@ jobs:
               print("FILE INDEX CREATED")
 
               # ------------------------------------------------
-              # UPLOAD FILE INDEX TO TELEGRAM
+              # UPLOAD INDEX
               # ------------------------------------------------
               index_message = await client.send_file(
                   "me",
-                  "file_index.json",
+                  INDEX_FILE,
                   caption="PERSISTENT-RDP-FILE-INDEX"
               )
 
@@ -257,20 +352,20 @@ jobs:
               )
 
               # ------------------------------------------------
-              # FIND THE INDEX MESSAGE AGAIN
+              # FIND INDEX AGAIN
               # ------------------------------------------------
-              index_message_found = None
+              found_index_message = None
 
               async for msg in client.iter_messages(
                   "me",
                   search="PERSISTENT-RDP-FILE-INDEX",
-                  limit=20
+                  limit=50
               ):
                   if msg.id == index_message_id:
-                      index_message_found = msg
+                      found_index_message = msg
                       break
 
-              if not index_message_found:
+              if not found_index_message:
                   print("FILE INDEX LOOKUP FAILED")
                   raise SystemExit(1)
 
@@ -279,11 +374,13 @@ jobs:
               # ------------------------------------------------
               # DOWNLOAD INDEX
               # ------------------------------------------------
-              downloaded_index = "file_index_downloaded.json"
+              restored_index_file = (
+                  "file_index_restored.json"
+              )
 
               await client.download_media(
-                  index_message_found,
-                  file=downloaded_index
+                  found_index_message,
+                  file=restored_index_file
               )
 
               print("FILE INDEX DOWNLOAD SUCCESS")
@@ -292,118 +389,152 @@ jobs:
               # READ INDEX
               # ------------------------------------------------
               with open(
-                  downloaded_index,
+                  restored_index_file,
                   "r",
                   encoding="utf-8"
               ) as f:
                   restored_index = json.load(f)
 
-              if restored_index["version"] != 1:
-                  print("FILE INDEX VERSION FAILED")
+              if restored_index["version"] != 2:
+                  print("INDEX VERSION FAILED")
                   raise SystemExit(1)
 
-              if not restored_index["files"]:
-                  print("FILE INDEX EMPTY")
-                  raise SystemExit(1)
-
-              restored_file = restored_index["files"][0]
-
-              if restored_file["telegram_message_id"] != message_id:
-                  print("FILE INDEX MESSAGE ID FAILED")
-                  raise SystemExit(1)
-
-              if restored_file["sha256"] != original_hash:
-                  print("FILE INDEX SHA256 FAILED")
+              if len(restored_index["files"]) != len(files):
+                  print("INDEX FILE COUNT FAILED")
                   raise SystemExit(1)
 
               print("FILE INDEX READ SUCCESS")
 
               # ------------------------------------------------
-              # FIND ORIGINAL FILE MESSAGE
+              # VERIFY EVERY RECORD
               # ------------------------------------------------
-              stored_message = await client.get_messages(
+              for record in restored_index["files"]:
+
+                  if not record["path"].startswith("/"):
+                      print("PATH VERIFICATION FAILED")
+                      raise SystemExit(1)
+
+                  if record["size"] < 0:
+                      print("SIZE VERIFICATION FAILED")
+                      raise SystemExit(1)
+
+                  if len(record["sha256"]) != 64:
+                      print("SHA256 RECORD FAILED")
+                      raise SystemExit(1)
+
+                  if record["chunk_count"] < 1:
+                      print("CHUNK COUNT FAILED")
+                      raise SystemExit(1)
+
+                  if len(record["chunks"]) != record["chunk_count"]:
+                      print("CHUNK RECORD COUNT FAILED")
+                      raise SystemExit(1)
+
+              print("FILE RECORD VERIFICATION SUCCESS")
+
+              # ------------------------------------------------
+              # VERIFY CHUNK METADATA
+              # ------------------------------------------------
+              for record in restored_index["files"]:
+
+                  expected_indexes = list(
+                      range(record["chunk_count"])
+                  )
+
+                  actual_indexes = [
+                      c["index"]
+                      for c in record["chunks"]
+                  ]
+
+                  if actual_indexes != expected_indexes:
+                      print("CHUNK INDEX FAILED")
+                      raise SystemExit(1)
+
+                  for chunk in record["chunks"]:
+
+                      if not chunk.get(
+                          "telegram_message_id"
+                      ):
+                          print(
+                              "CHUNK MESSAGE ID FAILED"
+                          )
+                          raise SystemExit(1)
+
+                      if len(chunk["sha256"]) != 64:
+                          print(
+                              "CHUNK SHA256 FAILED"
+                          )
+                          raise SystemExit(1)
+
+              print("CHUNK METADATA SUCCESS")
+
+              # ------------------------------------------------
+              # RE-DOWNLOAD FIRST CHUNK
+              # ------------------------------------------------
+              first_record = restored_index["files"][0]
+              first_chunk = first_record["chunks"][0]
+
+              first_chunk_message = await client.get_messages(
                   "me",
-                  ids=message_id
+                  ids=first_chunk[
+                      "telegram_message_id"
+                  ]
               )
 
-              if not stored_message:
-                  print("MESSAGE LOOKUP FAILED")
+              if not first_chunk_message:
+                  print("CHUNK LOOKUP FAILED")
                   raise SystemExit(1)
 
-              print("MESSAGE LOOKUP SUCCESS")
+              restored_chunk = "restored_chunk.bin"
 
-              # ------------------------------------------------
-              # DOWNLOAD ORIGINAL FILE
-              # ------------------------------------------------
               await client.download_media(
-                  stored_message,
-                  file=downloaded_file
+                  first_chunk_message,
+                  file=restored_chunk
               )
 
-              print("DOWNLOAD SUCCESS")
-
-              # ------------------------------------------------
-              # VERIFY DOWNLOADED FILE
-              # ------------------------------------------------
-              downloaded_size = os.path.getsize(
-                  downloaded_file
+              restored_chunk_hash = sha256(
+                  restored_chunk
               )
 
-              downloaded_hash = sha256(
-                  downloaded_file
-              )
-
-              print(
-                  f"DOWNLOADED_SIZE={downloaded_size}"
-              )
-
-              print(
-                  f"DOWNLOADED_SHA256={downloaded_hash}"
-              )
-
-              # ------------------------------------------------
-              # FINAL VERIFICATION
-              # ------------------------------------------------
-              if original_size != downloaded_size:
-                  print("SIZE VERIFICATION FAILED")
+              if (
+                  restored_chunk_hash
+                  != first_chunk["sha256"]
+              ):
+                  print("CHUNK SHA256 FAILED")
                   raise SystemExit(1)
 
-              if original_hash != downloaded_hash:
-                  print("SHA256 VERIFICATION FAILED")
-                  raise SystemExit(1)
+              print("CHUNK DOWNLOAD SUCCESS")
+              print("CHUNK SHA256 SUCCESS")
 
-              print("SIZE VERIFICATION SUCCESS")
-              print("SHA256 VERIFICATION SUCCESS")
+              # ------------------------------------------------
+              # FINAL
+              # ------------------------------------------------
+              print("")
+              print("================================")
+              print("FILE MANAGER TEST SUCCESS")
               print("PERSISTENT STORAGE TEST SUCCESS")
+              print("================================")
 
           with client:
               client.loop.run_until_complete(main())
           PY
 
-      - name: Display metadata and file index
+      - name: Display storage index
         shell: bash
         run: |
           echo "=============================="
-          echo "METADATA"
-          echo "=============================="
-          cat metadata.json
-
-          echo ""
-          echo "=============================="
-          echo "FILE INDEX"
+          echo "PERSISTENT STORAGE INDEX"
           echo "=============================="
           cat file_index.json
 
-      - name: Upload metadata artifact
+      - name: Upload storage test artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: telegram-storage-metadata
+          name: telegram-storage-file-manager-test
           path: |
-            metadata.json
             file_index.json
-            file_index_downloaded.json
-            TEST.txt
-            TEST_DOWNLOADED.txt
+            file_index_restored.json
+            test_workspace
 
   # ============================================================
   # SETUP
