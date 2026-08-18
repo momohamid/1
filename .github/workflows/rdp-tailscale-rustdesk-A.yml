@@ -69,12 +69,13 @@ jobs:
           sha256sum TEST.txt
 
       - name: Upload test file to Telegram Saved Messages
+        shell: bash
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
         run: |
-          python3 <<'PY'
+          python3 - <<'PY'
           import os
           import base64
           from telethon import TelegramClient
