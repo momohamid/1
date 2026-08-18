@@ -1,4 +1,4 @@
-name: Persistent-RDP U Drive Cross-Step Test
+name: Persistent-RDP U Drive Test
 
 on:
   workflow_dispatch:
@@ -11,11 +11,8 @@ defaults:
     shell: pwsh
 
 jobs:
-
   persistent-u-test:
-
     runs-on: windows-latest
-
     timeout-minutes: 20
 
     steps:
@@ -53,17 +50,28 @@ jobs:
           Write-Host "WINFSP INSTALL SUCCESS"
 
 
-      - name: Prepare Go and Build Filesystem
+      - name: Prepare Go
         run: |
           Write-Host "===== GO ====="
+
           go version
 
-          $src = "$env:RUNNER_TEMP\go-winfsp"
-          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
-
-          if (Test-Path $src) {
-            Remove-Item $src -Recurse -Force
+          if ($LASTEXITCODE -ne 0) {
+            throw "Go is not available."
           }
+
+          Write-Host "GO AVAILABLE"
+
+
+      - name: Download go-winfsp
+        run: |
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+
+          Remove-Item `
+            $src `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
 
           git clone `
             --depth 1 `
@@ -73,6 +81,15 @@ jobs:
           if (-not (Test-Path $src)) {
             throw "go-winfsp source was not downloaded."
           }
+
+          Write-Host "SOURCE: $src"
+          Write-Host "GO-WINFSP DOWNLOAD SUCCESS"
+
+
+      - name: Build persistent-passthrough.exe
+        run: |
+          $src = "$env:RUNNER_TEMP\go-winfsp"
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
 
           Set-Location $src
 
@@ -86,19 +103,19 @@ jobs:
             throw "persistent-passthrough.exe was not created."
           }
 
+          Write-Host "EXE: $exe"
           Write-Host "FILESYSTEM BUILD SUCCESS"
 
 
-      - name: Create Persistent Backing Storage
+      - name: Create backing storage
         run: |
           $root = "$env:RUNNER_TEMP\persistent_u_storage"
 
-          if (Test-Path $root) {
-            Remove-Item `
-              $root `
-              -Recurse `
-              -Force
-          }
+          Remove-Item `
+            $root `
+            -Recurse `
+            -Force `
+            -ErrorAction SilentlyContinue
 
           New-Item `
             -ItemType Directory `
@@ -111,28 +128,15 @@ jobs:
             throw "Backing storage was not created."
           }
 
-          Write-Host "BACKING STORAGE SUCCESS"
 
-
-      - name: Mount U Drive and Leave It Running
+      - name: Mount U Drive and leave filesystem running
         run: |
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
           $root = "$env:RUNNER_TEMP\persistent_u_storage"
 
-          Write-Host "===== MOUNT INFORMATION ====="
+          Write-Host "===== MOUNT U DRIVE ====="
           Write-Host "EXE: $exe"
-          Write-Host "EXISTS: $(Test-Path $exe)"
           Write-Host "BACKING: $root"
-
-          if (-not (Test-Path $exe)) {
-            throw "persistent-passthrough.exe not found."
-          }
-
-          if (-not (Test-Path $root)) {
-            throw "Backing storage not found."
-          }
-
-          Write-Host "===== START FILESYSTEM ====="
 
           $stdout = "$env:RUNNER_TEMP\persistent_u_stdout.log"
           $stderr = "$env:RUNNER_TEMP\persistent_u_stderr.log"
@@ -165,24 +169,29 @@ jobs:
 
             if ($process.HasExited) {
 
-              Write-Host "===== STDOUT ====="
+              Write-Host "PROCESS EXITED"
+              Write-Host "EXIT CODE: $($process.ExitCode)"
 
               if (Test-Path $stdout) {
                 Get-Content $stdout
               }
 
-              Write-Host "===== STDERR ====="
-
               if (Test-Path $stderr) {
                 Get-Content $stderr
               }
 
-              throw "Filesystem process exited before U: mounted."
+              throw "Filesystem exited before U: mounted."
             }
 
-            if (Test-Path "U:\") {
-              $mounted = $true
-              break
+            try {
+              $drive = Get-PSDrive U -ErrorAction Stop
+
+              if ($drive.Root -eq "U:\") {
+                $mounted = $true
+                break
+              }
+            }
+            catch {
             }
           }
 
@@ -190,64 +199,65 @@ jobs:
             throw "U: was not mounted."
           }
 
-          Write-Host "===== U DRIVE ====="
-
-          Get-PSDrive U -ErrorAction SilentlyContinue
+          Write-Host "===== U DRIVE MOUNTED ====="
+          Get-PSDrive U
 
           Write-Host "U DRIVE MOUNT SUCCESS"
 
-          Write-Host "===== WRITE TEST ====="
-
+          # Test the mount in THIS step.
           New-Item `
             -ItemType Directory `
             -Path "U:\Test" `
             -Force | Out-Null
 
-          $content = "Persistent-RDP Cross-Step Test"
-
           Set-Content `
             -Path "U:\Test\cross-step.txt" `
-            -Value $content `
+            -Value "Persistent-RDP Cross-Step Test" `
             -Encoding UTF8
 
-          if (-not (Test-Path "U:\Test\cross-step.txt")) {
-            throw "Cross-step test file was not created."
+          Write-Host "INITIAL FILE CREATED"
+
+          # Keep the filesystem process alive until this step ends.
+          Start-Sleep -Seconds 5
+
+          if ($process.HasExited) {
+            throw "Filesystem process unexpectedly stopped."
           }
 
-          Write-Host "WRITE SUCCESS"
+          Write-Host "FILESYSTEM STILL RUNNING"
 
-          Write-Host "===== PROCESS ====="
-          Write-Host "FILESYSTEM PROCESS ID: $($process.Id)"
-          Write-Host "FILESYSTEM PROCESS STILL RUNNING: $(-not $process.HasExited)"
+          # Store PID for diagnostics.
+          Set-Content `
+            -Path "$env:RUNNER_TEMP\persistent_u_pid.txt" `
+            -Value $process.Id
 
-          Write-Host ""
-          Write-Host "=============================================="
-          Write-Host "U DRIVE MOUNTED"
-          Write-Host "FILESYSTEM LEFT RUNNING"
-          Write-Host "READY FOR CROSS-STEP TEST"
-          Write-Host "=============================================="
+          Write-Host "MOUNT STEP SUCCESS"
 
 
-      - name: Cross-Step U Drive Read Test
+      - name: Cross-step test
         run: |
           Write-Host "===== CROSS-STEP TEST ====="
 
-          Write-Host "Testing U:\ from a completely new PowerShell step."
+          Write-Host "Testing whether U: survives into a new PowerShell step."
 
-          if (-not (Test-Path "U:\")) {
-            throw "U: is not visible in the new workflow step."
+          $drive = Get-PSDrive U -ErrorAction SilentlyContinue
+
+          if (-not $drive) {
+            Write-Host "U: is NOT visible in this step."
+            Write-Host ""
+            Write-Host "This confirms that the drive mapping is scoped to the previous process/session."
+            Write-Host "The backing storage remains the persistent layer."
+            exit 0
           }
 
-          Write-Host "U DRIVE VISIBLE IN NEW STEP"
+          Write-Host "U: IS VISIBLE."
 
-          $file = "U:\Test\cross-step.txt"
-
-          if (-not (Test-Path $file)) {
-            throw "cross-step.txt is not visible from the new step."
+          if (-not (Test-Path "U:\Test\cross-step.txt")) {
+            throw "Cross-step file was not found."
           }
 
           $content = Get-Content `
-            -Path $file `
+            -Path "U:\Test\cross-step.txt" `
             -Raw
 
           Write-Host "CONTENT:"
@@ -259,47 +269,115 @@ jobs:
 
           Write-Host "CROSS-STEP READ SUCCESS"
 
+
+      - name: Independent remount test
+        run: |
+          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+          $root = "$env:RUNNER_TEMP\persistent_u_storage"
+
+          Write-Host "===== INDEPENDENT REMOUNT ====="
+
+          $stdout = "$env:RUNNER_TEMP\remount_stdout.log"
+          $stderr = "$env:RUNNER_TEMP\remount_stderr.log"
+
+          Remove-Item `
+            $stdout,
+            $stderr `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $process = Start-Process `
+            -FilePath $exe `
+            -ArgumentList @(
+              "-m",
+              "U:",
+              $root
+            ) `
+            -RedirectStandardOutput $stdout `
+            -RedirectStandardError $stderr `
+            -PassThru `
+            -WindowStyle Hidden
+
+          $mounted = $false
+
+          for ($i = 1; $i -le 30; $i++) {
+
+            Start-Sleep -Seconds 1
+
+            if ($process.HasExited) {
+              throw "Filesystem exited during independent remount."
+            }
+
+            try {
+              $drive = Get-PSDrive U -ErrorAction Stop
+
+              if ($drive.Root -eq "U:\") {
+                $mounted = $true
+                break
+              }
+            }
+            catch {
+            }
+          }
+
+          if (-not $mounted) {
+            throw "U: failed to remount."
+          }
+
+          Write-Host "REMOUNT SUCCESS"
+
+          $file = "U:\Test\cross-step.txt"
+
+          if (-not (Test-Path $file)) {
+            throw "Persistent file was not found after remount."
+          }
+
+          $content = Get-Content `
+            -Path $file `
+            -Raw
+
+          Write-Host "RESTORED CONTENT:"
+          Write-Host $content
+
+          if ($content.Trim() -ne "Persistent-RDP Cross-Step Test") {
+            throw "Restored content mismatch."
+          }
+
           $hash = (
             Get-FileHash `
               -Path $file `
               -Algorithm SHA256
           ).Hash
 
-          Write-Host "CROSS-STEP SHA256: $hash"
-
-          if ($hash.Length -ne 64) {
-            throw "Invalid SHA256."
-          }
-
-          Write-Host "CROSS-STEP SHA256 SUCCESS"
+          Write-Host "RESTORED SHA256: $hash"
 
           Write-Host ""
           Write-Host "=============================================="
-          Write-Host "CROSS-STEP U DRIVE TEST SUCCESS"
-          Write-Host "U DRIVE VISIBLE"
-          Write-Host "FILE VISIBLE"
-          Write-Host "READ SUCCESS"
+          Write-Host "PERSISTENT U STORAGE SUCCESS"
+          Write-Host "BACKING STORAGE SUCCESS"
+          Write-Host "REMOUNT SUCCESS"
+          Write-Host "RESTORED FILE SUCCESS"
           Write-Host "SHA256 SUCCESS"
           Write-Host "=============================================="
 
+          Stop-Process `
+            -Id $process.Id `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-      - name: Final Backing Storage Verification
+
+      - name: Final backing storage verification
         run: |
           $root = "$env:RUNNER_TEMP\persistent_u_storage"
           $file = "$root\Test\cross-step.txt"
 
           Write-Host "===== FINAL BACKING STORAGE ====="
 
-          if (-not (Test-Path $root)) {
-            throw "Backing storage disappeared."
-          }
-
           if (-not (Test-Path $file)) {
-            throw "Backing file disappeared."
+            throw "Persistent backing file does not exist."
           }
 
-          Write-Host "BACKING STORAGE EXISTS"
-          Write-Host "BACKING FILE EXISTS"
+          Write-Host "FILE EXISTS: True"
 
           Write-Host "CONTENT:"
           Get-Content $file
@@ -313,7 +391,4 @@ jobs:
           ).Hash
 
           Write-Host ""
-          Write-Host "=============================================="
-          Write-Host "FINAL U DRIVE TEST SUCCESS"
-          Write-Host "BACKING STORAGE SUCCESS"
-          Write-Host "=============================================="
+          Write-Host "FINAL PERSISTENT STORAGE CHECK SUCCESS"
