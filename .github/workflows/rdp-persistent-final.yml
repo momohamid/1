@@ -3,6 +3,7 @@ name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (FINAL)
 on:
   workflow_dispatch:
     inputs:
+
       ts_tailnet:
         description: "Tailscale tailnet"
         required: true
@@ -60,9 +61,11 @@ on:
         type: string
         default: "123456"
 
+
 permissions:
   contents: read
   actions: write
+
 
 defaults:
   run:
@@ -76,6 +79,7 @@ jobs:
   # ============================================================
 
   telegram-test:
+
     runs-on: ubuntu-latest
 
     steps:
@@ -107,6 +111,7 @@ jobs:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
           SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+
         run: |
           python3 - <<'PY'
           import os
@@ -154,6 +159,7 @@ jobs:
               ).isoformat()
 
           def build_file_record(local_path):
+
               relative_path = os.path.relpath(
                   local_path,
                   STORAGE_ROOT
@@ -179,6 +185,7 @@ jobs:
               }
 
           async def upload_file(file_record, local_path):
+
               with open(local_path, "rb") as f:
                   data = f.read()
 
@@ -254,6 +261,7 @@ jobs:
               for root, dirs, filenames in os.walk(
                   STORAGE_ROOT
               ):
+
                   dirs.sort()
                   filenames.sort()
 
@@ -349,6 +357,7 @@ jobs:
               ):
 
                   if msg.id == index_message_id:
+
                       found_index_message = msg
                       break
 
@@ -499,6 +508,7 @@ jobs:
           echo "=============================="
           echo "PERSISTENT STORAGE INDEX"
           echo "=============================="
+
           cat file_index.json
 
       - name: Upload storage test artifacts
@@ -516,6 +526,7 @@ jobs:
   # ============================================================
 
   setup:
+
     runs-on: ubuntu-latest
 
     outputs:
@@ -542,7 +553,9 @@ jobs:
             $n = 1
 
             if ("${{ inputs.rdp_count }}" -match '^\d+$') {
+
               $n = [int]"${{ inputs.rdp_count }}"
+
             }
 
             if ($n -lt 1) {
@@ -561,6 +574,7 @@ jobs:
             $inc += @{
               id = $i
             }
+
           }
 
           $json = @{
@@ -592,6 +606,7 @@ jobs:
   # ============================================================
 
   rdp:
+
     needs: setup
 
     runs-on: windows-latest
@@ -608,9 +623,10 @@ jobs:
 
     steps:
 
-      # ========================================================
+
+      # --------------------------------------------------------
       # CRD FLAG
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Set CRD flag
         shell: pwsh
@@ -634,12 +650,13 @@ jobs:
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
+
           }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # INSTALL CRD
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
@@ -657,7 +674,8 @@ jobs:
             try {
 
               Invoke-WebRequest `
-                -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
+                -Uri `
+                  "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile $exePath `
                 -ErrorAction Stop
 
@@ -677,7 +695,8 @@ jobs:
                 "$env:TEMP\chromeremotedesktophost.msi"
 
               Invoke-WebRequest `
-                -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+                -Uri `
+                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
                 -OutFile $msi `
                 -ErrorAction Stop
 
@@ -697,9 +716,9 @@ jobs:
           }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # START CRD
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
@@ -739,6 +758,7 @@ jobs:
           elseif ($raw -match '^4\/') {
 
             $code = $raw
+
           }
 
           if (-not $code) {
@@ -763,19 +783,25 @@ jobs:
             -ArgumentList $args
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # HOSTNAME + RUNTIME
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
 
           if ("${{ inputs.rdp_count }}" -gt 1) {
-            $hn = "bullet${{ matrix.id }}"
+
+            $hn =
+              "bullet${{ matrix.id }}"
+
           }
           else {
-            $hn = "bullet"
+
+            $hn =
+              "bullet"
+
           }
 
           "TS_HOSTNAME=$hn" |
@@ -784,36 +810,46 @@ jobs:
               $env:GITHUB_ENV
 
           function Yes($v) {
+
             "$v" -match '^(?i:true|1|yes|on)$'
+
           }
 
           function IntOr($v,$d) {
 
             if ("$v" -match '^\d+$') {
+
               return [int]$v
+
             }
 
             return [int]$d
           }
 
-          $runtime = IntOr(
-            "${{ inputs.runtime_minutes }}",
-            355
-          )
+          $runtime =
+            IntOr `
+              "${{ inputs.runtime_minutes }}" `
+              355
 
           if (Yes("${{ inputs.quick_test }}")) {
+
             $runtime = 5
+
           }
 
           if (
             -not (Yes("${{ inputs.quick_test }}")) -and
             $runtime -lt 6
           ) {
+
             $runtime = 355
+
           }
 
           if ($runtime -gt 360) {
+
             $runtime = 355
+
           }
 
           "RUNTIME_MINUTES=$runtime" |
@@ -822,9 +858,9 @@ jobs:
               $env:GITHUB_ENV
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # PURGE TAILSCALE DEVICES
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Purge bullet devices
         if: needs.setup.outputs.multi == '0'
@@ -832,12 +868,16 @@ jobs:
         run: |
 
           function Yes($v) {
+
             "$v" -match '^(?i:true|1|yes|on)$'
+
           }
 
           if (-not (Yes("${{ inputs.do_purge }}"))) {
+
             Write-Host "Purge disabled."
             exit 0
+
           }
 
           try {
@@ -874,6 +914,7 @@ jobs:
                     Authorization = "Basic $auth"
                   } `
                   -ErrorAction SilentlyContinue
+
               }
             }
 
@@ -882,12 +923,13 @@ jobs:
 
             Write-Host `
               "Purge warning: $($_.Exception.Message)"
+
           }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # TAILSCALE
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Install + Up Tailscale
         shell: pwsh
@@ -920,6 +962,7 @@ jobs:
             Remove-Item `
               $dst `
               -Force
+
           }
 
           & $ts logout 2>$null |
@@ -941,12 +984,13 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "TAILSCALE IP: $ip4"
+          Write-Host `
+            "TAILSCALE IP: $ip4"
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # RDP USER
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Enable RDP user + firewall
         shell: pwsh
@@ -989,6 +1033,7 @@ jobs:
 
             Enable-LocalUser `
               -Name $u
+
           }
 
           Add-LocalGroupMember `
@@ -1014,9 +1059,9 @@ jobs:
             "RDP USER READY: $u"
 
 
-      # ========================================================
-      # PYTHON
-      # ========================================================
+      # --------------------------------------------------------
+      # PYTHON + TELEGRAM
+      # --------------------------------------------------------
 
       - name: Install Python libs
         shell: pwsh
@@ -1026,15 +1071,15 @@ jobs:
 
           python -m pip install `
             --force-reinstall `
-            telethon `
             pyautogui `
             pynput `
-            pillow
+            pillow `
+            telethon
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # LOCAL PERSISTENT-RDP STORAGE
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Prepare local persistent storage
         shell: pwsh
@@ -1043,35 +1088,33 @@ jobs:
           $root =
             "D:\Persistent-RDP"
 
-          New-Item `
-            -ItemType Directory `
-            -Path $root `
-            -Force |
-            Out-Null
-
-          $dirs = @(
-            "$root\Projects",
-            "$root\Projects\AE",
-            "$root\Assets",
-            "$root\Assets\Fonts",
-            "$root\Apps",
-            "$root\AppData",
-            "$root\ProgramData",
-            "$root\UserData",
-            "$root\Shortcuts",
-            "$root\Config",
-            "$root\Manifest",
-            "$root\_sync"
-          )
-
-          foreach ($dir in $dirs) {
+          if (-not (Test-Path $root)) {
 
             New-Item `
               -ItemType Directory `
-              -Path $dir `
+              -Path $root `
               -Force |
               Out-Null
+
           }
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Projects\AE" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Assets\Fonts" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\_sync" `
+            -Force |
+            Out-Null
 
           Write-Host `
             "LOCAL STORAGE: $root"
@@ -1088,421 +1131,360 @@ jobs:
             "D: STORAGE READY"
 
 
-      # ========================================================
-      # TELEGRAM RESTORE ENGINE
-      # ========================================================
+      # --------------------------------------------------------
+      # CHECK + EXTEND D
+      # --------------------------------------------------------
 
-      - name: Restore persistent storage from Telegram
+      - name: Check and extend D drive
         shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
         run: |
 
-          $script = @'
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "CHECKING D DRIVE EXPANSION"
+          Write-Host "=========================================="
+
+          $partition =
+            Get-Partition `
+              -DriveLetter D `
+              -ErrorAction Stop
+
+          Write-Host ""
+          Write-Host "CURRENT PARTITION SIZE:"
+          Write-Host $partition.Size
+
+          $supported =
+            Get-PartitionSupportedSize `
+              -DriveLetter D `
+              -ErrorAction Stop
+
+          Write-Host ""
+          Write-Host "MAXIMUM SUPPORTED SIZE:"
+          Write-Host $supported.SizeMax
+
+          if ($supported.SizeMax -gt $partition.Size) {
+
+            Write-Host ""
+            Write-Host "UNALLOCATED SPACE AVAILABLE."
+            Write-Host "ATTEMPTING TO EXTEND D..."
+
+            Resize-Partition `
+              -DriveLetter D `
+              -Size $supported.SizeMax `
+              -ErrorAction Stop
+
+            Write-Host ""
+            Write-Host "D DRIVE EXTENSION SUCCESS"
+
+          }
+          else {
+
+            Write-Host ""
+            Write-Host `
+              "NO DIRECTLY USABLE UNALLOCATED SPACE FOUND."
+
+            Write-Host `
+              "D WILL REMAIN AT CURRENT SIZE."
+
+          }
+
+          Write-Host ""
+          Write-Host "FINAL D STATUS:"
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
+
+
+      # --------------------------------------------------------
+      # CREATE PERSISTENT SYNC SCRIPT
+      # --------------------------------------------------------
+
+      - name: Create persistent sync script
+        shell: pwsh
+        run: |
+
+          $syncDir =
+            "D:\Persistent-RDP\_sync"
+
+          $syncFile =
+            "$syncDir\sync.py"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $syncDir `
+            -Force |
+            Out-Null
+
+          @'
           import os
           import base64
-          import json
           import hashlib
+          import json
+          import math
           import tempfile
-          from pathlib import Path
+          from datetime import datetime, timezone
+
           from telethon import TelegramClient
 
-          ROOT = Path(r"D:\Persistent-RDP")
-          SYNC = ROOT / "_sync"
-          INDEX = SYNC / "telegram_index.json"
 
           API_ID = int(os.environ["API_ID"])
           API_HASH = os.environ["API_HASH"]
           SESSION_B64 = os.environ["SESSION_B64"]
 
-          SESSION = Path(
-              os.environ["TEMP"]
-          ) / "unlim_session.session"
 
-          SESSION.write_bytes(
-              base64.b64decode(SESSION_B64)
+          ROOT = r"D:\Persistent-RDP"
+
+          INDEX_FILE = os.path.join(
+              ROOT,
+              "_sync",
+              "persistent_index.json"
           )
 
           CHUNK_SIZE = 1024 * 1024
 
-          def sha256_file(path):
+
+          def now():
+              return datetime.now(
+                  timezone.utc
+              ).isoformat()
+
+
+          def sha256(path):
+
               h = hashlib.sha256()
 
-              with open(path, "rb") as f:
-                  while True:
-                      b = f.read(1024 * 1024)
+              with open(
+                  path,
+                  "rb"
+              ) as f:
 
-                      if not b:
+                  while True:
+
+                      data = f.read(
+                          1024 * 1024
+                      )
+
+                      if not data:
                           break
 
-                      h.update(b)
+                      h.update(data)
 
               return h.hexdigest()
 
-          def safe_target(rel):
-              rel = rel.replace("\\", "/").lstrip("/")
 
-              target = (
-                  ROOT / rel
-              ).resolve()
+          def build_index():
 
-              root = ROOT.resolve()
+              result = {
+                  "version": 1,
+                  "type": "persistent-rdp-index",
+                  "updated_at": now(),
+                  "root": ROOT,
+                  "files": []
+              }
 
-              if target != root and root not in target.parents:
-                  raise RuntimeError(
-                      "Unsafe restore path: " + rel
-                  )
+              for current_root, dirs, files in os.walk(ROOT):
 
-              return target
+                  dirs[:] = [
+                      d for d in dirs
+                      if d != "_sync"
+                  ]
 
-          async def get_latest_index(client):
+                  dirs.sort()
+                  files.sort()
 
-              latest = None
+                  for filename in files:
 
-              async for msg in client.iter_messages(
-                  "me",
-                  search="PERSISTENT-RDP-INDEX",
-                  limit=100
-              ):
-
-                  if not msg.file:
-                      continue
-
-                  if not msg.text:
-                      continue
-
-                  if "PERSISTENT-RDP-INDEX" not in msg.text:
-                      continue
-
-                  if latest is None or msg.id > latest.id:
-                      latest = msg
-
-              return latest
-
-          async def restore():
-
-              client = TelegramClient(
-                  str(SESSION.with_suffix("")),
-                  API_ID,
-                  API_HASH
-              )
-
-              async with client:
-
-                  print("TELEGRAM RESTORE: CONNECTING")
-
-                  await client.start()
-
-                  print("TELEGRAM RESTORE: CONNECTED")
-
-                  msg = await get_latest_index(client)
-
-                  if msg is None:
-                      print(
-                          "NO PERSISTENT INDEX FOUND"
+                      path = os.path.join(
+                          current_root,
+                          filename
                       )
-                      return
-
-                  print(
-                      f"LATEST INDEX MESSAGE: {msg.id}"
-                  )
-
-                  tmp_index = (
-                      SYNC / "index.download.tmp"
-                  )
-
-                  await client.download_media(
-                      msg,
-                      file=str(tmp_index)
-                  )
-
-                  with open(
-                      tmp_index,
-                      "r",
-                      encoding="utf-8"
-                  ) as f:
-                      index = json.load(f)
-
-                  if index.get("type") != \
-                     "persistent-rdp-file-index":
-
-                      raise RuntimeError(
-                          "INVALID PERSISTENT INDEX"
-                      )
-
-                  files = index.get("files", [])
-
-                  print(
-                      f"FILES IN INDEX: {len(files)}"
-                  )
-
-                  restored = 0
-                  skipped = 0
-                  failed = 0
-
-                  for record in files:
-
-                      rel = record["path"]
-                      expected_hash = record["sha256"]
-                      expected_size = int(
-                          record["size"]
-                      )
-
-                      target = safe_target(rel)
-
-                      target.parent.mkdir(
-                          parents=True,
-                          exist_ok=True
-                      )
-
-                      if target.exists():
-
-                          try:
-
-                              if (
-                                  target.stat().st_size
-                                  == expected_size
-                                  and
-                                  sha256_file(target)
-                                  == expected_hash
-                              ):
-
-                                  print(
-                                      "ALREADY VALID:",
-                                      rel
-                                  )
-
-                                  skipped += 1
-                                  continue
-
-                          except Exception:
-                              pass
-
-                      tmp = Path(
-                          str(target) + ".restore.tmp"
-                      )
-
-                      if tmp.exists():
-                          tmp.unlink()
-
-                      print(
-                          "RESTORING:",
-                          rel
-                      )
-
-                      chunks = sorted(
-                          record.get("chunks", []),
-                          key=lambda x: x["index"]
-                      )
-
-                      if not chunks:
-                          print(
-                              "FAILED: NO CHUNKS",
-                              rel
-                          )
-
-                          failed += 1
-                          continue
 
                       try:
 
-                          with open(
-                              tmp,
-                              "wb"
-                          ) as out:
-
-                              for chunk in chunks:
-
-                                  mid = int(
-                                      chunk[
-                                          "telegram_message_id"
-                                      ]
-                                  )
-
-                                  expected_chunk_hash = \
-                                      chunk["sha256"]
-
-                                  cm = await client.get_messages(
-                                      "me",
-                                      ids=mid
-                                  )
-
-                                  if not cm:
-                                      raise RuntimeError(
-                                          "Missing Telegram message "
-                                          + str(mid)
-                                      )
-
-                                  ctmp = Path(
-                                      tempfile.mktemp(
-                                          suffix=".chunk"
-                                      )
-                                  )
-
-                                  await client.download_media(
-                                      cm,
-                                      file=str(ctmp)
-                                  )
-
-                                  actual_chunk_hash = \
-                                      sha256_file(ctmp)
-
-                                  if actual_chunk_hash != \
-                                     expected_chunk_hash:
-
-                                      ctmp.unlink(
-                                          missing_ok=True
-                                      )
-
-                                      raise RuntimeError(
-                                          "Chunk SHA256 mismatch"
-                                      )
-
-                                  with open(
-                                      ctmp,
-                                      "rb"
-                                  ) as cf:
-
-                                      while True:
-
-                                          data = cf.read(
-                                              4 * 1024 * 1024
-                                          )
-
-                                          if not data:
-                                              break
-
-                                          out.write(data)
-
-                                  ctmp.unlink(
-                                      missing_ok=True
-                                  )
-
-                          actual_size = tmp.stat().st_size
-
-                          if actual_size != expected_size:
-                              raise RuntimeError(
-                                  "Final size mismatch"
-                              )
-
-                          actual_hash = \
-                              sha256_file(tmp)
-
-                          if actual_hash != expected_hash:
-                              raise RuntimeError(
-                                  "Final SHA256 mismatch"
-                              )
-
-                          os.replace(
-                              tmp,
-                              target
+                          size = os.path.getsize(
+                              path
                           )
 
-                          print(
-                              "RESTORE SUCCESS:",
-                              rel
+                          relative = os.path.relpath(
+                              path,
+                              ROOT
+                          ).replace(
+                              "\\",
+                              "/"
                           )
 
-                          restored += 1
+                          result["files"].append({
+                              "path": relative,
+                              "size": size,
+                              "sha256": sha256(path)
+                          })
 
                       except Exception as e:
 
                           print(
-                              "RESTORE FAILED:",
-                              rel,
+                              "SKIP:",
+                              path,
                               str(e)
                           )
 
-                          tmp.unlink(
-                              missing_ok=True
-                          )
+              return result
 
-                          failed += 1
 
-                  tmp_index.unlink(
-                      missing_ok=True
+          async def upload_index(client, index):
+
+              os.makedirs(
+                  os.path.dirname(INDEX_FILE),
+                  exist_ok=True
+              )
+
+              with open(
+                  INDEX_FILE,
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+
+                  json.dump(
+                      index,
+                      f,
+                      indent=2,
+                      ensure_ascii=False
                   )
 
-                  print("")
-                  print("==============================")
-                  print("TELEGRAM RESTORE COMPLETE")
-                  print(
-                      "RESTORED:",
-                      restored
-                  )
-                  print(
-                      "ALREADY VALID:",
-                      skipped
-                  )
-                  print(
-                      "FAILED:",
-                      failed
-                  )
-                  print("==============================")
+              message = await client.send_file(
+                  "me",
+                  INDEX_FILE,
+                  caption="PERSISTENT-RDP-LIVE-INDEX"
+              )
 
-                  if failed:
-                      raise RuntimeError(
-                          "Some persistent files failed to restore."
+              return message.id
+
+
+          async def main():
+
+              print("================================")
+              print("PERSISTENT SYNC START")
+              print("================================")
+
+              print("ROOT:", ROOT)
+
+              if not os.path.exists(ROOT):
+
+                  raise SystemExit(
+                      "PERSISTENT ROOT DOES NOT EXIST"
+                  )
+
+              client = TelegramClient(
+                  "unlim_session",
+                  API_ID,
+                  API_HASH
+              )
+
+              with open(
+                  os.path.join(
+                      tempfile.gettempdir(),
+                      "unlim_session.session"
+                  ),
+                  "wb"
+              ) as f:
+
+                  f.write(
+                      base64.b64decode(
+                          SESSION_B64
                       )
+                  )
+
+              client.session = "unlim_session"
+
+              await client.start()
+
+              print("TELEGRAM CONNECTED")
+
+              index = build_index()
+
+              print(
+                  "FILES DISCOVERED:",
+                  len(index["files"])
+              )
+
+              index_id = await upload_index(
+                  client,
+                  index
+              )
+
+              print(
+                  "INDEX UPLOADED:",
+                  index_id
+              )
+
+              print("")
+              print(
+                  "PERSISTENT SYNC SUCCESS"
+              )
+
+              print(
+                  "INDEX MESSAGE ID:",
+                  index_id
+              )
+
+              await client.disconnect()
+
 
           import asyncio
-          asyncio.run(restore())
-          '@
 
-          $scriptPath =
-            "D:\Persistent-RDP\_sync\restore.py"
-
-          Set-Content `
-            -Path $scriptPath `
-            -Value $script `
+          asyncio.run(main())
+          '@ | Set-Content `
+            -Path $syncFile `
             -Encoding UTF8
 
-          python $scriptPath
+          Write-Host `
+            "SYNC SCRIPT CREATED: $syncFile"
 
 
-      # ========================================================
-      # VERIFY RESTORED STORAGE
-      # ========================================================
+      # --------------------------------------------------------
+      # INITIAL PERSISTENT SYNC
+      # --------------------------------------------------------
 
-      - name: Verify persistent storage
+      - name: Initial Persistent Sync
         shell: pwsh
+
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+
         run: |
 
-          $root =
-            "D:\Persistent-RDP"
+          if ([string]::IsNullOrWhiteSpace($env:API_ID)) {
+            throw "TELEGRAM_API_ID secret is missing."
+          }
 
-          if (-not (Test-Path $root)) {
-            throw `
-              "D:\Persistent-RDP DOES NOT EXIST."
+          if ([string]::IsNullOrWhiteSpace($env:API_HASH)) {
+            throw "TELEGRAM_API_HASH secret is missing."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($env:SESSION_B64)) {
+            throw "TELEGRAM_SESSION secret is missing."
           }
 
           Write-Host ""
-          Write-Host `
-            "========================================"
+          Write-Host "=========================================="
+          Write-Host "INITIAL PERSISTENT SYNC"
+          Write-Host "=========================================="
 
-          Write-Host `
-            "RESTORED PERSISTENT STORAGE"
-
-          Write-Host `
-            "========================================"
-
-          Get-ChildItem `
-            $root `
-            -Recurse `
-            -Force |
-            Select-Object `
-              FullName,
-              Length,
-              LastWriteTime
+          python `
+            "D:\Persistent-RDP\_sync\sync.py"
 
 
-      # ========================================================
-      # FIRST LOCAL TEST
-      # ========================================================
+      # --------------------------------------------------------
+      # TEST LOCAL STORAGE
+      # --------------------------------------------------------
 
-      - name: Test local persistent storage
+      - name: Test local storage
         shell: pwsh
         run: |
 
@@ -1528,8 +1510,10 @@ jobs:
             -Encoding UTF8
 
           if (-not (Test-Path $testFile)) {
+
             throw `
               "LOCAL STORAGE WRITE TEST FAILED."
+
           }
 
           $content =
@@ -1547,534 +1531,22 @@ jobs:
             "TEST CONTENT: $content"
 
 
-      # ========================================================
-      # TELEGRAM SYNC ENGINE
-      # ========================================================
-
-      - name: Install persistent sync engine
-        shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
-        run: |
-
-          $script = @'
-          import os
-          import base64
-          import json
-          import hashlib
-          import math
-          from pathlib import Path
-          from datetime import datetime, timezone
-          from telethon import TelegramClient
-
-          ROOT = Path(r"D:\Persistent-RDP")
-          SYNC = ROOT / "_sync"
-          INDEX = SYNC / "telegram_index.json"
-
-          API_ID = int(os.environ["API_ID"])
-          API_HASH = os.environ["API_HASH"]
-          SESSION_B64 = os.environ["SESSION_B64"]
-
-          SESSION = Path(
-              os.environ["TEMP"]
-          ) / "unlim_session.session"
-
-          SESSION.write_bytes(
-              base64.b64decode(SESSION_B64)
-          )
-
-          CHUNK_SIZE = 1024 * 1024
-
-          EXCLUDED_DIRS = {
-              "_sync",
-              "System Volume Information",
-              "$RECYCLE.BIN"
-          }
-
-          def now():
-              return datetime.now(
-                  timezone.utc
-              ).isoformat()
-
-          def sha256_file(path):
-
-              h = hashlib.sha256()
-
-              with open(path, "rb") as f:
-
-                  while True:
-
-                      data = f.read(
-                          4 * 1024 * 1024
-                      )
-
-                      if not data:
-                          break
-
-                      h.update(data)
-
-              return h.hexdigest()
-
-          def discover():
-
-              result = []
-
-              for path in ROOT.rglob("*"):
-
-                  if not path.is_file():
-                      continue
-
-                  relative_parts = path.relative_to(
-                      ROOT
-                  ).parts
-
-                  if relative_parts and \
-                     relative_parts[0] in EXCLUDED_DIRS:
-                      continue
-
-                  if path.name.endswith(
-                      ".restore.tmp"
-                  ):
-                      continue
-
-                  if path.name.endswith(
-                      ".upload.tmp"
-                  ):
-                      continue
-
-                  result.append(path)
-
-              return sorted(result)
-
-          def make_record(path):
-
-              rel = (
-                  path.relative_to(ROOT)
-                  .as_posix()
-              )
-
-              size = path.stat().st_size
-
-              return {
-                  "path": "/" + rel,
-                  "name": path.name,
-                  "size": size,
-                  "sha256": sha256_file(path),
-                  "chunk_size": CHUNK_SIZE,
-                  "chunk_count": max(
-                      1,
-                      math.ceil(
-                          size / CHUNK_SIZE
-                      )
-                  ),
-                  "chunks": [],
-                  "updated_at": now()
-              }
-
-          def load_old_index():
-
-              if not INDEX.exists():
-                  return {
-                      "version": 3,
-                      "type":
-                        "persistent-rdp-file-index",
-                      "updated_at": now(),
-                      "storage": {
-                          "logical_capacity":
-                              "10 TB",
-                          "chunk_size":
-                              CHUNK_SIZE
-                      },
-                      "files": []
-                  }
-
-              try:
-
-                  with open(
-                      INDEX,
-                      "r",
-                      encoding="utf-8"
-                  ) as f:
-                      data = json.load(f)
-
-                  if data.get("type") != \
-                     "persistent-rdp-file-index":
-                      raise RuntimeError(
-                          "Wrong index type"
-                      )
-
-                  return data
-
-              except Exception as e:
-
-                  print(
-                      "OLD INDEX READ WARNING:",
-                      str(e)
-                  )
-
-                  return {
-                      "version": 3,
-                      "type":
-                        "persistent-rdp-file-index",
-                      "updated_at": now(),
-                      "storage": {
-                          "logical_capacity":
-                              "10 TB",
-                          "chunk_size":
-                              CHUNK_SIZE
-                      },
-                      "files": []
-                  }
-
-          def atomic_write_json(path, data):
-
-              tmp = Path(
-                  str(path) + ".tmp"
-              )
-
-              with open(
-                  tmp,
-                  "w",
-                  encoding="utf-8"
-              ) as f:
-
-                  json.dump(
-                      data,
-                      f,
-                      indent=2,
-                      ensure_ascii=False
-                  )
-
-              os.replace(
-                  tmp,
-                  path
-              )
-
-          async def upload_file(
-              client,
-              record,
-              path
-          ):
-
-              total = path.stat().st_size
-
-              count = max(
-                  1,
-                  math.ceil(
-                      total / CHUNK_SIZE
-                  )
-              )
-
-              record["chunk_count"] = count
-              record["chunks"] = []
-
-              with open(path, "rb") as f:
-
-                  for index in range(count):
-
-                      data = f.read(
-                          CHUNK_SIZE
-                      )
-
-                      tmp = Path(
-                          str(SYNC)
-                          + "\\upload_"
-                          + str(os.getpid())
-                          + "_"
-                          + str(index)
-                          + ".tmp"
-                      )
-
-                      with open(
-                          tmp,
-                          "wb"
-                      ) as out:
-                          out.write(data)
-
-                      chunk_hash = \
-                          sha256_file(tmp)
-
-                      caption = (
-                          "PERSISTENT-RDP-CHUNK\n"
-                          f"path={record['path']}\n"
-                          f"chunk={index}\n"
-                          f"chunks={count}\n"
-                          f"sha256={chunk_hash}"
-                      )
-
-                      message = await client.send_file(
-                          "me",
-                          str(tmp),
-                          caption=caption
-                      )
-
-                      record["chunks"].append({
-                          "index": index,
-                          "size": len(data),
-                          "sha256":
-                              chunk_hash,
-                          "telegram_message_id":
-                              message.id
-                      })
-
-                      tmp.unlink(
-                          missing_ok=True
-                      )
-
-                      print(
-                          "UPLOAD CHUNK:",
-                          record["path"],
-                          index + 1,
-                          "/",
-                          count
-                      )
-
-          async def save_index(
-              client,
-              index
-          ):
-
-              backup = (
-                  SYNC /
-                  "telegram_index.previous.json"
-              )
-
-              if INDEX.exists():
-
-                  try:
-
-                      backup.write_bytes(
-                          INDEX.read_bytes()
-                      )
-
-                  except Exception:
-                      pass
-
-              atomic_write_json(
-                  INDEX,
-                  index
-              )
-
-              message = await client.send_file(
-                  "me",
-                  str(INDEX),
-                  caption="PERSISTENT-RDP-INDEX"
-              )
-
-              index["telegram_index_message_id"] = \
-                  message.id
-
-              atomic_write_json(
-                  INDEX,
-                  index
-              )
-
-              print(
-                  "INDEX UPLOADED:",
-                  message.id
-              )
-
-          async def sync():
-
-              SYNC.mkdir(
-                  parents=True,
-                  exist_ok=True
-              )
-
-              client = TelegramClient(
-                  str(SESSION.with_suffix("")),
-                  API_ID,
-                  API_HASH
-              )
-
-              async with client:
-
-                  await client.start()
-
-                  print(
-                      "TELEGRAM SYNC CONNECTED"
-                  )
-
-                  old = load_old_index()
-
-                  old_map = {
-                      x["path"]: x
-                      for x in old.get(
-                          "files",
-                          []
-                      )
-                  }
-
-                  paths = discover()
-
-                  print(
-                      "LOCAL FILES:",
-                      len(paths)
-                  )
-
-                  new_files = []
-
-                  uploaded = 0
-                  unchanged = 0
-
-                  for path in paths:
-
-                      record = make_record(
-                          path
-                      )
-
-                      old_record = old_map.get(
-                          record["path"]
-                      )
-
-                      if (
-                          old_record
-                          and
-                          old_record.get(
-                              "sha256"
-                          )
-                          == record["sha256"]
-                          and
-                          int(
-                              old_record.get(
-                                  "size",
-                                  -1
-                              )
-                          )
-                          == record["size"]
-                          and
-                          old_record.get(
-                              "chunks"
-                          )
-                      ):
-
-                          record["chunks"] = \
-                              old_record["chunks"]
-
-                          record["chunk_count"] = \
-                              old_record[
-                                  "chunk_count"
-                              ]
-
-                          unchanged += 1
-
-                          print(
-                              "UNCHANGED:",
-                              record["path"]
-                          )
-
-                      else:
-
-                          print(
-                              "CHANGED/NEW:",
-                              record["path"]
-                          )
-
-                          await upload_file(
-                              client,
-                              record,
-                              path
-                          )
-
-                          uploaded += 1
-
-                      new_files.append(
-                          record
-                      )
-
-                  index = {
-                      "version": 3,
-                      "type":
-                        "persistent-rdp-file-index",
-                      "updated_at": now(),
-                      "storage": {
-                          "logical_capacity":
-                              "10 TB",
-                          "chunk_size":
-                              CHUNK_SIZE
-                      },
-                      "files": new_files
-                  }
-
-                  await save_index(
-                      client,
-                      index
-                  )
-
-                  print("")
-                  print(
-                      "================================"
-                  )
-                  print(
-                      "PERSISTENT SYNC COMPLETE"
-                  )
-                  print(
-                      "FILES:",
-                      len(new_files)
-                  )
-                  print(
-                      "UPLOADED:",
-                      uploaded
-                  )
-                  print(
-                      "UNCHANGED:",
-                      unchanged
-                  )
-                  print(
-                      "================================"
-                  )
-
-          import asyncio
-          asyncio.run(sync())
-          '@
-
-          $scriptPath =
-            "D:\Persistent-RDP\_sync\sync.py"
-
-          Set-Content `
-            -Path $scriptPath `
-            -Value $script `
-            -Encoding UTF8
-
-          Write-Host `
-            "PERSISTENT SYNC ENGINE READY"
-
-
-      # ========================================================
-      # INITIAL SYNC
-      # ========================================================
-
-      - name: Initial persistent sync
-        shell: pwsh
-        run: |
-
-          python `
-            "D:\Persistent-RDP\_sync\sync.py"
-
-
-      # ========================================================
+      # --------------------------------------------------------
       # DISPLAY STORAGE STATUS
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Display storage status
         shell: pwsh
         run: |
 
           Write-Host ""
-          Write-Host `
-            "=========================================="
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP LOCAL STORAGE"
+          Write-Host "=========================================="
 
-          Write-Host `
-            "PERSISTENT-RDP LOCAL STORAGE"
-
-          Write-Host `
-            "=========================================="
-
+          Write-Host ""
           Write-Host "Drive: D:"
-          Write-Host `
-            "Path: D:\Persistent-RDP"
+          Write-Host "Path: D:\Persistent-RDP"
 
           Get-Volume `
             -DriveLetter D |
@@ -2084,10 +1556,21 @@ jobs:
               Size,
               SizeRemaining
 
-          Write-Host ""
+          if (Test-Path "D:\Persistent-RDP") {
 
-          Write-Host `
-            "Storage tree:"
+            Write-Host `
+              "D:\Persistent-RDP READY"
+
+          }
+          else {
+
+            throw `
+              "D:\Persistent-RDP missing."
+
+          }
+
+          Write-Host ""
+          Write-Host "Storage tree:"
 
           Get-ChildItem `
             "D:\Persistent-RDP" `
@@ -2099,9 +1582,9 @@ jobs:
               LastWriteTime
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # RUSTDESK
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Install RustDesk
         shell: pwsh
@@ -2134,12 +1617,13 @@ jobs:
             Remove-Item `
               $installerPath `
               -Force
+
           }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # RUSTDESK PORTS
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Open RustDesk ports
         shell: pwsh
@@ -2159,12 +1643,13 @@ jobs:
               action=allow `
               protocol=TCP `
               localport=$p
+
           }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # LAUNCH RUSTDESK
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Launch RustDesk
         shell: pwsh
@@ -2181,211 +1666,50 @@ jobs:
 
             Start-Sleep `
               -Seconds 5
+
           }
 
 
-      # ========================================================
-      # KEEP ALIVE + PERIODIC SYNC
-      # ========================================================
+      # --------------------------------------------------------
+      # KEEP ALIVE
+      # --------------------------------------------------------
 
-      - name: Keep alive + periodic persistent sync
+      - name: Keep alive
         shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
         run: |
 
           $mins =
             [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end =
-            (Get-Date).AddMinutes(
-              $mins
-            )
-
-          $syncScript =
-            "D:\Persistent-RDP\_sync\sync.py"
-
-          $nextSync =
-            (Get-Date).AddMinutes(10)
+            (Get-Date).AddMinutes($mins)
 
           while (
             (Get-Date) -lt $end
           ) {
 
-            $now =
-              Get-Date
-
             Write-Host (
               "Heartbeat " +
-              $now.ToString(
-                "HH:mm:ss"
-              )
+              (Get-Date).ToString("HH:mm:ss")
             )
 
-            if ($now -ge $nextSync) {
-
-              Write-Host ""
-              Write-Host `
-                "================================"
-
-              Write-Host `
-                "PERIODIC PERSISTENT SYNC"
-
-              Write-Host `
-                "================================"
-
-              try {
-
-                python $syncScript
-
-                if ($LASTEXITCODE -ne 0) {
-
-                  Write-Host `
-                    "SYNC FAILED - WILL RETRY"
-
-                }
-                else {
-
-                  Write-Host `
-                    "PERIODIC SYNC SUCCESS"
-                }
-
-              }
-              catch {
-
-                Write-Host `
-                  "SYNC ERROR: $($_.Exception.Message)"
-              }
-
-              $nextSync =
-                (Get-Date).AddMinutes(10)
-            }
-
             Start-Sleep `
-              -Seconds 30
-          }
-
-
-      # ========================================================
-      # FINAL SYNC
-      # ========================================================
-
-      - name: FINAL persistent sync before shutdown
-        if: always()
-        shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
-        run: |
-
-          $syncScript =
-            "D:\Persistent-RDP\_sync\sync.py"
-
-          Write-Host ""
-          Write-Host `
-            "=========================================="
-
-          Write-Host `
-            "FINAL PERSISTENT STORAGE SYNC"
-
-          Write-Host `
-            "=========================================="
-
-          $success = $false
-
-          for ($attempt = 1; $attempt -le 3; $attempt++) {
-
-            Write-Host `
-              "FINAL SYNC ATTEMPT $attempt / 3"
-
-            try {
-
-              python $syncScript
-
-              if ($LASTEXITCODE -eq 0) {
-
-                $success = $true
-
-                Write-Host `
-                  "FINAL SYNC SUCCESS"
-
-                break
-              }
-
-            }
-            catch {
-
-              Write-Host `
-                "FINAL SYNC ERROR: $($_.Exception.Message)"
-            }
-
-            if (-not $success) {
-
-              Start-Sleep `
-                -Seconds 10
-            }
-          }
-
-          if (-not $success) {
-
-            Write-Error `
-              "FINAL PERSISTENT SYNC FAILED."
-
-            exit 1
-          }
-
-
-      # ========================================================
-      # FINAL STORAGE REPORT
-      # ========================================================
-
-      - name: Final persistent storage report
-        if: always()
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host `
-            "=========================================="
-
-          Write-Host `
-            "FINAL STORAGE REPORT"
-
-          Write-Host `
-            "=========================================="
-
-          if (Test-Path `
-              "D:\Persistent-RDP") {
-
-            Get-ChildItem `
-              "D:\Persistent-RDP" `
-              -Recurse `
-              -Force |
-              Select-Object `
-                FullName,
-                Length,
-                LastWriteTime
+              -Seconds 60
 
           }
-          else {
-
-            Write-Host `
-              "Persistent storage directory missing."
-          }
 
 
-      # ========================================================
+      # --------------------------------------------------------
       # STOP / NEXT
-      # ========================================================
+      # --------------------------------------------------------
 
       - name: Dispatch next or stop
         if: always()
         shell: pwsh
+
         env:
           GH_TOKEN: ${{ github.token }}
+
         run: |
 
           $cycles = 0
@@ -2394,6 +1718,7 @@ jobs:
 
             $cycles =
               [int]"${{ inputs.cycles }}"
+
           }
 
           if ($cycles -gt 0) {
@@ -2409,4 +1734,5 @@ jobs:
 
             Write-Host `
               "No cycles configured. Done."
+
           }
