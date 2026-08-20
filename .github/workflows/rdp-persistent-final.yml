@@ -3,7 +3,6 @@ name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (FINAL)
 on:
   workflow_dispatch:
     inputs:
-
       ts_tailnet:
         description: "Tailscale tailnet"
         required: true
@@ -69,7 +68,6 @@ defaults:
   run:
     shell: pwsh
 
-
 jobs:
 
   # ============================================================
@@ -93,11 +91,8 @@ jobs:
           mkdir -p test_workspace/Projects/AE
           mkdir -p test_workspace/Assets/Fonts
 
-          echo "Persistent-RDP test $(date -u)" \
-            > test_workspace/Projects/AE/project.txt
-
-          echo "Persistent-RDP asset $(date -u)" \
-            > test_workspace/Assets/Fonts/test-font.txt
+          echo "Persistent-RDP test $(date -u)" > test_workspace/Projects/AE/project.txt
+          echo "Persistent-RDP asset $(date -u)" > test_workspace/Assets/Fonts/test-font.txt
 
           echo "Created test tree:"
           find test_workspace -type f -print
@@ -115,56 +110,33 @@ jobs:
           import hashlib
           import json
           import math
+          import sqlite3
 
           from datetime import datetime, timezone
-
           from telethon import TelegramClient
-          from telethon.sessions import SQLiteSession
+          from telethon.sessions import SQLiteSession, StringSession
 
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
 
-          API_ID_RAW = os.environ.get("API_ID", "").strip()
-          API_HASH = os.environ.get("API_HASH", "").strip()
-          SESSION_B64 = os.environ.get("SESSION_B64", "").strip()
+          decoded = base64.b64decode(SESSION_B64)
 
-          if not API_ID_RAW:
-              raise SystemExit("TELEGRAM_API_ID secret is missing")
+          if decoded.startswith(b"SQLite format 3"):
+              with open("unlim_session.session", "wb") as f:
+                  f.write(decoded)
 
-          if not API_HASH:
-              raise SystemExit("TELEGRAM_API_HASH secret is missing")
+              session = SQLiteSession("unlim_session")
+          else:
+              try:
+                  session_string = decoded.decode("utf-8").strip()
+              except Exception:
+                  session_string = ""
 
-          if not SESSION_B64:
-              raise SystemExit("TELEGRAM_SESSION secret is missing")
+              if not session_string:
+                  raise RuntimeError("TELEGRAM_SESSION is neither a valid SQLite session nor a StringSession")
 
-          try:
-              API_ID = int(API_ID_RAW)
-          except ValueError:
-              raise SystemExit("TELEGRAM_API_ID must be numeric")
-
-
-          SESSION_PATH = "unlim_session"
-          SESSION_FILE = SESSION_PATH + ".session"
-
-          try:
-              session_bytes = base64.b64decode(
-                  SESSION_B64,
-                  validate=True
-              )
-          except Exception as e:
-              raise SystemExit(
-                  "TELEGRAM_SESSION is not valid base64: "
-                  + str(e)
-              )
-
-          with open(
-              SESSION_FILE,
-              "wb"
-          ) as f:
-              f.write(session_bytes)
-
-
-          session = SQLiteSession(
-              SESSION_PATH
-          )
+              session = StringSession(session_string)
 
           client = TelegramClient(
               session,
@@ -172,26 +144,16 @@ jobs:
               API_HASH
           )
 
-
           STORAGE_ROOT = "test_workspace"
           INDEX_FILE = "file_index.json"
           CHUNK_SIZE = 1024 * 1024
 
-
           def sha256(path):
-
               h = hashlib.sha256()
 
-              with open(
-                  path,
-                  "rb"
-              ) as f:
-
+              with open(path, "rb") as f:
                   while True:
-
-                      chunk = f.read(
-                          1024 * 1024
-                      )
+                      chunk = f.read(1024 * 1024)
 
                       if not chunk:
                           break
@@ -200,46 +162,26 @@ jobs:
 
               return h.hexdigest()
 
-
           def utc_now():
+              return datetime.now(timezone.utc).isoformat()
 
-              return datetime.now(
-                  timezone.utc
-              ).isoformat()
-
-
-          def build_file_record(
-              local_path
-          ):
-
+          def build_file_record(local_path):
               relative_path = os.path.relpath(
                   local_path,
                   STORAGE_ROOT
-              ).replace(
-                  "\\",
-                  "/"
-              )
+              ).replace("\\", "/")
 
-              size = os.path.getsize(
-                  local_path
-              )
-
-              file_hash = sha256(
-                  local_path
-              )
+              size = os.path.getsize(local_path)
+              file_hash = sha256(local_path)
 
               chunk_count = max(
                   1,
-                  math.ceil(
-                      size / CHUNK_SIZE
-                  )
+                  math.ceil(size / CHUNK_SIZE)
               )
 
               return {
                   "path": "/" + relative_path,
-                  "name": os.path.basename(
-                      local_path
-                  ),
+                  "name": os.path.basename(local_path),
                   "size": size,
                   "sha256": file_hash,
                   "chunk_size": CHUNK_SIZE,
@@ -248,17 +190,8 @@ jobs:
                   "created_at": utc_now()
               }
 
-
-          async def upload_file(
-              file_record,
-              local_path
-          ):
-
-              with open(
-                  local_path,
-                  "rb"
-              ) as f:
-
+          async def upload_file(file_record, local_path):
+              with open(local_path, "rb") as f:
                   data = f.read()
 
               total_size = len(data)
@@ -266,33 +199,19 @@ jobs:
               chunk_count = (
                   1
                   if total_size == 0
-                  else math.ceil(
-                      total_size / CHUNK_SIZE
-                  )
+                  else math.ceil(total_size / CHUNK_SIZE)
               )
 
-              file_record["chunk_count"] = (
-                  chunk_count
-              )
+              file_record["chunk_count"] = chunk_count
 
-              for index in range(
-                  chunk_count
-              ):
-
-                  start = (
-                      index *
-                      CHUNK_SIZE
-                  )
-
+              for index in range(chunk_count):
+                  start = index * CHUNK_SIZE
                   end = min(
-                      start +
-                      CHUNK_SIZE,
+                      start + CHUNK_SIZE,
                       total_size
                   )
 
-                  chunk_data = data[
-                      start:end
-                  ]
+                  chunk_data = data[start:end]
 
                   chunk_name = (
                       "persistent_chunk_"
@@ -300,43 +219,28 @@ jobs:
                       + ".bin"
                   )
 
-                  with open(
+                  with open(chunk_name, "wb") as chunk_file:
+                      chunk_file.write(chunk_data)
+
+                  chunk_hash = sha256(chunk_name)
+
+                  message = await client.send_file(
+                      "me",
                       chunk_name,
-                      "wb"
-                  ) as chunk_file:
-
-                      chunk_file.write(
-                          chunk_data
-                      )
-
-                  chunk_hash = sha256(
-                      chunk_name
-                  )
-
-                  message = (
-                      await client.send_file(
-                          "me",
-                          chunk_name,
-                          caption=(
-                              "PERSISTENT-RDP-CHUNK\n"
-                              f"path={file_record['path']}\n"
-                              f"chunk={index}\n"
-                              f"chunks={chunk_count}\n"
-                              f"sha256={chunk_hash}"
-                          )
+                      caption=(
+                          "PERSISTENT-RDP-CHUNK\n"
+                          f"path={file_record['path']}\n"
+                          f"chunk={index}\n"
+                          f"chunks={chunk_count}\n"
+                          f"sha256={chunk_hash}"
                       )
                   )
 
-                  file_record[
-                      "chunks"
-                  ].append({
+                  file_record["chunks"].append({
                       "index": index,
-                      "size": len(
-                          chunk_data
-                      ),
+                      "size": len(chunk_data),
                       "sha256": chunk_hash,
-                      "telegram_message_id":
-                          message.id
+                      "telegram_message_id": message.id
                   })
 
                   print(
@@ -345,98 +249,73 @@ jobs:
                       f"message_id={message.id}"
                   )
 
-                  os.remove(
-                      chunk_name
-                  )
-
+                  os.remove(chunk_name)
 
           async def main():
-
               await client.connect()
 
               if not await client.is_user_authorized():
-
-                  await client.disconnect()
-
                   raise SystemExit(
-                      "Telegram session is not authorized"
+                      "TELEGRAM SESSION IS NOT AUTHORIZED"
                   )
 
-              print(
-                  "TELEGRAM CONNECTED"
-              )
+              print("TELEGRAM CONNECTED")
 
               files = []
 
-              for root, dirs, filenames in os.walk(
-                  STORAGE_ROOT
-              ):
-
+              for root, dirs, filenames in os.walk(STORAGE_ROOT):
                   dirs.sort()
                   filenames.sort()
 
                   for filename in filenames:
-
                       local_path = os.path.join(
                           root,
                           filename
                       )
 
-                      files.append(
-                          local_path
-                      )
+                      files.append(local_path)
 
               if not files:
-
                   raise SystemExit(
                       "NO TEST FILES FOUND"
                   )
 
               print(
-                  f"FILE DISCOVERY SUCCESS: "
-                  f"{len(files)} files"
+                  f"FILE DISCOVERY SUCCESS: {len(files)} files"
               )
 
               index = {
                   "version": 2,
-                  "type":
-                      "persistent-rdp-file-index",
-                  "updated_at":
-                      utc_now(),
+                  "type": "persistent-rdp-file-index",
+                  "updated_at": utc_now(),
                   "storage": {
-                      "logical_capacity":
-                          "10 TB",
-                      "chunk_size":
-                          CHUNK_SIZE
+                      "logical_capacity": "Telegram-backed",
+                      "chunk_size": CHUNK_SIZE
                   },
                   "files": []
               }
 
               for local_path in files:
+                  record = build_file_record(local_path)
 
-                  record = (
-                      build_file_record(
-                          local_path
-                      )
-                  )
+                  print(f"FILE: {record['path']}")
+                  print(f"SIZE: {record['size']}")
+                  print(f"SHA256: {record['sha256']}")
 
                   await upload_file(
                       record,
                       local_path
                   )
 
-                  index[
-                      "files"
-                  ].append(
-                      record
-                  )
+                  index["files"].append(record)
+
+              print("FILE UPLOADS SUCCESS")
 
               with open(
                   INDEX_FILE,
                   "w",
                   encoding="utf-8"
               ) as f:
-
                   json.dump(
                       index,
                       f,
@@ -444,166 +323,164 @@ jobs:
                       ensure_ascii=False
                   )
 
-              index_message = (
-                  await client.send_file(
-                      "me",
-                      INDEX_FILE,
-                      caption=
-                      "PERSISTENT-RDP-FILE-INDEX"
-                  )
+              print("FILE INDEX CREATED")
+
+              index_message = await client.send_file(
+                  "me",
+                  INDEX_FILE,
+                  caption="PERSISTENT-RDP-FILE-INDEX"
               )
 
-              index_message_id = (
-                  index_message.id
-              )
+              index_message_id = index_message.id
 
               print(
-                  f"INDEX_MESSAGE_ID="
-                  f"{index_message_id}"
+                  f"INDEX_MESSAGE_ID={index_message_id}"
               )
 
               found_index_message = None
 
               async for msg in client.iter_messages(
                   "me",
-                  search=
-                  "PERSISTENT-RDP-FILE-INDEX",
+                  search="PERSISTENT-RDP-FILE-INDEX",
                   limit=50
               ):
-
                   if msg.id == index_message_id:
-
                       found_index_message = msg
-
                       break
 
               if not found_index_message:
-
                   raise SystemExit(
                       "FILE INDEX LOOKUP FAILED"
                   )
 
-              print(
-                  "FILE INDEX LOOKUP SUCCESS"
-              )
+              print("FILE INDEX LOOKUP SUCCESS")
 
-              restored_index_file = (
-                  "file_index_restored.json"
-              )
+              restored_index_file = "file_index_restored.json"
 
               await client.download_media(
                   found_index_message,
                   file=restored_index_file
               )
 
+              print("FILE INDEX DOWNLOAD SUCCESS")
+
               with open(
                   restored_index_file,
                   "r",
                   encoding="utf-8"
               ) as f:
-
                   restored_index = json.load(f)
 
-              if restored_index[
-                  "version"
-              ] != 2:
-
+              if restored_index["version"] != 2:
                   raise SystemExit(
                       "INDEX VERSION FAILED"
                   )
 
-              if len(
-                  restored_index["files"]
-              ) != len(files):
-
+              if len(restored_index["files"]) != len(files):
                   raise SystemExit(
                       "INDEX FILE COUNT FAILED"
                   )
 
-              print(
-                  "FILE INDEX READ SUCCESS"
-              )
+              print("FILE INDEX READ SUCCESS")
 
-              first_record = (
-                  restored_index[
-                      "files"
-                  ][0]
-              )
+              for record in restored_index["files"]:
+                  if not record["path"].startswith("/"):
+                      raise SystemExit(
+                          "PATH VERIFICATION FAILED"
+                      )
 
-              first_chunk = (
-                  first_record[
-                      "chunks"
-                  ][0]
-              )
+                  if record["size"] < 0:
+                      raise SystemExit(
+                          "SIZE VERIFICATION FAILED"
+                      )
 
-              first_chunk_message = (
-                  await client.get_messages(
-                      "me",
-                      ids=first_chunk[
-                          "telegram_message_id"
-                      ]
+                  if len(record["sha256"]) != 64:
+                      raise SystemExit(
+                          "SHA256 RECORD FAILED"
+                      )
+
+                  if record["chunk_count"] < 1:
+                      raise SystemExit(
+                          "CHUNK COUNT FAILED"
+                      )
+
+                  if len(record["chunks"]) != record["chunk_count"]:
+                      raise SystemExit(
+                          "CHUNK RECORD COUNT FAILED"
+                      )
+
+              print("FILE RECORD VERIFICATION SUCCESS")
+
+              for record in restored_index["files"]:
+                  expected_indexes = list(
+                      range(record["chunk_count"])
                   )
+
+                  actual_indexes = [
+                      c["index"]
+                      for c in record["chunks"]
+                  ]
+
+                  if actual_indexes != expected_indexes:
+                      raise SystemExit(
+                          "CHUNK INDEX FAILED"
+                      )
+
+                  for chunk in record["chunks"]:
+                      if not chunk.get("telegram_message_id"):
+                          raise SystemExit(
+                              "CHUNK MESSAGE ID FAILED"
+                          )
+
+                      if len(chunk["sha256"]) != 64:
+                          raise SystemExit(
+                              "CHUNK SHA256 FAILED"
+                          )
+
+              print("CHUNK METADATA SUCCESS")
+
+              first_record = restored_index["files"][0]
+              first_chunk = first_record["chunks"][0]
+
+              first_chunk_message = await client.get_messages(
+                  "me",
+                  ids=first_chunk["telegram_message_id"]
               )
 
               if not first_chunk_message:
-
                   raise SystemExit(
                       "CHUNK LOOKUP FAILED"
                   )
 
-              restored_chunk = (
-                  "restored_chunk.bin"
-              )
+              restored_chunk = "restored_chunk.bin"
 
               await client.download_media(
                   first_chunk_message,
                   file=restored_chunk
               )
 
-              restored_chunk_hash = (
-                  sha256(
-                      restored_chunk
-                  )
+              restored_chunk_hash = sha256(
+                  restored_chunk
               )
 
-              if (
-                  restored_chunk_hash
-                  != first_chunk["sha256"]
-              ):
-
+              if restored_chunk_hash != first_chunk["sha256"]:
                   raise SystemExit(
                       "CHUNK SHA256 FAILED"
                   )
 
-              print(
-                  "CHUNK DOWNLOAD SUCCESS"
-              )
-
-              print(
-                  "================================"
-              )
-
-              print(
-                  "FILE MANAGER TEST SUCCESS"
-              )
-
-              print(
-                  "PERSISTENT STORAGE TEST SUCCESS"
-              )
-
-              print(
-                  "================================"
-              )
+              print("CHUNK DOWNLOAD SUCCESS")
+              print("CHUNK SHA256 SUCCESS")
 
               await client.disconnect()
 
+              print("")
+              print("================================")
+              print("FILE MANAGER TEST SUCCESS")
+              print("PERSISTENT STORAGE TEST SUCCESS")
+              print("================================")
 
           import asyncio
-
-          asyncio.run(
-              main()
-          )
-
+          asyncio.run(main())
           PY
 
       - name: Display storage index
@@ -640,66 +517,40 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
-          if (
-            $crd.Length -gt 0
-          ) {
-
+          if ($crd.Length -gt 0) {
             $n = 1
-
           }
           else {
-
             $n = 1
 
-            if (
-              "${{ inputs.rdp_count }}"
-              -match '^\d+$'
-            ) {
-
+            if ("${{ inputs.rdp_count }}" -match '^\d+$') {
               $n = [int]"${{ inputs.rdp_count }}"
-
             }
 
-            if (
-              $n -lt 1
-            ) {
-
+            if ($n -lt 1) {
               $n = 1
-
             }
 
-            if (
-              $n -gt 10
-            ) {
-
+            if ($n -gt 10) {
               $n = 10
-
             }
           }
 
           $inc = @()
 
-          for (
-            $i = 1;
-            $i -le $n;
-            $i++
-          ) {
-
+          for ($i = 1; $i -le $n; $i++) {
             $inc += @{
               id = $i
             }
-
           }
 
           $json = @{
             include = $inc
-          } |
-            ConvertTo-Json -Compress
+          } | ConvertTo-Json -Compress
 
           "matrix=$json" |
             Out-File `
@@ -707,9 +558,7 @@ jobs:
               -Append `
               -Encoding utf8
 
-          $multi = if (
-            $n -gt 1
-          ) {
+          $multi = if ($n -gt 1) {
             "1"
           }
           else {
@@ -728,7 +577,6 @@ jobs:
   # ============================================================
 
   rdp:
-
     needs: setup
 
     runs-on: windows-latest
@@ -752,28 +600,21 @@ jobs:
       - name: Set CRD flag
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
-          if (
-            $crd.Length -gt 0
-          ) {
-
+          if ($crd.Length -gt 0) {
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
 
 
@@ -785,19 +626,14 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
-          if (
-            -not (Test-Path $exe)
-          ) {
-
+          if (-not (Test-Path $exe)) {
             $exePath =
               "$env:TEMP\chromeremotedesktophost.exe"
 
             try {
-
               Invoke-WebRequest `
                 -Uri `
                 "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
@@ -807,17 +643,15 @@ jobs:
               Start-Process `
                 -FilePath $exePath `
                 -ArgumentList `
-                  "/silent",
-                  "/install" `
+                "/silent",
+                "/install" `
                 -Wait
 
               Remove-Item `
                 $exePath `
                 -Force
-
             }
             catch {
-
               $msi =
                 "$env:TEMP\chromeremotedesktophost.msi"
 
@@ -830,10 +664,10 @@ jobs:
               Start-Process `
                 msiexec.exe `
                 -ArgumentList `
-                  "/i",
-                  "`"$msi`"",
-                  "/quiet",
-                  "/norestart" `
+                "/i",
+                "`"$msi`"",
+                "/quiet",
+                "/norestart" `
                 -Wait
 
               Remove-Item `
@@ -851,7 +685,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -859,54 +692,33 @@ jobs:
           $pin =
             "${{ inputs.crd_pin }}".Trim()
 
-          if (
-            $pin -notmatch '^\d{6,12}$'
-          ) {
-
-            throw `
-              "crd_pin must be 6-12 digits."
+          if ($pin -notmatch '^\d{6,12}$') {
+            throw "crd_pin must be 6-12 digits."
           }
 
           $starter =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
-          if (
-            -not (Test-Path $starter)
-          ) {
-
-            throw `
-              "remoting_start_host.exe not found."
+          if (-not (Test-Path $starter)) {
+            throw "remoting_start_host.exe not found."
           }
 
           $code = $null
 
-          if (
-            $raw -match
-            '--code\s*=\s*"?([^"\s]+)'
-          ) {
-
+          if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
             $code = (
               [regex]::Match(
                 $raw,
                 '--code\s*=\s*"?([^"\s]+)'
               )
             ).Groups[1].Value
-
           }
-          elseif (
-            $raw -match '^4\/'
-          ) {
-
+          elseif ($raw -match '^4\/') {
             $code = $raw
-
           }
 
-          if (
-            -not $code
-          ) {
-
-            throw `
-              "Could not detect CRD code."
+          if (-not $code) {
+            throw "Could not detect CRD code."
           }
 
           $redir =
@@ -934,19 +746,12 @@ jobs:
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
-
-          if (
-            "${{ inputs.rdp_count }}" -gt 1
-          ) {
-
+          if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn =
               "bullet${{ matrix.id }}"
-
           }
           else {
-
             $hn = "bullet"
-
           }
 
           "TS_HOSTNAME=$hn" |
@@ -955,24 +760,15 @@ jobs:
               $env:GITHUB_ENV
 
           function Yes($v) {
-
-            "$v" -match `
-              '^(?i:true|1|yes|on)$'
-
+            "$v" -match '^(?i:true|1|yes|on)$'
           }
 
           function IntOr($v,$d) {
-
-            if (
-              "$v" -match '^\d+$'
-            ) {
-
+            if ("$v" -match '^\d+$') {
               return [int]$v
-
             }
 
             return [int]$d
-
           }
 
           $runtime = IntOr(
@@ -980,31 +776,19 @@ jobs:
             355
           )
 
-          if (
-            Yes("${{ inputs.quick_test }}")
-          ) {
-
+          if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
-
           }
 
           if (
-            -not (
-              Yes("${{ inputs.quick_test }}")
-            ) -and
+            -not (Yes("${{ inputs.quick_test }}")) -and
             $runtime -lt 6
           ) {
-
             $runtime = 355
-
           }
 
-          if (
-            $runtime -gt 360
-          ) {
-
+          if ($runtime -gt 360) {
             $runtime = 355
-
           }
 
           "RUNTIME_MINUTES=$runtime" |
@@ -1021,29 +805,16 @@ jobs:
         if: needs.setup.outputs.multi == '0'
         shell: pwsh
         run: |
-
           function Yes($v) {
-
-            "$v" -match `
-              '^(?i:true|1|yes|on)$'
-
+            "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          if (
-            -not (
-              Yes("${{ inputs.do_purge }}")
-            )
-          ) {
-
-            Write-Host `
-              "Purge disabled."
-
+          if (-not (Yes("${{ inputs.do_purge }}"))) {
+            Write-Host "Purge disabled."
             exit 0
-
           }
 
           try {
-
             $auth =
               [Convert]::ToBase64String(
                 [Text.Encoding]::ASCII.GetBytes(
@@ -1065,15 +836,8 @@ jobs:
                     "Basic $auth"
                 }
 
-            foreach (
-              $d in $list.devices
-            ) {
-
-              if (
-                $d.hostname -match
-                '^bullet[0-9]*$'
-              ) {
-
+            foreach ($d in $list.devices) {
+              if ($d.hostname -match '^bullet[0-9]*$') {
                 Invoke-RestMethod `
                   -Method Delete `
                   -Uri `
@@ -1083,17 +847,12 @@ jobs:
                       "Basic $auth"
                   } `
                   -ErrorAction SilentlyContinue
-
               }
-
             }
-
           }
           catch {
-
             Write-Host `
               "Purge warning: $($_.Exception.Message)"
-
           }
 
 
@@ -1104,14 +863,10 @@ jobs:
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
-
           $ts =
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
-          if (
-            -not (Test-Path $ts)
-          ) {
-
+          if (-not (Test-Path $ts)) {
             $url =
               "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
 
@@ -1125,16 +880,15 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$dst`"",
-                "/quiet",
-                "/norestart" `
+              "/i",
+              "`"$dst`"",
+              "/quiet",
+              "/norestart" `
               -Wait
 
             Remove-Item `
               $dst `
               -Force
-
           }
 
           & $ts logout 2>$null |
@@ -1167,24 +921,15 @@ jobs:
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
-
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
-          if (
-            [string]::IsNullOrWhiteSpace($u)
-          ) {
-
+          if ([string]::IsNullOrWhiteSpace($u)) {
             throw "RDP_USER is empty."
-
           }
 
-          if (
-            [string]::IsNullOrWhiteSpace($p)
-          ) {
-
+          if ([string]::IsNullOrWhiteSpace($p)) {
             throw "RDP_PASS is empty."
-
           }
 
           $sec =
@@ -1193,29 +938,23 @@ jobs:
               -AsPlainText `
               -Force
 
-          if (
-            -not (
-              Get-LocalUser `
-                -Name $u `
-                -ErrorAction SilentlyContinue
-            )
-          ) {
-
+          if (-not (
+            Get-LocalUser `
+              -Name $u `
+              -ErrorAction SilentlyContinue
+          )) {
             New-LocalUser `
               -Name $u `
               -Password $sec `
               -AccountNeverExpires
-
           }
           else {
-
             Set-LocalUser `
               -Name $u `
               -Password $sec
 
             Enable-LocalUser `
               -Name $u
-
           }
 
           Add-LocalGroupMember `
@@ -1248,7 +987,6 @@ jobs:
       - name: Install Python libs
         shell: pwsh
         run: |
-
           python -m pip install `
             --upgrade pip
 
@@ -1267,20 +1005,15 @@ jobs:
       - name: Prepare local persistent storage
         shell: pwsh
         run: |
-
           $root =
             "D:\Persistent-RDP"
 
-          if (
-            -not (Test-Path $root)
-          ) {
-
+          if (-not (Test-Path $root)) {
             New-Item `
               -ItemType Directory `
               -Path $root `
               -Force |
               Out-Null
-
           }
 
           New-Item `
@@ -1297,25 +1030,25 @@ jobs:
 
           New-Item `
             -ItemType Directory `
-            -Path "$root\UserData" `
+            -Path "$root\Desktop" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Documents" `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Downloads" `
             -Force |
             Out-Null
 
           New-Item `
             -ItemType Directory `
             -Path "$root\AppData" `
-            -Force |
-            Out-Null
-
-          New-Item `
-            -ItemType Directory `
-            -Path "$root\ProgramData" `
-            -Force |
-            Out-Null
-
-          New-Item `
-            -ItemType Directory `
-            -Path "$root\Shortcuts" `
             -Force |
             Out-Null
 
@@ -1341,7 +1074,7 @@ jobs:
 
 
       # ========================================================
-      # CREATE SYNC ENGINE
+      # CREATE PERSISTENT SYNC ENGINE
       # ========================================================
 
       - name: Create persistent sync engine
@@ -1357,10 +1090,7 @@ jobs:
               $env:API_ID
             )
           ) {
-
-            throw `
-              "TELEGRAM_API_ID secret is missing."
-
+            throw "TELEGRAM_API_ID secret is missing."
           }
 
           if (
@@ -1368,10 +1098,7 @@ jobs:
               $env:API_HASH
             )
           ) {
-
-            throw `
-              "TELEGRAM_API_HASH secret is missing."
-
+            throw "TELEGRAM_API_HASH secret is missing."
           }
 
           if (
@@ -1379,10 +1106,7 @@ jobs:
               $env:SESSION_B64
             )
           ) {
-
-            throw `
-              "TELEGRAM_SESSION secret is missing."
-
+            throw "TELEGRAM_SESSION secret is missing."
           }
 
           $script = @'
@@ -1397,7 +1121,7 @@ import shutil
 from datetime import datetime, timezone
 
 from telethon import TelegramClient
-from telethon.sessions import SQLiteSession
+from telethon.sessions import SQLiteSession, StringSession
 
 
 ROOT = r"D:\Persistent-RDP"
@@ -1432,58 +1156,26 @@ CHUNK_PREFIX = (
     "PERSISTENT-RDP-CHUNK-V4"
 )
 
-
-def required_env(name):
-
-    value = os.environ.get(
-        name,
-        ""
-    ).strip()
-
-    if not value:
-
-        raise RuntimeError(
-            name +
-            " environment variable is missing."
-        )
-
-    return value
-
-
-API_ID_RAW = required_env(
-    "API_ID"
+API_ID = int(
+    os.environ["API_ID"]
 )
 
-API_HASH = required_env(
+API_HASH = os.environ[
     "API_HASH"
-)
+]
 
-SESSION_B64 = required_env(
+SESSION_B64 = os.environ[
     "SESSION_B64"
-)
-
-try:
-
-    API_ID = int(
-        API_ID_RAW
-    )
-
-except ValueError:
-
-    raise RuntimeError(
-        "API_ID must be numeric."
-    )
+]
 
 
 def utc_now():
-
     return datetime.now(
         timezone.utc
     ).isoformat()
 
 
 def sha256(path):
-
     h = hashlib.sha256()
 
     with open(
@@ -1492,18 +1184,14 @@ def sha256(path):
     ) as f:
 
         while True:
-
             data = f.read(
                 1024 * 1024
             )
 
             if not data:
-
                 break
 
-            h.update(
-                data
-            )
+            h.update(data)
 
     return h.hexdigest()
 
@@ -1512,17 +1200,13 @@ def safe_path(relative_path):
 
     relative_path = (
         relative_path
-        .replace(
-            "/",
-            os.sep
-        )
-        .replace(
-            "\\",
-            os.sep
-        )
-        .lstrip(
-            os.sep
-        )
+        .replace("/", os.sep)
+        .replace("\\", os.sep)
+    )
+
+    relative_path = (
+        relative_path
+        .lstrip(os.sep)
     )
 
     destination = os.path.abspath(
@@ -1538,15 +1222,12 @@ def safe_path(relative_path):
 
     if not (
         destination == root_abs
-        or
-        destination.startswith(
+        or destination.startswith(
             root_abs + os.sep
         )
     ):
-
         raise RuntimeError(
-            "Unsafe restore path: "
-            + relative_path
+            "Unsafe restore path"
         )
 
     return destination
@@ -1567,9 +1248,7 @@ def discover_files():
             and d != "System Volume Information"
         )
 
-        for name in sorted(
-            files
-        ):
+        for name in sorted(files):
 
             full = os.path.join(
                 current,
@@ -1578,15 +1257,8 @@ def discover_files():
 
             try:
 
-                if os.path.islink(
-                    full
-                ):
-
+                if os.path.islink(full):
                     continue
-
-                size = os.path.getsize(
-                    full
-                )
 
                 relative = os.path.relpath(
                     full,
@@ -1596,17 +1268,15 @@ def discover_files():
                     "/"
                 )
 
+                size = os.path.getsize(
+                    full
+                )
+
                 result.append({
-                    "path":
-                        "/" + relative,
-                    "name":
-                        name,
-                    "size":
-                        size,
-                    "sha256":
-                        sha256(
-                            full
-                        )
+                    "path": "/" + relative,
+                    "name": name,
+                    "size": size,
+                    "sha256": sha256(full)
                 })
 
             except Exception as e:
@@ -1622,10 +1292,7 @@ def discover_files():
 
 def save_index(index):
 
-    temp = (
-        INDEX_FILE +
-        ".tmp"
-    )
+    temp = INDEX_FILE + ".tmp"
 
     with open(
         temp,
@@ -1643,6 +1310,79 @@ def save_index(index):
     os.replace(
         temp,
         INDEX_FILE
+    )
+
+
+def create_telegram_client():
+
+    decoded = base64.b64decode(
+        SESSION_B64
+    )
+
+    # ----------------------------------------------------------
+    # SUPPORT BOTH SESSION TYPES:
+    #
+    # 1. Base64 encoded SQLite Telethon session file
+    # 2. Base64 encoded Telethon StringSession
+    #
+    # This prevents the previous:
+    # AttributeError:
+    # 'str' object has no attribute 'server_address'
+    # ----------------------------------------------------------
+
+    if decoded.startswith(
+        b"SQLite format 3"
+    ):
+
+        with open(
+            SESSION_FILE,
+            "wb"
+        ) as f:
+
+            f.write(decoded)
+
+        print(
+            "SESSION TYPE: SQLITE"
+        )
+
+        session = SQLiteSession(
+            SESSION_BASE
+        )
+
+    else:
+
+        try:
+
+            session_string = (
+                decoded
+                .decode("utf-8")
+                .strip()
+            )
+
+        except Exception as e:
+
+            raise RuntimeError(
+                "Could not decode TELEGRAM_SESSION"
+            ) from e
+
+        if not session_string:
+
+            raise RuntimeError(
+                "Decoded TELEGRAM_SESSION is empty"
+            )
+
+        print(
+            "SESSION TYPE: STRING"
+        )
+
+        session = StringSession(
+            session_string
+        )
+
+    return TelegramClient(
+        session,
+        API_ID,
+        API_HASH
     )
 
 
@@ -1677,13 +1417,8 @@ async def download_index(
         ".download"
     )
 
-    if os.path.exists(
-        temp
-    ):
-
-        os.remove(
-            temp
-        )
+    if os.path.exists(temp):
+        os.remove(temp)
 
     await client.download_media(
         message,
@@ -1696,13 +1431,9 @@ async def download_index(
         encoding="utf-8"
     ) as f:
 
-        index = json.load(
-            f
-        )
+        index = json.load(f)
 
-    os.remove(
-        temp
-    )
+    os.remove(temp)
 
     return index
 
@@ -1712,16 +1443,12 @@ async def upload_index(
     index
 ):
 
-    save_index(
-        index
-    )
+    save_index(index)
 
-    message = (
-        await client.send_file(
-            "me",
-            INDEX_FILE,
-            caption=INDEX_CAPTION
-        )
+    message = await client.send_file(
+        "me",
+        INDEX_FILE,
+        caption=INDEX_CAPTION
     )
 
     print(
@@ -1749,18 +1476,11 @@ async def upload_file(
 
     if (
         old_record
-        and
-        old_record.get(
-            "sha256"
-        ) == file_hash
-        and
-        old_record.get(
-            "size"
-        ) == size
-        and
-        old_record.get(
-            "chunks"
-        )
+        and old_record.get("sha256")
+        == file_hash
+        and old_record.get("size")
+        == size
+        and old_record.get("chunks")
     ):
 
         print(
@@ -1773,37 +1493,27 @@ async def upload_file(
     print(
         "UPLOAD:",
         relative_path,
-        "SIZE:",
         size
     )
 
     chunk_count = max(
         1,
         math.ceil(
-            size /
-            CHUNK_SIZE
+            size / CHUNK_SIZE
         )
     )
 
     record = {
-        "path":
-            relative_path,
-        "name":
-            os.path.basename(
-                local_path
-            ),
-        "size":
-            size,
-        "sha256":
-            file_hash,
-        "chunk_size":
-            CHUNK_SIZE,
-        "chunk_count":
-            chunk_count,
-        "chunks":
-            [],
-        "updated_at":
-            utc_now()
+        "path": relative_path,
+        "name": os.path.basename(
+            local_path
+        ),
+        "size": size,
+        "sha256": file_hash,
+        "chunk_size": CHUNK_SIZE,
+        "chunk_count": chunk_count,
+        "chunks": [],
+        "updated_at": utc_now()
     }
 
     with open(
@@ -1824,22 +1534,12 @@ async def upload_file(
                 "upload_chunk.bin"
             )
 
-            if os.path.exists(
-                temp_name
-            ):
-
-                os.remove(
-                    temp_name
-                )
-
             with open(
                 temp_name,
                 "wb"
             ) as out:
 
-                out.write(
-                    data
-                )
+                out.write(data)
 
             chunk_hash = sha256(
                 temp_name
@@ -1857,23 +1557,16 @@ async def upload_file(
                 + chunk_hash
             )
 
-            message = (
-                await client.send_file(
-                    "me",
-                    temp_name,
-                    caption=caption
-                )
+            message = await client.send_file(
+                "me",
+                temp_name,
+                caption=caption
             )
 
-            record[
-                "chunks"
-            ].append({
-                "index":
-                    index,
-                "size":
-                    len(data),
-                "sha256":
-                    chunk_hash,
+            record["chunks"].append({
+                "index": index,
+                "size": len(data),
+                "sha256": chunk_hash,
                 "telegram_message_id":
                     message.id
             })
@@ -1883,13 +1576,16 @@ async def upload_file(
                 index + 1,
                 "/",
                 chunk_count,
-                "MESSAGE:",
+                "message=",
                 message.id
             )
 
-            os.remove(
+            if os.path.exists(
                 temp_name
-            )
+            ):
+                os.remove(
+                    temp_name
+                )
 
     return record
 
@@ -1900,9 +1596,7 @@ async def restore_file(
 ):
 
     destination = safe_path(
-        record[
-            "path"
-        ]
+        record["path"]
     )
 
     os.makedirs(
@@ -1917,19 +1611,12 @@ async def restore_file(
         ".restore"
     )
 
-    if os.path.exists(
-        temp
-    ):
-
-        os.remove(
-            temp
-        )
+    if os.path.exists(temp):
+        os.remove(temp)
 
     print(
         "RESTORE:",
-        record[
-            "path"
-        ]
+        record["path"]
     )
 
     with open(
@@ -1938,31 +1625,24 @@ async def restore_file(
     ) as out:
 
         for chunk in sorted(
-            record[
-                "chunks"
-            ],
-            key=lambda x:
-                x["index"]
+            record["chunks"],
+            key=lambda x: x["index"]
         ):
 
             message_id = chunk[
                 "telegram_message_id"
             ]
 
-            message = (
-                await client.get_messages(
-                    "me",
-                    ids=message_id
-                )
+            message = await client.get_messages(
+                "me",
+                ids=message_id
             )
 
             if not message:
 
                 raise RuntimeError(
                     "Telegram message missing: "
-                    + str(
-                        message_id
-                    )
+                    + str(message_id)
                 )
 
             chunk_file = os.path.join(
@@ -1973,7 +1653,6 @@ async def restore_file(
             if os.path.exists(
                 chunk_file
             ):
-
                 os.remove(
                     chunk_file
                 )
@@ -1989,16 +1668,19 @@ async def restore_file(
 
             if (
                 actual_hash
-                != chunk[
-                    "sha256"
-                ]
+                != chunk["sha256"]
             ):
+
+                if os.path.exists(
+                    chunk_file
+                ):
+                    os.remove(
+                        chunk_file
+                    )
 
                 raise RuntimeError(
                     "CHUNK HASH MISMATCH: "
-                    + record[
-                        "path"
-                    ]
+                    + record["path"]
                 )
 
             with open(
@@ -2019,22 +1701,15 @@ async def restore_file(
         temp
     )
 
-    if (
-        final_hash
-        != record[
-            "sha256"
-        ]
-    ):
+    if final_hash != record[
+        "sha256"
+    ]:
 
-        os.remove(
-            temp
-        )
+        os.remove(temp)
 
         raise RuntimeError(
             "FILE HASH MISMATCH: "
-            + record[
-                "path"
-            ]
+            + record["path"]
         )
 
     os.replace(
@@ -2044,128 +1719,20 @@ async def restore_file(
 
     print(
         "RESTORE SUCCESS:",
-        record[
-            "path"
-        ]
+        record["path"]
     )
 
 
-async def connect_telegram():
+async def main():
 
-    print(
-        "TELEGRAM SESSION PREPARATION"
-    )
-
-    os.makedirs(
-        SYNC_ROOT,
-        exist_ok=True
-    )
-
-    # ----------------------------------------------------------
-    # Decode the secret session only when there is no local
-    # SQLite session yet.
-    # ----------------------------------------------------------
-
-    if not os.path.exists(
-        SESSION_FILE
-    ):
-
-        print(
-            "Creating Telegram SQLite session..."
-        )
-
-        try:
-
-            session_bytes = (
-                base64.b64decode(
-                    SESSION_B64,
-                    validate=True
-                )
-            )
-
-        except Exception as e:
-
-            raise RuntimeError(
-                "TELEGRAM_SESSION base64 decode failed: "
-                + str(e)
-            )
-
-        if len(
-            session_bytes
-        ) < 100:
-
-            raise RuntimeError(
-                "TELEGRAM_SESSION decoded data is too small."
-            )
-
-        with open(
-            SESSION_FILE,
-            "wb"
-        ) as f:
-
-            f.write(
-                session_bytes
-            )
-
-        print(
-            "TELEGRAM SESSION FILE CREATED"
-        )
-
-    else:
-
-        print(
-            "EXISTING TELEGRAM SESSION FOUND"
-        )
-
-    # ----------------------------------------------------------
-    # IMPORTANT:
-    #
-    # SQLiteSession receives the BASE PATH,
-    # not the filename as a normal string session.
-    #
-    # TelegramClient receives the SQLiteSession OBJECT.
-    #
-    # This is the fix for:
-    # 'str' object has no attribute 'server_address'
-    # ----------------------------------------------------------
-
-    session = SQLiteSession(
-        SESSION_BASE
-    )
-
-    client = TelegramClient(
-        session,
-        API_ID,
-        API_HASH
-    )
-
-    await client.connect()
-
-    if not await client.is_user_authorized():
-
-        await client.disconnect()
-
-        raise RuntimeError(
-            "Telegram session is not authorized. "
-            "The TELEGRAM_SESSION secret is invalid or expired."
-        )
-
-    print(
-        "TELEGRAM CONNECTED SUCCESSFULLY"
-    )
-
-    return client
-
-
-async def sync_once():
-
-    print("")
     print(
         "================================"
     )
+
     print(
         "PERSISTENT SYNC START"
     )
+
     print(
         "================================"
     )
@@ -2185,9 +1752,25 @@ async def sync_once():
         exist_ok=True
     )
 
-    client = await connect_telegram()
+    # ----------------------------------------------------------
+    # TELEGRAM
+    # ----------------------------------------------------------
+
+    client = create_telegram_client()
+
+    await client.connect()
 
     try:
+
+        if not await client.is_user_authorized():
+
+            raise RuntimeError(
+                "Telegram session is not authorized."
+            )
+
+        print(
+            "TELEGRAM CONNECTED"
+        )
 
         # ------------------------------------------------------
         # FIND REMOTE INDEX
@@ -2216,7 +1799,7 @@ async def sync_once():
             )
 
             print(
-                "REMOTE INDEX DOWNLOADED"
+                "REMOTE INDEX RESTORED"
             )
 
         else:
@@ -2226,7 +1809,28 @@ async def sync_once():
             )
 
         # ------------------------------------------------------
-        # RESTORE FILES
+        # BUILD OLD FILE MAP
+        # ------------------------------------------------------
+
+        old_map = {}
+
+        if remote_index:
+
+            for record in remote_index.get(
+                "files",
+                []
+            ):
+
+                path = record.get(
+                    "path"
+                )
+
+                if path:
+
+                    old_map[path] = record
+
+        # ------------------------------------------------------
+        # RESTORE REMOTE FILES
         # ------------------------------------------------------
 
         if remote_index:
@@ -2240,143 +1844,93 @@ async def sync_once():
 
             print(
                 "REMOTE FILE COUNT:",
-                len(
-                    remote_files
-                )
+                len(remote_files)
             )
 
             for record in remote_files:
 
-                try:
+                destination = safe_path(
+                    record["path"]
+                )
 
-                    destination = safe_path(
-                        record[
-                            "path"
-                        ]
-                    )
+                need_restore = True
 
-                    need_restore = True
+                if os.path.exists(
+                    destination
+                ):
 
-                    if os.path.exists(
-                        destination
-                    ):
+                    try:
 
-                        try:
-
-                            local_hash = sha256(
-                                destination
-                            )
-
-                            local_size = (
-                                os.path.getsize(
-                                    destination
-                                )
-                            )
-
-                            if (
-                                local_hash
-                                ==
-                                record[
-                                    "sha256"
-                                ]
-                                and
-                                local_size
-                                ==
-                                record[
-                                    "size"
-                                ]
-                            ):
-
-                                need_restore = False
-
-                                print(
-                                    "ALREADY CURRENT:",
-                                    record[
-                                        "path"
-                                    ]
-                                )
-
-                        except Exception as e:
-
-                            print(
-                                "LOCAL CHECK WARNING:",
-                                e
-                            )
-
-                    if need_restore:
-
-                        await restore_file(
-                            client,
-                            record
+                        local_hash = sha256(
+                            destination
                         )
 
-                except Exception as e:
+                        local_size = (
+                            os.path.getsize(
+                                destination
+                            )
+                        )
 
-                    print(
-                        "RESTORE FAILED:",
-                        record.get(
-                            "path",
-                            "unknown"
-                        ),
-                        e
+                        if (
+                            local_hash
+                            == record["sha256"]
+                            and
+                            local_size
+                            == record["size"]
+                        ):
+
+                            need_restore = False
+
+                            print(
+                                "ALREADY CURRENT:",
+                                record["path"]
+                            )
+
+                    except Exception as e:
+
+                        print(
+                            "LOCAL CHECK ERROR:",
+                            e
+                        )
+
+                if need_restore:
+
+                    await restore_file(
+                        client,
+                        record
                     )
 
-                    raise
-
         # ------------------------------------------------------
-        # DISCOVER CURRENT LOCAL FILES
+        # DISCOVER LOCAL FILES AFTER RESTORE
         # ------------------------------------------------------
 
         local_files = discover_files()
 
         print(
             "LOCAL FILE COUNT:",
-            len(
-                local_files
-            )
+            len(local_files)
         )
-
-        old_map = {}
-
-        if remote_index:
-
-            for record in remote_index.get(
-                "files",
-                []
-            ):
-
-                old_map[
-                    record[
-                        "path"
-                    ]
-                ] = record
 
         new_records = []
 
         # ------------------------------------------------------
-        # UPLOAD NEW OR CHANGED FILES
+        # UPLOAD NEW / CHANGED FILES
         # ------------------------------------------------------
 
         for item in local_files:
 
             local_path = safe_path(
-                item[
-                    "path"
-                ]
+                item["path"]
             )
 
             old_record = old_map.get(
-                item[
-                    "path"
-                ]
+                item["path"]
             )
 
             record = await upload_file(
                 client,
                 local_path,
-                item[
-                    "path"
-                ],
+                item["path"],
                 old_record
             )
 
@@ -2385,12 +1939,11 @@ async def sync_once():
             )
 
         # ------------------------------------------------------
-        # BUILD NEW INDEX
+        # NEW MASTER INDEX
         # ------------------------------------------------------
 
         index = {
-            "version":
-                4,
+            "version": 4,
             "type":
                 "persistent-rdp-file-index",
             "updated_at":
@@ -2401,22 +1954,22 @@ async def sync_once():
                 "chunk_size":
                     CHUNK_SIZE,
                 "backend":
-                    "telegram"
+                    "telegram",
+                "description":
+                    "Persistent-RDP user/application data"
             },
             "files":
                 new_records
         }
 
-        save_index(
-            index
-        )
+        save_index(index)
 
         print(
             "LOCAL INDEX CREATED"
         )
 
         # ------------------------------------------------------
-        # UPLOAD INDEX
+        # UPLOAD MASTER INDEX
         # ------------------------------------------------------
 
         await upload_index(
@@ -2425,7 +1978,7 @@ async def sync_once():
         )
 
         # ------------------------------------------------------
-        # VERIFY INDEX
+        # VERIFY REMOTE INDEX
         # ------------------------------------------------------
 
         verify_message = (
@@ -2448,9 +2001,7 @@ async def sync_once():
         )
 
         if (
-            verify_index.get(
-                "version"
-            )
+            verify_index.get("version")
             != 4
         ):
 
@@ -2458,21 +2009,33 @@ async def sync_once():
                 "INDEX VERSION VERIFY FAILED"
             )
 
-        if len(
+        remote_count = len(
             verify_index.get(
                 "files",
                 []
             )
-        ) != len(
+        )
+
+        local_count = len(
             new_records
-        ):
+        )
+
+        if remote_count != local_count:
 
             raise RuntimeError(
-                "INDEX FILE COUNT VERIFY FAILED"
+                "INDEX FILE COUNT VERIFY FAILED: "
+                + str(remote_count)
+                + " != "
+                + str(local_count)
             )
 
         print(
             "INDEX VERIFY SUCCESS"
+        )
+
+        print(
+            "FILES VERIFIED:",
+            remote_count
         )
 
         print(
@@ -2492,14 +2055,7 @@ async def sync_once():
         await client.disconnect()
 
 
-async def main():
-
-    await sync_once()
-
-
-asyncio.run(
-    main()
-)
+asyncio.run(main())
 '@
 
           Set-Content `
@@ -2508,16 +2064,14 @@ asyncio.run(
             -Encoding UTF8
 
           Write-Host `
-            "SYNC ENGINE CREATED SUCCESSFULLY"
+            "SYNC ENGINE CREATED"
 
 
       # ========================================================
-      # INITIAL RESTORE + SYNC
-      #
-      # THIS IS BEFORE KEEP ALIVE.
+      # INITIAL PERSISTENT SYNC
       # ========================================================
 
-      - name: Initial persistent restore and sync
+      - name: Initial persistent sync
         shell: pwsh
         env:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
@@ -2530,10 +2084,8 @@ asyncio.run(
               $env:API_ID
             )
           ) {
-
             throw `
               "TELEGRAM_API_ID secret is missing."
-
           }
 
           if (
@@ -2541,10 +2093,8 @@ asyncio.run(
               $env:API_HASH
             )
           ) {
-
             throw `
               "TELEGRAM_API_HASH secret is missing."
-
           }
 
           if (
@@ -2552,10 +2102,8 @@ asyncio.run(
               $env:SESSION_B64
             )
           ) {
-
             throw `
               "TELEGRAM_SESSION secret is missing."
-
           }
 
           Write-Host ""
@@ -2563,7 +2111,7 @@ asyncio.run(
             "=========================================="
 
           Write-Host `
-            "INITIAL PERSISTENT RESTORE + SYNC"
+            "INITIAL PERSISTENT SYNC"
 
           Write-Host `
             "=========================================="
@@ -2571,22 +2119,89 @@ asyncio.run(
           python `
             "D:\Persistent-RDP\_sync\sync.py"
 
-          if (
-            $LASTEXITCODE -ne 0
-          ) {
-
+          if ($LASTEXITCODE -ne 0) {
             throw `
-              "Initial persistent sync failed."
-
+              "Persistent sync failed."
           }
-
-          Write-Host ""
-          Write-Host `
-            "INITIAL PERSISTENT SYNC COMPLETED"
 
 
       # ========================================================
-      # STORAGE STATUS
+      # CREATE DESKTOP / USER DATA LINKS
+      # ========================================================
+
+      - name: Prepare persistent Windows user folders
+        shell: pwsh
+        run: |
+
+          $root =
+            "D:\Persistent-RDP"
+
+          $user =
+            $env:RDP_USER
+
+          $profile =
+            "C:\Users\$user"
+
+          if (-not (Test-Path $profile)) {
+            Write-Host `
+              "User profile not found yet. Skipping links."
+            exit 0
+          }
+
+          $persistentDesktop =
+            "$root\Desktop"
+
+          $persistentDocuments =
+            "$root\Documents"
+
+          $persistentDownloads =
+            "$root\Downloads"
+
+          $persistentAppData =
+            "$root\AppData"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistentDesktop `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistentDocuments `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistentDownloads `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistentAppData `
+            -Force |
+            Out-Null
+
+          Write-Host `
+            "Persistent folders prepared."
+
+          Write-Host `
+            "Desktop: $persistentDesktop"
+
+          Write-Host `
+            "Documents: $persistentDocuments"
+
+          Write-Host `
+            "Downloads: $persistentDownloads"
+
+          Write-Host `
+            "AppData: $persistentAppData"
+
+
+      # ========================================================
+      # FINAL STORAGE STATUS
       # ========================================================
 
       - name: Display persistent storage status
@@ -2621,16 +2236,12 @@ asyncio.run(
             Test-Path `
               "D:\Persistent-RDP"
           ) {
-
             Write-Host `
               "D:\Persistent-RDP READY"
-
           }
           else {
-
             throw `
               "D:\Persistent-RDP missing."
-
           }
 
           Write-Host ""
@@ -2640,8 +2251,7 @@ asyncio.run(
           Get-ChildItem `
             "D:\Persistent-RDP" `
             -Recurse `
-            -Force `
-            -ErrorAction SilentlyContinue |
+            -Force |
             Select-Object `
               FullName,
               Length,
@@ -2659,9 +2269,7 @@ asyncio.run(
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
-          if (
-            -not (Test-Path $rdExe)
-          ) {
+          if (-not (Test-Path $rdExe)) {
 
             $rdUrl =
               "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
@@ -2676,16 +2284,15 @@ asyncio.run(
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$installerPath`"",
-                "/quiet",
-                "/norestart" `
+              "/i",
+              "`"$installerPath`"",
+              "/quiet",
+              "/norestart" `
               -Wait
 
             Remove-Item `
               $installerPath `
               -Force
-
           }
 
 
@@ -2715,7 +2322,6 @@ asyncio.run(
               action=allow `
               protocol=TCP `
               localport=$p
-
           }
 
 
@@ -2730,9 +2336,7 @@ asyncio.run(
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
-          if (
-            Test-Path $rdExe
-          ) {
+          if (Test-Path $rdExe) {
 
             Start-Process `
               -FilePath $rdExe `
@@ -2740,7 +2344,6 @@ asyncio.run(
 
             Start-Sleep `
               -Seconds 5
-
           }
 
 
@@ -2773,171 +2376,6 @@ asyncio.run(
 
             Start-Sleep `
               -Seconds 60
-
-          }
-
-
-      # ========================================================
-      # FINAL SAVE
-      #
-      # IMPORTANT:
-      # Anything created/changed DURING the RDP session
-      # is uploaded here before the runner terminates.
-      # ========================================================
-
-      - name: Final persistent save
-        if: always()
-        shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
-        run: |
-
-          Write-Host ""
-          Write-Host `
-            "=========================================="
-
-          Write-Host `
-            "FINAL PERSISTENT SAVE"
-
-          Write-Host `
-            "=========================================="
-
-          if (
-            -not (
-              Test-Path `
-                "D:\Persistent-RDP\_sync\sync.py"
-            )
-          ) {
-
-            Write-Host `
-              "SYNC ENGINE NOT FOUND."
-
-            exit 0
-
-          }
-
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:API_ID
-            )
-          ) {
-
-            Write-Host `
-              "API_ID missing. Final save skipped."
-
-            exit 0
-
-          }
-
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:API_HASH
-            )
-          ) {
-
-            Write-Host `
-              "API_HASH missing. Final save skipped."
-
-            exit 0
-
-          }
-
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:SESSION_B64
-            )
-          ) {
-
-            Write-Host `
-              "SESSION_B64 missing. Final save skipped."
-
-            exit 0
-
-          }
-
-          python `
-            "D:\Persistent-RDP\_sync\sync.py"
-
-          if (
-            $LASTEXITCODE -ne 0
-          ) {
-
-            Write-Host `
-              "WARNING: Final persistent save failed."
-
-            exit 0
-
-          }
-
-          Write-Host ""
-          Write-Host `
-            "FINAL PERSISTENT SAVE SUCCESS"
-
-
-      # ========================================================
-      # FINAL STORAGE STATUS
-      # ========================================================
-
-      - name: Final storage verification
-        if: always()
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host `
-            "=========================================="
-
-          Write-Host `
-            "FINAL STORAGE VERIFICATION"
-
-          Write-Host `
-            "=========================================="
-
-          if (
-            Test-Path `
-              "D:\Persistent-RDP"
-          ) {
-
-            $files =
-              Get-ChildItem `
-                "D:\Persistent-RDP" `
-                -Recurse `
-                -File `
-                -Force `
-                -ErrorAction SilentlyContinue
-
-            Write-Host `
-              "LOCAL PERSISTENT FILE COUNT:" `
-              $files.Count
-
-            $total =
-              (
-                $files |
-                Measure-Object `
-                  -Property Length `
-                  -Sum
-              ).Sum
-
-            if (
-              $null -eq $total
-            ) {
-
-              $total = 0
-
-            }
-
-            Write-Host `
-              "LOCAL PERSISTENT BYTES:" `
-              $total
-
-          }
-          else {
-
-            Write-Host `
-              "D:\Persistent-RDP does not exist."
-
           }
 
 
@@ -2961,12 +2399,9 @@ asyncio.run(
 
             $cycles =
               [int]"${{ inputs.cycles }}"
-
           }
 
-          if (
-            $cycles -gt 0
-          ) {
+          if ($cycles -gt 0) {
 
             $next =
               $cycles - 1
@@ -2974,13 +2409,9 @@ asyncio.run(
             Write-Host `
               "Next cycle: $next"
 
-            Write-Host `
-              "Automatic handoff is configured externally."
-
           }
           else {
 
             Write-Host `
               "No cycles configured. Done."
-
           }
