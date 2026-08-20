@@ -70,6 +70,10 @@ defaults:
 
 jobs:
 
+  # ============================================================
+  # TELEGRAM STORAGE TEST
+  # ============================================================
+
   telegram-test:
     runs-on: ubuntu-latest
 
@@ -313,6 +317,10 @@ jobs:
             test_workspace
 
 
+  # ============================================================
+  # SETUP
+  # ============================================================
+
   setup:
     runs-on: ubuntu-latest
 
@@ -381,6 +389,10 @@ jobs:
               -Encoding utf8
 
 
+  # ============================================================
+  # WINDOWS RDP
+  # ============================================================
+
   rdp:
     needs: setup
 
@@ -394,9 +406,13 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif@1990
+      RDP_PASS: Yousif1990
 
     steps:
+
+      # ========================================================
+      # CRD
+      # ========================================================
 
       - name: Set CRD flag
         shell: pwsh
@@ -545,6 +561,10 @@ jobs:
             $args
 
 
+      # ========================================================
+      # HOSTNAME / RUNTIME
+      # ========================================================
+
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
@@ -599,6 +619,10 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
+
+      # ========================================================
+      # PURGE
+      # ========================================================
 
       - name: Purge bullet devices
         if: needs.setup.outputs.multi == '0'
@@ -659,6 +683,10 @@ jobs:
           }
 
 
+      # ========================================================
+      # TAILSCALE
+      # ========================================================
+
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
@@ -716,7 +744,7 @@ jobs:
 
 
       # ========================================================
-      # RDP USER + FIREWALL — FIXED
+      # RDP USER + FIREWALL
       # ========================================================
 
       - name: Enable RDP user + firewall
@@ -729,205 +757,279 @@ jobs:
           $p = $env:RDP_PASS
 
           Write-Host "========================================"
-          Write-Host "CONFIGURING RDP USER"
+          Write-Host "CONFIGURING WINDOWS RDP"
           Write-Host "========================================"
 
           # ----------------------------------------------------
-          # Create / update local user
+          # Make sure Remote Desktop service exists and is running
           # ----------------------------------------------------
 
-          $sec = ConvertTo-SecureString `
-            $p `
-            -AsPlainText `
-            -Force
+          $termService = Get-Service `
+            -Name "TermService" `
+            -ErrorAction Stop
 
-          $existing = Get-LocalUser `
-            -Name $u `
-            -ErrorAction SilentlyContinue
+          if ($termService.StartType -ne "Automatic") {
 
-          if ($null -eq $existing) {
+            Set-Service `
+              -Name "TermService" `
+              -StartupType Automatic
+          }
+
+          if ($termService.Status -ne "Running") {
+
+            Start-Service `
+              -Name "TermService" `
+              -ErrorAction SilentlyContinue
+
+            Start-Sleep -Seconds 3
+          }
+
+          # ----------------------------------------------------
+          # Create / update local RDP account
+          # ----------------------------------------------------
+
+          $sec =
+            ConvertTo-SecureString `
+              $p `
+              -AsPlainText `
+              -Force
+
+          $existingUser =
+            Get-LocalUser `
+              -Name $u `
+              -ErrorAction SilentlyContinue
+
+          if (-not $existingUser) {
 
             Write-Host "Creating user: $u"
 
             New-LocalUser `
               -Name $u `
               -Password $sec `
-              -Description "Persistent-RDP User" `
+              -FullName $u `
+              -Description "Persistent-RDP user" `
+              -AccountNeverExpires `
               -PasswordNeverExpires `
-              -AccountNeverExpires |
+              -UserMayNotChangePassword:$false `
+              -ErrorAction Stop |
               Out-Null
-
           }
           else {
 
-            Write-Host "User already exists: $u"
+            Write-Host "Updating existing user: $u"
 
             Set-LocalUser `
               -Name $u `
-              -Password $sec
+              -Password $sec `
+              -AccountNeverExpires $true `
+              -PasswordNeverExpires $true `
+              -ErrorAction Stop
 
             Enable-LocalUser `
-              -Name $u
+              -Name $u `
+              -ErrorAction SilentlyContinue
           }
 
           # ----------------------------------------------------
-          # Administrator group
+          # Add user to Administrators using net localgroup.
+          # This avoids Add-LocalGroupMember duplicate errors.
           # ----------------------------------------------------
 
-          try {
+          Write-Host "Adding $u to Administrators..."
 
-            $adminMembers =
-              Get-LocalGroupMember `
-                -Group "Administrators" `
-                -ErrorAction Stop
+          $adminOutput =
+            & net.exe localgroup Administrators $u /add 2>&1
 
-            $alreadyAdmin =
-              $adminMembers |
-              Where-Object {
-                $_.Name -match "\\$([regex]::Escape($u))$"
-              }
+          Write-Host ($adminOutput -join "`n")
 
-            if (-not $alreadyAdmin) {
+          # Error 1378 = already a member.
+          # Treat it as success.
+          if ($LASTEXITCODE -ne 0 -and
+              ($adminOutput -join " ") -notmatch
+              "already a member|1378") {
 
-              Add-LocalGroupMember `
-                -Group "Administrators" `
-                -Member $u `
-                -ErrorAction Stop
-            }
-
-          }
-          catch {
-
-            Write-Host `
-              "Administrator membership warning: $($_.Exception.Message)"
-
-            net localgroup Administrators $u /add 2>$null
+            Write-Warning `
+              "Administrators group command returned exit code $LASTEXITCODE"
           }
 
           # ----------------------------------------------------
-          # Remote Desktop Users group
+          # Add user to Remote Desktop Users.
+          # Again use net.exe so duplicates do not break the job.
           # ----------------------------------------------------
 
-          try {
+          Write-Host "Adding $u to Remote Desktop Users..."
 
-            $rdMembers =
-              Get-LocalGroupMember `
-                -Group "Remote Desktop Users" `
-                -ErrorAction Stop
+          $rdpGroupOutput =
+            & net.exe localgroup "Remote Desktop Users" $u /add 2>&1
 
-            $alreadyRdp =
-              $rdMembers |
-              Where-Object {
-                $_.Name -match "\\$([regex]::Escape($u))$"
-              }
+          Write-Host ($rdpGroupOutput -join "`n")
 
-            if (-not $alreadyRdp) {
+          if ($LASTEXITCODE -ne 0 -and
+              ($rdpGroupOutput -join " ") -notmatch
+              "already a member|1378") {
 
-              Add-LocalGroupMember `
-                -Group "Remote Desktop Users" `
-                -Member $u `
-                -ErrorAction Stop
-            }
-
-          }
-          catch {
-
-            Write-Host `
-              "Remote Desktop Users membership warning: $($_.Exception.Message)"
-
-            net localgroup "Remote Desktop Users" $u /add 2>$null
+            Write-Warning `
+              "Remote Desktop Users command returned exit code $LASTEXITCODE"
           }
 
           # ----------------------------------------------------
-          # Enable Remote Desktop
+          # Enable RDP in registry
           # ----------------------------------------------------
+
+          Write-Host "Enabling RDP registry settings..."
 
           Set-ItemProperty `
             -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
             -Name "fDenyTSConnections" `
             -Type DWord `
-            -Value 0
+            -Value 0 `
+            -Force
+
+          Set-ItemProperty `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "fAllowToGetHelp" `
+            -Type DWord `
+            -Value 0 `
+            -Force
 
           # ----------------------------------------------------
-          # Enable RDP service
+          # Make sure Network Level Authentication does not prevent
+          # the connection if the runner image has an unusual state.
           # ----------------------------------------------------
 
-          try {
+          $rdpTcpPath =
+            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
 
-            Set-Service `
-              -Name TermService `
-              -StartupType Automatic `
-              -ErrorAction Stop
+          if (Test-Path $rdpTcpPath) {
 
-            Start-Service `
-              -Name TermService `
-              -ErrorAction SilentlyContinue
-
-          }
-          catch {
-
-            Write-Host `
-              "TermService warning: $($_.Exception.Message)"
+            Set-ItemProperty `
+              -Path $rdpTcpPath `
+              -Name "UserAuthentication" `
+              -Type DWord `
+              -Value 1 `
+              -Force
           }
 
           # ----------------------------------------------------
           # Firewall
+          #
+          # Do NOT depend only on DisplayGroup because that can
+          # fail on images/localizations where the display name
+          # is different.
           # ----------------------------------------------------
 
-          netsh advfirewall firewall set rule `
+          Write-Host "Configuring Windows Firewall..."
+
+          netsh.exe advfirewall set allprofiles state on |
+            Out-Null
+
+          # Enable the built-in Remote Desktop firewall rules.
+          netsh.exe advfirewall firewall set rule `
             group="remote desktop" `
-            new enable=Yes 2>$null
+            new enable=Yes 2>&1 |
+            Write-Host
 
-          netsh advfirewall firewall delete rule `
-            name="Persistent-RDP-3389" 2>$null
+          # Explicit TCP 3389 rule as a fallback.
+          netsh.exe advfirewall firewall delete rule `
+            name="Persistent-RDP-TCP-3389" 2>$null |
+            Out-Null
 
-          netsh advfirewall firewall add rule `
-            name="Persistent-RDP-3389" `
+          netsh.exe advfirewall firewall add rule `
+            name="Persistent-RDP-TCP-3389" `
             dir=in `
             action=allow `
             protocol=TCP `
-            localport=3389 `
-            profile=any
+            localport=3389 |
+            Out-Null
+
+          # Explicit UDP 3389 rule.
+          netsh.exe advfirewall firewall delete rule `
+            name="Persistent-RDP-UDP-3389" 2>$null |
+            Out-Null
+
+          netsh.exe advfirewall firewall add rule `
+            name="Persistent-RDP-UDP-3389" `
+            dir=in `
+            action=allow `
+            protocol=UDP `
+            localport=3389 |
+            Out-Null
 
           # ----------------------------------------------------
-          # Verify RDP registry
+          # Restart Remote Desktop service
           # ----------------------------------------------------
 
-          $rdpState =
+          Write-Host "Restarting Remote Desktop service..."
+
+          Restart-Service `
+            -Name "TermService" `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Start-Sleep -Seconds 5
+
+          # ----------------------------------------------------
+          # Verification
+          # ----------------------------------------------------
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "RDP CONFIGURATION VERIFICATION"
+          Write-Host "========================================"
+
+          $deny =
             Get-ItemPropertyValue `
               -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
               -Name "fDenyTSConnections"
 
-          if ($rdpState -ne 0) {
+          Write-Host "fDenyTSConnections = $deny"
+
+          if ($deny -ne 0) {
             throw "RDP registry configuration failed."
           }
 
-          # ----------------------------------------------------
-          # Verify port listener
-          # ----------------------------------------------------
+          $svc =
+            Get-Service `
+              -Name "TermService"
+
+          Write-Host "TermService status = $($svc.Status)"
+
+          if ($svc.Status -ne "Running") {
+            throw "TermService is not running."
+          }
 
           Write-Host ""
-          Write-Host "RDP LISTENER STATUS:"
+          Write-Host "Testing TCP 3389 listener..."
 
-          Get-NetTCPConnection `
-            -LocalPort 3389 `
-            -State Listen `
-            -ErrorAction SilentlyContinue |
-            Format-Table `
-              LocalAddress,
-              LocalPort,
-              State,
-              OwningProcess
+          $listener =
+            Get-NetTCPConnection `
+              -LocalPort 3389 `
+              -State Listen `
+              -ErrorAction SilentlyContinue
+
+          if ($listener) {
+
+            Write-Host "TCP 3389 LISTENING = YES"
+          }
+          else {
+
+            Write-Warning `
+              "TCP 3389 listener was not detected yet."
+          }
 
           Write-Host ""
           Write-Host "========================================"
-          Write-Host "RDP CONFIGURATION COMPLETE"
+          Write-Host "RDP USER + FIREWALL READY"
           Write-Host "========================================"
-          Write-Host "Username : $u"
-          Write-Host "Password : $p"
-          Write-Host "Port     : 3389"
+          Write-Host "Username: $u"
+          Write-Host "RDP: ENABLED"
+          Write-Host "TCP 3389: ALLOWED"
           Write-Host "========================================"
 
+
+      # ========================================================
+      # PYTHON
+      # ========================================================
 
       - name: Install Python libs
         shell: pwsh
@@ -942,6 +1044,10 @@ jobs:
             pynput `
             pillow
 
+
+      # ========================================================
+      # PREPARE D:
+      # ========================================================
 
       - name: Prepare persistent D storage
         shell: pwsh
@@ -991,6 +1097,10 @@ jobs:
               SizeRemaining
 
 
+      # ========================================================
+      # TELEGRAM RESTORE + SYNC ENGINE
+      # ========================================================
+
       - name: Restore and start Persistent-RDP Sync
         shell: pwsh
         env:
@@ -1008,9 +1118,11 @@ jobs:
 
           @'
           import os
+          import sys
           import json
           import base64
           import hashlib
+          import math
           import time
           from datetime import datetime, timezone
           from telethon import TelegramClient
@@ -1047,6 +1159,7 @@ jobs:
               API_HASH
           )
 
+
           def sha256(path):
 
               h = hashlib.sha256()
@@ -1066,11 +1179,13 @@ jobs:
 
               return h.hexdigest()
 
+
           def now():
 
               return datetime.now(
                   timezone.utc
               ).isoformat()
+
 
           def build_index():
 
@@ -1125,6 +1240,7 @@ jobs:
 
               return records
 
+
           async def find_index():
 
               async for msg in client.iter_messages(
@@ -1137,6 +1253,7 @@ jobs:
                       return msg
 
               return None
+
 
           async def download_index():
 
@@ -1162,6 +1279,7 @@ jobs:
               ) as f:
 
                   return json.load(f)
+
 
           async def restore_file(record):
 
@@ -1257,6 +1375,7 @@ jobs:
                   target
               )
 
+
           async def restore():
 
               print(
@@ -1299,6 +1418,7 @@ jobs:
               print(
                   "PERSISTENT-RDP RESTORE COMPLETE"
               )
+
 
           async def upload_file(
               path,
@@ -1363,6 +1483,7 @@ jobs:
                       index += 1
 
               return chunks
+
 
           async def sync():
 
@@ -1485,6 +1606,7 @@ jobs:
                   "PERSISTENT-RDP SYNC COMPLETE"
               )
 
+
           async def main():
 
               await client.start()
@@ -1501,6 +1623,7 @@ jobs:
                   "INITIAL PERSISTENCE READY"
               )
 
+
           with client:
 
               client.loop.run_until_complete(
@@ -1512,7 +1635,16 @@ jobs:
               -Path $script `
               -Encoding UTF8
 
+          # ----------------------------------------------------
+          # Initial restore + sync
+          # ----------------------------------------------------
+
           python $script
+
+          # ----------------------------------------------------
+          # Create a background sync loop.
+          # This keeps saving changes while Keep Alive runs.
+          # ----------------------------------------------------
 
           $runner =
             "$env:TEMP\persistent_rdp_sync_loop.ps1"
@@ -1553,4 +1685,279 @@ jobs:
 
           Write-Host ""
           Write-Host "========================================"
-          Write-Host
+          Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
+          Write-Host "BACKGROUND SYNC: EVERY 5 MINUTES"
+          Write-Host "========================================"
+
+
+      # ========================================================
+      # VERIFY D:
+      # ========================================================
+
+      - name: Verify persistent D storage
+        shell: pwsh
+        run: |
+
+          $root =
+            "D:\Persistent-RDP"
+
+          if (-not (Test-Path $root)) {
+            throw "Persistent storage missing."
+          }
+
+          $test =
+            "$root\Persistent-RDP-Test"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $test `
+            -Force |
+            Out-Null
+
+          $file =
+            "$test\runner-test.txt"
+
+          Set-Content `
+            -Path $file `
+            -Value `
+              "Persistent-RDP test $(Get-Date -Format o)" `
+            -Encoding UTF8
+
+          if (-not (Test-Path $file)) {
+            throw "D WRITE FAILED."
+          }
+
+          Get-Content `
+            $file
+
+          Write-Host ""
+          Write-Host "D: WRITE SUCCESS"
+          Write-Host "D: PERSISTENT-RDP READY"
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
+
+
+      # ========================================================
+      # RUSTDESK
+      # ========================================================
+
+      - name: Install RustDesk
+        shell: pwsh
+        run: |
+
+          $rdExe =
+            "C:\Program Files\RustDesk\rustdesk.exe"
+
+          if (-not (Test-Path $rdExe)) {
+
+            $rdUrl =
+              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
+            $installerPath =
+              "$env:TEMP\rustdesk.msi"
+
+            Invoke-WebRequest `
+              -Uri $rdUrl `
+              -OutFile $installerPath
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList `
+              "/i",
+              "`"$installerPath`"",
+              "/quiet",
+              "/norestart" `
+              -Wait
+
+            Remove-Item `
+              $installerPath `
+              -Force
+          }
+
+
+      - name: Open RustDesk ports
+        shell: pwsh
+        run: |
+
+          for ($p = 21115; $p -le 21119; $p++) {
+
+            $name =
+              "APP-PORT-TCP-$p"
+
+            netsh advfirewall firewall delete rule `
+              name=$name 2>$null
+
+            netsh advfirewall firewall add rule `
+              name=$name `
+              dir=in `
+              action=allow `
+              protocol=TCP `
+              localport=$p
+          }
+
+
+      - name: Launch RustDesk
+        shell: pwsh
+        run: |
+
+          $rdExe =
+            "C:\Program Files\RustDesk\rustdesk.exe"
+
+          if (Test-Path $rdExe) {
+
+            Start-Process `
+              -FilePath $rdExe `
+              -ErrorAction SilentlyContinue
+
+            Start-Sleep -Seconds 5
+          }
+
+
+      # ========================================================
+      # DISPLAY STORAGE STATUS
+      # ========================================================
+
+      - name: Display storage status
+        shell: pwsh
+        run: |
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP STORAGE"
+          Write-Host "=========================================="
+
+          Write-Host "Drive: D:"
+          Write-Host "Path: D:\Persistent-RDP"
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
+
+          Write-Host ""
+          Write-Host "Persistent folders:"
+
+          Get-ChildItem `
+            "D:\Persistent-RDP" `
+            -Force |
+            Select-Object `
+              Name,
+              Length,
+              LastWriteTime
+
+
+      # ========================================================
+      # KEEP ALIVE
+      # ========================================================
+
+      - name: Keep alive
+        shell: pwsh
+        run: |
+
+          $mins =
+            [int]"${{ env.RUNTIME_MINUTES }}"
+
+          $end =
+            (Get-Date).AddMinutes($mins)
+
+          while (
+            (Get-Date) -lt $end
+          ) {
+
+            Write-Host (
+              "Heartbeat " +
+              (Get-Date).ToString("HH:mm:ss")
+            )
+
+            Write-Host `
+              "Persistent-RDP background sync is running."
+
+            Start-Sleep `
+              -Seconds 60
+          }
+
+
+      # ========================================================
+      # FINAL SYNC
+      # ========================================================
+
+      - name: Final Persistent-RDP sync
+        if: always()
+        shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+
+        run: |
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "FINAL PERSISTENT-RDP SYNC"
+          Write-Host "========================================"
+
+          # The background sync has already been
+          # saving every 5 minutes.
+          # This final pass saves the latest changes.
+
+          $script =
+            "$env:TEMP\persistent_rdp_sync.py"
+
+          if (Test-Path $script) {
+
+            python $script
+
+          }
+          else {
+
+            Write-Host `
+              "Sync script not found."
+          }
+
+
+      # ========================================================
+      # STOP / NEXT
+      # ========================================================
+
+      - name: Dispatch next or stop
+        if: always()
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+        run: |
+
+          $cycles = 0
+
+          if (
+            "${{ inputs.cycles }}"
+            -match '^\d+$'
+          ) {
+
+            $cycles =
+              [int]"${{ inputs.cycles }}"
+          }
+
+          if ($cycles -gt 0) {
+
+            $next =
+              $cycles - 1
+
+            Write-Host `
+              "Next cycle: $next"
+
+          }
+          else {
+
+            Write-Host `
+              "No cycles configured. Done."
+          }
