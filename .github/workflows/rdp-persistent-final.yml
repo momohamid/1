@@ -242,7 +242,6 @@ jobs:
                   os.remove(chunk_name)
 
           async def main():
-
               await client.start()
 
               print("TELEGRAM CONNECTED")
@@ -256,7 +255,6 @@ jobs:
                   filenames.sort()
 
                   for filename in filenames:
-
                       local_path = os.path.join(
                           root,
                           filename
@@ -285,7 +283,6 @@ jobs:
               }
 
               for local_path in files:
-
                   record = build_file_record(
                       local_path
                   )
@@ -344,7 +341,6 @@ jobs:
                   search="PERSISTENT-RDP-FILE-INDEX",
                   limit=50
               ):
-
                   if msg.id == index_message_id:
                       found_index_message = msg
                       break
@@ -387,7 +383,6 @@ jobs:
               print("FILE INDEX READ SUCCESS")
 
               for record in restored_index["files"]:
-
                   if not record["path"].startswith("/"):
                       raise SystemExit(
                           "PATH VERIFICATION FAILED"
@@ -416,7 +411,6 @@ jobs:
               print("FILE RECORD VERIFICATION SUCCESS")
 
               for record in restored_index["files"]:
-
                   expected_indexes = list(
                       range(record["chunk_count"])
                   )
@@ -432,7 +426,6 @@ jobs:
                       )
 
                   for chunk in record["chunks"]:
-
                       if not chunk.get(
                           "telegram_message_id"
                       ):
@@ -522,7 +515,6 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -531,7 +523,6 @@ jobs:
             $n = 1
           }
           else {
-
             $n = 1
 
             if ("${{ inputs.rdp_count }}" -match '^\d+$') {
@@ -550,7 +541,6 @@ jobs:
           $inc = @()
 
           for ($i = 1; $i -le $n; $i++) {
-
             $inc += @{
               id = $i
             }
@@ -584,9 +574,7 @@ jobs:
   # ============================================================
 
   rdp:
-
     needs: setup
-
     runs-on: windows-latest
 
     strategy:
@@ -596,8 +584,8 @@ jobs:
     timeout-minutes: 370
 
     env:
-      RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_USER: ${{ secrets.RDP_USER }}
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -608,20 +596,17 @@ jobs:
       - name: Set CRD flag
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
@@ -636,15 +621,12 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
-
             $exePath = "$env:TEMP\chromeremotedesktophost.exe"
 
             try {
-
               Invoke-WebRequest `
                 -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile $exePath `
@@ -660,7 +642,6 @@ jobs:
                 -Force
             }
             catch {
-
               $msi = "$env:TEMP\chromeremotedesktophost.msi"
 
               Invoke-WebRequest `
@@ -671,9 +652,9 @@ jobs:
               Start-Process `
                 msiexec.exe `
                 -ArgumentList `
-                  "/i",
-                  "`"$msi`"",
-                  "/quiet",
+                  "/i", `
+                  "`"$msi`"", `
+                  "/quiet", `
                   "/norestart" `
                 -Wait
 
@@ -691,7 +672,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -711,7 +691,6 @@ jobs:
           $code = $null
 
           if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
-
             $code = (
               [regex]::Match(
                 $raw,
@@ -748,7 +727,6 @@ jobs:
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
-
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -766,7 +744,6 @@ jobs:
           }
 
           function IntOr($v,$d) {
-
             if ("$v" -match '^\d+$') {
               return [int]$v
             }
@@ -807,18 +784,16 @@ jobs:
         if: needs.setup.outputs.multi == '0'
         shell: pwsh
         run: |
-
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          if (-not (Yes("${{ inputs.do_purge }}"))) {
+          if (-not (Yes("${{ inputs.do_purge }}")) ) {
             Write-Host "Purge disabled."
             exit 0
           }
 
           try {
-
             $auth = [Convert]::ToBase64String(
               [Text.Encoding]::ASCII.GetBytes(
                 "${{ inputs.ts_api_key }}:"
@@ -837,9 +812,7 @@ jobs:
               }
 
             foreach ($d in $list.devices) {
-
               if ($d.hostname -match '^bullet[0-9]*$') {
-
                 Invoke-RestMethod `
                   -Method Delete `
                   -Uri `
@@ -852,7 +825,6 @@ jobs:
             }
           }
           catch {
-
             Write-Host "Purge warning: $($_.Exception.Message)"
           }
 
@@ -863,11 +835,9 @@ jobs:
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
-
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (-not (Test-Path $ts)) {
-
             $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
             $dst = "$env:TEMP\tailscale.msi"
 
@@ -878,9 +848,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$dst`"",
-                "/quiet",
+                "/i", `
+                "`"$dst`"", `
+                "/quiet", `
                 "/norestart" `
               -Wait
 
@@ -916,9 +886,16 @@ jobs:
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
-
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
+
+          if ([string]::IsNullOrWhiteSpace($u)) {
+            throw "RDP_USER secret is missing."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($p)) {
+            throw "RDP_PASS secret is missing."
+          }
 
           $sec = ConvertTo-SecureString `
             $p `
@@ -930,14 +907,12 @@ jobs:
               -Name $u `
               -ErrorAction SilentlyContinue
           )) {
-
             New-LocalUser `
               -Name $u `
               -Password $sec `
               -AccountNeverExpires
           }
           else {
-
             Set-LocalUser `
               -Name $u `
               -Password $sec
@@ -972,7 +947,6 @@ jobs:
       - name: Install Python libs
         shell: pwsh
         run: |
-
           python -m pip install --upgrade pip
 
           python -m pip install `
@@ -988,7 +962,6 @@ jobs:
       - name: Install WinFSP
         shell: pwsh
         run: |
-
           Write-Host "===== WINFSP ====="
 
           $installed = Get-ItemProperty `
@@ -996,7 +969,6 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if (-not $installed) {
-
             choco install winfsp `
               -y `
               --no-progress
@@ -1010,9 +982,7 @@ jobs:
           $found = $false
 
           foreach ($p in $paths) {
-
             if (Test-Path $p) {
-
               Write-Host "WinFSP FOUND: $p"
               $found = $true
             }
@@ -1035,7 +1005,6 @@ jobs:
               $_.Name -match "WinFsp"
             } |
             ForEach-Object {
-
               if ($_.Status -ne "Running") {
                 Start-Service $_.Name -ErrorAction SilentlyContinue
               }
@@ -1058,7 +1027,6 @@ jobs:
       - name: Prepare Go
         shell: pwsh
         run: |
-
           go version
 
           if ($LASTEXITCODE -ne 0) {
@@ -1072,12 +1040,10 @@ jobs:
       - name: Build persistent passthrough
         shell: pwsh
         run: |
-
           $src = "$env:RUNNER_TEMP\go-winfsp"
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
 
           if (Test-Path $src) {
-
             Remove-Item `
               $src `
               -Recurse `
@@ -1107,22 +1073,31 @@ jobs:
 
       # --------------------------------------------------------
       # PERSISTENT BACKING STORAGE
+      # IMPORTANT: USE D: INSTEAD OF C:
       # --------------------------------------------------------
 
       - name: Prepare persistent U backing storage
         shell: pwsh
         run: |
+          $root = "D:\Persistent-RDP-U"
 
-          $root = "C:\Persistent-RDP-U"
+          Write-Host "===== CHECKING D: BACKING STORAGE ====="
 
-          if (-not (Test-Path $root)) {
-
-            New-Item `
-              -ItemType Directory `
-              -Path $root `
-              -Force |
-              Out-Null
+          if (-not (Test-Path "D:\")) {
+            throw "D: drive is not available."
           }
+
+          $d = Get-PSDrive D -ErrorAction SilentlyContinue
+
+          if ($d) {
+            Write-Host "D: ROOT: $($d.Root)"
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $root `
+            -Force |
+            Out-Null
 
           New-Item `
             -ItemType Directory `
@@ -1136,51 +1111,72 @@ jobs:
             throw "Backing storage was not created."
           }
 
+          $test = "$root\Test\runner-storage-test.txt"
+
+          Set-Content `
+            -Path $test `
+            -Value "Persistent-RDP D backing test $(Get-Date -Format o)" `
+            -Encoding UTF8
+
+          if (-not (Test-Path $test)) {
+            throw "D: backing storage write failed."
+          }
+
+          Write-Host "D: BACKING STORAGE WRITE SUCCESS"
+
       # --------------------------------------------------------
-      # CREATE USER-SESSION MOUNT SCRIPT
+      # CREATE MOUNT SCRIPT
       # --------------------------------------------------------
 
-      - name: Create U user-session mount script
+      - name: Create U mount script
         shell: pwsh
         run: |
-
-          $root = "C:\Persistent-RDP-U"
-          $scriptPath = "$root\mount-u.ps1"
+          $scriptPath = "D:\Persistent-RDP-U\mount-u.ps1"
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
+          $root = "D:\Persistent-RDP-U"
 
           if (-not (Test-Path $exe)) {
             throw "Passthrough executable not found."
           }
 
-          Copy-Item `
-            $exe `
-            "$root\persistent-passthrough.exe" `
-            -Force
-
-          $userExe = "$root\persistent-passthrough.exe"
-
           $content = @"
           `$ErrorActionPreference = "Continue"
 
-          `$exe = "$userExe"
+          `$exe = "$exe"
           `$root = "$root"
 
-          Write-Host "Persistent-RDP U mount starting..."
+          `$log = "D:\Persistent-RDP-U\mount-u-user.log"
+
+          function Log(`$text) {
+              try {
+                  Add-Content `
+                    -Path `$log `
+                    -Value ("[{0}] {1}" -f (Get-Date -Format o), `$text)
+              }
+              catch {}
+          }
+
+          Log "MOUNT SCRIPT STARTED"
+          Log "USER=$env:USERNAME"
+          Log "SESSION=$env:SESSIONNAME"
+          Log "EXE=`$exe"
+          Log "ROOT=`$root"
 
           while (`$true) {
 
-              `$existing = Get-PSDrive U -ErrorAction SilentlyContinue
-
-              if (`$existing) {
-                  Start-Sleep -Seconds 10
-                  continue
-              }
-
-              `$process = `$null
-
               try {
 
-                  `$process = Start-Process `
+                  `$existing = Get-PSDrive U -ErrorAction SilentlyContinue
+
+                  if (`$existing) {
+                      Log "U: ALREADY EXISTS"
+                      Start-Sleep -Seconds 10
+                      continue
+                  }
+
+                  Log "STARTING WINFSP PASSTHROUGH"
+
+                  `$p = Start-Process `
                       -FilePath `$exe `
                       -ArgumentList @(
                           "-m",
@@ -1190,18 +1186,32 @@ jobs:
                       -PassThru `
                       -WindowStyle Hidden
 
-                  Start-Sleep -Seconds 5
+                  Log "PASSTHROUGH PID=`$(`$p.Id)"
 
-                  if (`$process.HasExited) {
+                  Start-Sleep -Seconds 10
+
+                  if (`$p.HasExited) {
+                      Log "PASSTHROUGH EXITED CODE=`$(`$p.ExitCode)"
                       Start-Sleep -Seconds 5
                       continue
                   }
 
-                  while (-not `$process.HasExited) {
+                  if (Test-Path "U:\") {
+                      Log "U: MOUNT SUCCESS"
+                  }
+                  else {
+                      Log "U: NOT YET VISIBLE"
+                  }
+
+                  while (-not `$p.HasExited) {
                       Start-Sleep -Seconds 5
                   }
+
+                  Log "PASSTHROUGH STOPPED CODE=`$(`$p.ExitCode)"
+
               }
               catch {
+                  Log "ERROR: `$(`$_.Exception.Message)"
                   Start-Sleep -Seconds 5
               }
           }
@@ -1212,164 +1222,172 @@ jobs:
             -Value $content `
             -Encoding UTF8
 
-          Write-Host "USER SESSION MOUNT SCRIPT CREATED"
-          Write-Host $scriptPath
+          Write-Host "MOUNT SCRIPT CREATED: $scriptPath"
 
       # --------------------------------------------------------
       # CREATE INTERACTIVE LOGON TASK
       # --------------------------------------------------------
 
-      - name: Create interactive U logon task
+      - name: Create U interactive logon task
         shell: pwsh
         run: |
-
           $taskName = "Persistent-RDP-U"
+          $taskPath = "\Persistent-RDP\"
+
+          $scriptPath = "D:\Persistent-RDP-U\mount-u.ps1"
+          $user = $env:RDP_USER
+          $pass = $env:RDP_PASS
+
+          if ([string]::IsNullOrWhiteSpace($user)) {
+            throw "RDP_USER is empty."
+          }
+
+          if ([string]::IsNullOrWhiteSpace($pass)) {
+            throw "RDP_PASS is empty."
+          }
 
           schtasks.exe `
             /Delete `
-            /TN $taskName `
+            /TN "$taskName" `
             /F 2>$null
 
-          $action =
-            'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Persistent-RDP-U\mount-u.ps1"'
+          $action = `
+            "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
 
           schtasks.exe `
             /Create `
-            /TN $taskName `
-            /TR $action `
+            /TN "$taskName" `
+            /TR "$action" `
             /SC ONLOGON `
-            /RU "$env:RDP_USER" `
-            /RP "$env:RDP_PASS" `
+            /RU "$user" `
+            /RP "$pass" `
             /IT `
             /RL HIGHEST `
+            /DELAY 0000:10 `
             /F
 
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to create interactive Persistent-RDP-U logon task."
           }
 
-          Write-Host "INTERACTIVE U LOGON TASK CREATED"
+          Write-Host "U INTERACTIVE LOGON TASK CREATED"
+
+          Write-Host "===== TASK ====="
 
           schtasks.exe `
             /Query `
-            /TN $taskName `
-            /V `
-            /FO LIST
+            /TN "$taskName" `
+            /FO LIST `
+            /V
 
       # --------------------------------------------------------
-      # CURRENT RUNNER U TEST
+      # START U IN THE USER SESSION
       # --------------------------------------------------------
 
-      - name: Test U only if available in runner session
+      - name: Start U filesystem in interactive user session
         shell: pwsh
         run: |
+          $taskName = "Persistent-RDP-U"
 
           Write-Host "=========================================="
-          Write-Host "CHECKING U: IN CURRENT RUNNER SESSION"
+          Write-Host "STARTING INTERACTIVE U TASK"
           Write-Host "=========================================="
 
-          if (Test-Path "U:\") {
+          schtasks.exe `
+            /Run `
+            /TN "$taskName"
 
-            Write-Host "U: IS VISIBLE IN RUNNER SESSION"
-
-            New-Item `
-              -ItemType Directory `
-              -Path "U:\Persistent-RDP-Test" `
-              -Force |
-              Out-Null
-
-            $testFile =
-              "U:\Persistent-RDP-Test\runner-test.txt"
-
-            Set-Content `
-              -Path $testFile `
-              -Value "Persistent-RDP U test $(Get-Date -Format o)" `
-              -Encoding UTF8
-
-            if (-not (Test-Path $testFile)) {
-              throw "U: WRITE TEST FAILED."
-            }
-
-            Write-Host "U: RUNNER WRITE TEST SUCCESS"
-          }
-          else {
-
-            Write-Host ""
-            Write-Host "U: IS NOT EXPECTED IN THIS RUNNER SESSION."
-            Write-Host "THE INTERACTIVE LOGON TASK WILL CREATE U:"
-            Write-Host "AFTER RDP_USER LOGS INTO WINDOWS."
-            Write-Host ""
-
-            Write-Host "===== TASK STATUS ====="
-
-            schtasks.exe `
-              /Query `
-              /TN "Persistent-RDP-U" `
-              /V `
-              /FO LIST
-
-            Write-Host ""
-            Write-Host "===== BACKING STORAGE ====="
-
-            if (-not (Test-Path "C:\Persistent-RDP-U")) {
-              throw "Backing storage missing."
-            }
-
-            Get-ChildItem `
-              "C:\Persistent-RDP-U" `
-              -Force
-
-            Write-Host ""
-            Write-Host "U LOGON CONFIGURATION READY"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "schtasks /Run returned code $LASTEXITCODE"
+            Write-Host "This can happen when the RDP user has not logged in yet."
           }
 
+          Start-Sleep -Seconds 5
+
+          Write-Host "===== TASK STATUS ====="
+
+          schtasks.exe `
+            /Query `
+            /TN "$taskName" `
+            /FO LIST `
+            /V
+
+          Write-Host ""
+          Write-Host "IMPORTANT:"
+          Write-Host "U: is intentionally NOT tested from the GitHub runner session."
+          Write-Host "The mount is created in the RDP user's interactive session."
+
       # --------------------------------------------------------
-      # TEST BACKING STORAGE
+      # VERIFY BACKING STORAGE
       # --------------------------------------------------------
 
-      - name: Test U backing storage
+      - name: Verify D backing storage
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
 
-          $root = "C:\Persistent-RDP-U"
+          $root = "D:\Persistent-RDP-U"
+
+          Write-Host "=========================================="
+          Write-Host "VERIFYING D BACKING STORAGE"
+          Write-Host "=========================================="
+
+          if (-not (Test-Path "D:\")) {
+            throw "D: DRIVE IS NOT AVAILABLE."
+          }
+
+          if (-not (Test-Path $root)) {
+            throw "D: BACKING DIRECTORY WAS NOT CREATED."
+          }
+
+          $marker = "$root\Persistent-RDP-Test"
 
           New-Item `
             -ItemType Directory `
-            -Path "$root\Test" `
+            -Path $marker `
             -Force |
             Out-Null
 
-          $file = "$root\Test\runner-test.txt"
+          $testFile = "$marker\runner-test.txt"
 
           Set-Content `
-            -Path $file `
-            -Value "Persistent U test $(Get-Date -Format o)" `
+            -Path $testFile `
+            -Value "Persistent-RDP D test $(Get-Date -Format o)" `
             -Encoding UTF8
 
-          if (-not (Test-Path $file)) {
-            throw "Backing storage test failed."
+          if (-not (Test-Path $testFile)) {
+            throw "D: WRITE TEST FAILED."
           }
 
-          Write-Host "BACKING STORAGE WRITE SUCCESS"
+          $content = Get-Content `
+            -Path $testFile `
+            -Raw
+
+          Write-Host "D: WRITE TEST SUCCESS"
+          Write-Host "D: READ TEST SUCCESS"
+          Write-Host "TEST CONTENT: $content"
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "D BACKING STORAGE READY"
+          Write-Host "=========================================="
 
       # --------------------------------------------------------
-      # U STATUS
+      # USER SESSION MOUNT STATUS
       # --------------------------------------------------------
 
-      - name: Display U status
+      - name: Display U mount status
         shell: pwsh
         run: |
-
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENT U STATUS"
+          Write-Host "PERSISTENT U STORAGE STATUS"
           Write-Host "=========================================="
 
-          Write-Host ""
           Write-Host "Backing path:"
-          Write-Host "C:\Persistent-RDP-U"
+          Write-Host "D:\Persistent-RDP-U"
 
-          if (Test-Path "C:\Persistent-RDP-U") {
+          if (Test-Path "D:\Persistent-RDP-U") {
             Write-Host "BACKING STORAGE READY"
           }
           else {
@@ -1377,37 +1395,33 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Current runner session U:"
+          Write-Host "Interactive mount:"
+          Write-Host "Persistent-RDP-U scheduled task created."
 
-          if (Test-Path "U:\") {
-            Write-Host "U DRIVE READY IN RUNNER SESSION"
+          Write-Host ""
+          Write-Host "Mount log:"
+          if (Test-Path "D:\Persistent-RDP-U\mount-u-user.log") {
+            Get-Content `
+              "D:\Persistent-RDP-U\mount-u-user.log"
           }
           else {
-            Write-Host "U DRIVE NOT IN RUNNER SESSION"
-            Write-Host "THIS IS EXPECTED UNTIL RDP_USER LOGS IN."
+            Write-Host "No user-session mount log yet."
+            Write-Host "The RDP user must be logged in for /IT task execution."
           }
 
           Write-Host ""
-          Write-Host "Interactive task:"
-
-          schtasks.exe `
-            /Query `
-            /TN "Persistent-RDP-U" `
-            /V `
-            /FO LIST
-
-          Write-Host ""
-          Write-Host "Files:"
+          Write-Host "Files in backing storage:"
 
           Get-ChildItem `
-            "C:\Persistent-RDP-U" `
+            "D:\Persistent-RDP-U" `
             -Recurse `
             -Force
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "RDP USER SESSION WILL MOUNT U:"
-          Write-Host "=========================================="
+          Write-Host "NOTE:"
+          Write-Host "U: is mounted inside the interactive RDP user session."
+          Write-Host "The actual backing storage is D:\Persistent-RDP-U."
+          Write-Host "The runner session is intentionally not used to verify U:."
 
       # --------------------------------------------------------
       # RUSTDESK
@@ -1416,15 +1430,11 @@ jobs:
       - name: Install RustDesk
         shell: pwsh
         run: |
-
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (-not (Test-Path $rdExe)) {
-
             $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
-
-            $installerPath =
-              "$env:TEMP\rustdesk.msi"
+            $installerPath = "$env:TEMP\rustdesk.msi"
 
             Invoke-WebRequest `
               -Uri $rdUrl `
@@ -1433,9 +1443,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$installerPath`"",
-                "/quiet",
+                "/i", `
+                "`"$installerPath`"", `
+                "/quiet", `
                 "/norestart" `
               -Wait
 
@@ -1451,9 +1461,7 @@ jobs:
       - name: Open RustDesk ports
         shell: pwsh
         run: |
-
           for ($p = 21115; $p -le 21119; $p++) {
-
             $name = "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
@@ -1474,11 +1482,9 @@ jobs:
       - name: Launch RustDesk
         shell: pwsh
         run: |
-
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (Test-Path $rdExe) {
-
             Start-Process `
               -FilePath $rdExe `
               -ErrorAction SilentlyContinue
@@ -1493,7 +1499,6 @@ jobs:
       - name: Keep alive
         shell: pwsh
         run: |
-
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end = (
@@ -1503,7 +1508,6 @@ jobs:
           while (
             (Get-Date) -lt $end
           ) {
-
             Write-Host (
               "Heartbeat " +
               (Get-Date).ToString("HH:mm:ss")
@@ -1522,7 +1526,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-
           $cycles = 0
 
           if ("${{ inputs.cycles }}" -match '^\d+$') {
@@ -1530,12 +1533,10 @@ jobs:
           }
 
           if ($cycles -gt 0) {
-
             $next = $cycles - 1
 
             Write-Host "Next cycle: $next"
           }
           else {
-
             Write-Host "No cycles configured. Done."
           }
