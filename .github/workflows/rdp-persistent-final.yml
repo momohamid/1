@@ -70,13 +70,8 @@ defaults:
 
 jobs:
 
-  # ============================================================
-  # TELEGRAM STORAGE TEST
-  # ============================================================
-
   telegram-test:
     runs-on: ubuntu-latest
-    continue-on-error: true
 
     steps:
 
@@ -310,19 +305,13 @@ jobs:
 
       - name: Upload storage test artifacts
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: telegram-storage-file-manager-test
           path: |
             file_index.json
             file_index_restored.json
             test_workspace
-          if-no-files-found: warn
 
-
-  # ============================================================
-  # SETUP
-  # ============================================================
 
   setup:
     runs-on: ubuntu-latest
@@ -392,10 +381,6 @@ jobs:
               -Encoding utf8
 
 
-  # ============================================================
-  # WINDOWS RDP
-  # ============================================================
-
   rdp:
     needs: setup
 
@@ -409,13 +394,9 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: Yousif@1990
 
     steps:
-
-      # ========================================================
-      # CRD
-      # ========================================================
 
       - name: Set CRD flag
         shell: pwsh
@@ -470,8 +451,7 @@ jobs:
 
               Remove-Item `
                 $exePath `
-                -Force `
-                -ErrorAction SilentlyContinue
+                -Force
 
             }
             catch {
@@ -497,8 +477,7 @@ jobs:
 
               Remove-Item `
                 $msi `
-                -Force `
-                -ErrorAction SilentlyContinue
+                -Force
             }
           }
 
@@ -566,10 +545,6 @@ jobs:
             $args
 
 
-      # ========================================================
-      # HOSTNAME / RUNTIME
-      # ========================================================
-
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
@@ -624,10 +599,6 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-
-      # ========================================================
-      # PURGE
-      # ========================================================
 
       - name: Purge bullet devices
         if: needs.setup.outputs.multi == '0'
@@ -688,10 +659,6 @@ jobs:
           }
 
 
-      # ========================================================
-      # TAILSCALE
-      # ========================================================
-
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
@@ -709,8 +676,7 @@ jobs:
 
             Invoke-WebRequest `
               -Uri $url `
-              -OutFile $dst `
-              -ErrorAction Stop
+              -OutFile $dst
 
             Start-Process `
               msiexec.exe `
@@ -723,20 +689,8 @@ jobs:
 
             Remove-Item `
               $dst `
-              -Force `
-              -ErrorAction SilentlyContinue
+              -Force
           }
-
-          if (-not (Test-Path $ts)) {
-            throw "Tailscale executable was not installed."
-          }
-
-          Start-Service `
-            -Name Tailscale `
-            -ErrorAction SilentlyContinue
-
-          Start-Sleep `
-            -Seconds 3
 
           & $ts logout 2>$null |
             Out-Null
@@ -747,73 +701,66 @@ jobs:
             --accept-dns=true `
             --accept-routes=true
 
-          $ip4 = $null
-
-          for ($i = 0; $i -lt 30; $i++) {
-
-            $ip4 = (
-              & $ts ip -4 2>$null |
-              Select-Object -First 1
-            )
-
-            if ($ip4) {
-              break
-            }
-
-            Start-Sleep `
-              -Seconds 2
-          }
-
-          if (-not $ip4) {
-            throw "Tailscale did not obtain an IPv4 address."
-          }
+          $ip4 = (
+            & $ts ip -4 |
+            Select-Object -First 1
+          )
 
           "TAILSCALE_IP=$ip4" |
             Out-File `
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "TAILSCALE CONNECTED"
-          Write-Host "TAILSCALE HOSTNAME: $env:TS_HOSTNAME"
-          Write-Host "TAILSCALE IP: $ip4"
-          Write-Host "========================================"
+          Write-Host `
+            "TAILSCALE IP: $ip4"
 
 
       # ========================================================
-      # RDP USER
+      # RDP USER + FIREWALL — FIXED
       # ========================================================
 
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
 
+          $ErrorActionPreference = "Stop"
+
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
-          $sec =
-            ConvertTo-SecureString `
-              $p `
-              -AsPlainText `
-              -Force
+          Write-Host "========================================"
+          Write-Host "CONFIGURING RDP USER"
+          Write-Host "========================================"
 
-          $existing =
-            Get-LocalUser `
-              -Name $u `
-              -ErrorAction SilentlyContinue
+          # ----------------------------------------------------
+          # Create / update local user
+          # ----------------------------------------------------
 
-          if (-not $existing) {
+          $sec = ConvertTo-SecureString `
+            $p `
+            -AsPlainText `
+            -Force
+
+          $existing = Get-LocalUser `
+            -Name $u `
+            -ErrorAction SilentlyContinue
+
+          if ($null -eq $existing) {
+
+            Write-Host "Creating user: $u"
 
             New-LocalUser `
               -Name $u `
               -Password $sec `
-              -AccountNeverExpires `
-              -PasswordNeverExpires $true `
-              -UserMayNotChangePassword $true
+              -Description "Persistent-RDP User" `
+              -PasswordNeverExpires `
+              -AccountNeverExpires |
+              Out-Null
 
           }
           else {
+
+            Write-Host "User already exists: $u"
 
             Set-LocalUser `
               -Name $u `
@@ -823,58 +770,164 @@ jobs:
               -Name $u
           }
 
-          Add-LocalGroupMember `
-            -Group "Administrators" `
-            -Member $u `
-            -ErrorAction SilentlyContinue
+          # ----------------------------------------------------
+          # Administrator group
+          # ----------------------------------------------------
 
-          Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member $u `
-            -ErrorAction SilentlyContinue
+          try {
+
+            $adminMembers =
+              Get-LocalGroupMember `
+                -Group "Administrators" `
+                -ErrorAction Stop
+
+            $alreadyAdmin =
+              $adminMembers |
+              Where-Object {
+                $_.Name -match "\\$([regex]::Escape($u))$"
+              }
+
+            if (-not $alreadyAdmin) {
+
+              Add-LocalGroupMember `
+                -Group "Administrators" `
+                -Member $u `
+                -ErrorAction Stop
+            }
+
+          }
+          catch {
+
+            Write-Host `
+              "Administrator membership warning: $($_.Exception.Message)"
+
+            net localgroup Administrators $u /add 2>$null
+          }
+
+          # ----------------------------------------------------
+          # Remote Desktop Users group
+          # ----------------------------------------------------
+
+          try {
+
+            $rdMembers =
+              Get-LocalGroupMember `
+                -Group "Remote Desktop Users" `
+                -ErrorAction Stop
+
+            $alreadyRdp =
+              $rdMembers |
+              Where-Object {
+                $_.Name -match "\\$([regex]::Escape($u))$"
+              }
+
+            if (-not $alreadyRdp) {
+
+              Add-LocalGroupMember `
+                -Group "Remote Desktop Users" `
+                -Member $u `
+                -ErrorAction Stop
+            }
+
+          }
+          catch {
+
+            Write-Host `
+              "Remote Desktop Users membership warning: $($_.Exception.Message)"
+
+            net localgroup "Remote Desktop Users" $u /add 2>$null
+          }
+
+          # ----------------------------------------------------
+          # Enable Remote Desktop
+          # ----------------------------------------------------
 
           Set-ItemProperty `
-            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name fDenyTSConnections `
+            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Type DWord `
             -Value 0
 
-          Set-ItemProperty `
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
-            -Name UserAuthentication `
-            -Value 1
+          # ----------------------------------------------------
+          # Enable RDP service
+          # ----------------------------------------------------
 
-          Set-Service `
-            -Name TermService `
-            -StartupType Automatic
+          try {
 
-          Start-Service `
-            -Name TermService `
-            -ErrorAction SilentlyContinue
+            Set-Service `
+              -Name TermService `
+              -StartupType Automatic `
+              -ErrorAction Stop
 
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop" |
-            Out-Null
+            Start-Service `
+              -Name TermService `
+              -ErrorAction SilentlyContinue
+
+          }
+          catch {
+
+            Write-Host `
+              "TermService warning: $($_.Exception.Message)"
+          }
+
+          # ----------------------------------------------------
+          # Firewall
+          # ----------------------------------------------------
+
+          netsh advfirewall firewall set rule `
+            group="remote desktop" `
+            new enable=Yes 2>$null
+
+          netsh advfirewall firewall delete rule `
+            name="Persistent-RDP-3389" 2>$null
 
           netsh advfirewall firewall add rule `
-            name="Tailscale-RDP-3389" `
+            name="Persistent-RDP-3389" `
             dir=in `
             action=allow `
             protocol=TCP `
             localport=3389 `
-            profile=any `
-            2>$null
+            profile=any
+
+          # ----------------------------------------------------
+          # Verify RDP registry
+          # ----------------------------------------------------
+
+          $rdpState =
+            Get-ItemPropertyValue `
+              -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
+              -Name "fDenyTSConnections"
+
+          if ($rdpState -ne 0) {
+            throw "RDP registry configuration failed."
+          }
+
+          # ----------------------------------------------------
+          # Verify port listener
+          # ----------------------------------------------------
+
+          Write-Host ""
+          Write-Host "RDP LISTENER STATUS:"
+
+          Get-NetTCPConnection `
+            -LocalPort 3389 `
+            -State Listen `
+            -ErrorAction SilentlyContinue |
+            Format-Table `
+              LocalAddress,
+              LocalPort,
+              State,
+              OwningProcess
 
           Write-Host ""
           Write-Host "========================================"
-          Write-Host "RDP ENABLED"
-          Write-Host "USER: $u"
-          Write-Host "RDP SERVICE: RUNNING"
+          Write-Host "RDP CONFIGURATION COMPLETE"
+          Write-Host "========================================"
+          Write-Host "Username : $u"
+          Write-Host "Password : $p"
+          Write-Host "Port     : 3389"
           Write-Host "========================================"
 
-
-      # ========================================================
-      # PYTHON
-      # ========================================================
 
       - name: Install Python libs
         shell: pwsh
@@ -889,10 +942,6 @@ jobs:
             pynput `
             pillow
 
-
-      # ========================================================
-      # PREPARE D:
-      # ========================================================
 
       - name: Prepare persistent D storage
         shell: pwsh
@@ -941,10 +990,6 @@ jobs:
               Size,
               SizeRemaining
 
-
-      # ========================================================
-      # TELEGRAM RESTORE + SYNC ENGINE
-      # ========================================================
 
       - name: Restore and start Persistent-RDP Sync
         shell: pwsh
@@ -1002,7 +1047,6 @@ jobs:
               API_HASH
           )
 
-
           def sha256(path):
 
               h = hashlib.sha256()
@@ -1022,13 +1066,11 @@ jobs:
 
               return h.hexdigest()
 
-
           def now():
 
               return datetime.now(
                   timezone.utc
               ).isoformat()
-
 
           def build_index():
 
@@ -1068,8 +1110,7 @@ jobs:
                                       "\\",
                                       "/"
                                   ),
-                              "size":
-                                  size,
+                              "size": size,
                               "sha256":
                                   sha256(path)
                           })
@@ -1084,7 +1125,6 @@ jobs:
 
               return records
 
-
           async def find_index():
 
               async for msg in client.iter_messages(
@@ -1098,7 +1138,6 @@ jobs:
 
               return None
 
-
           async def download_index():
 
               msg = await find_index()
@@ -1111,30 +1150,18 @@ jobs:
                   "persistent_master_index.json"
               )
 
-              try:
+              await client.download_media(
+                  msg,
+                  file=temp
+              )
 
-                  await client.download_media(
-                      msg,
-                      file=temp
-                  )
+              with open(
+                  temp,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
 
-                  with open(
-                      temp,
-                      "r",
-                      encoding="utf-8"
-                  ) as f:
-
-                      return json.load(f)
-
-              except Exception as e:
-
-                  print(
-                      "INDEX DOWNLOAD ERROR:",
-                      e
-                  )
-
-                  return None
-
+                  return json.load(f)
 
           async def restore_file(record):
 
@@ -1169,87 +1196,66 @@ jobs:
 
               output = target + ".restore"
 
-              try:
+              with open(
+                  output,
+                  "wb"
+              ) as out:
 
-                  with open(
-                      output,
-                      "wb"
-                  ) as out:
+                  for chunk in record["chunks"]:
 
-                      for chunk in record.get(
-                          "chunks",
-                          []
+                      msg_id = chunk[
+                          "telegram_message_id"
+                      ]
+
+                      msg = await client.get_messages(
+                          "me",
+                          ids=msg_id
+                      )
+
+                      if not msg:
+                          raise RuntimeError(
+                              "Missing Telegram chunk "
+                              + str(msg_id)
+                          )
+
+                      temp = os.path.join(
+                          os.environ["TEMP"],
+                          "restore_chunk.bin"
+                      )
+
+                      await client.download_media(
+                          msg,
+                          file=temp
+                      )
+
+                      if (
+                          sha256(temp)
+                          != chunk["sha256"]
                       ):
-
-                          msg_id = chunk[
-                              "telegram_message_id"
-                          ]
-
-                          msg = await client.get_messages(
-                              "me",
-                              ids=msg_id
+                          raise RuntimeError(
+                              "Chunk SHA256 mismatch"
                           )
 
-                          if not msg:
-                              raise RuntimeError(
-                                  "Missing Telegram chunk "
-                                  + str(msg_id)
+                      with open(
+                          temp,
+                          "rb"
+                      ) as f:
+
+                          while True:
+
+                              data = f.read(
+                                  4 * 1024 * 1024
                               )
 
-                          temp = os.path.join(
-                              os.environ["TEMP"],
-                              "restore_chunk.bin"
-                          )
+                              if not data:
+                                  break
 
-                          await client.download_media(
-                              msg,
-                              file=temp
-                          )
+                              out.write(data)
 
-                          if (
-                              sha256(temp)
-                              != chunk["sha256"]
-                          ):
-                              raise RuntimeError(
-                                  "Chunk SHA256 mismatch"
-                              )
-
-                          with open(
-                              temp,
-                              "rb"
-                          ) as f:
-
-                              while True:
-
-                                  data = f.read(
-                                      4 * 1024 * 1024
-                                  )
-
-                                  if not data:
-                                      break
-
-                                  out.write(data)
-
-                          try:
-                              os.remove(temp)
-                          except Exception:
-                              pass
-
-                  os.replace(
-                      output,
-                      target
-                  )
-
-              except Exception:
-
-                  try:
-                      if os.path.exists(output):
-                          os.remove(output)
-                  except Exception:
-                      pass
-
-                  raise
-
+              os.replace(
+                  output,
+                  target
+              )
 
           async def restore():
 
@@ -1293,7 +1299,6 @@ jobs:
               print(
                   "PERSISTENT-RDP RESTORE COMPLETE"
               )
-
 
           async def upload_file(
               path,
@@ -1346,25 +1351,18 @@ jobs:
                       )
 
                       chunks.append({
-                          "index":
-                              index,
-                          "size":
-                              len(data),
-                          "sha256":
-                              h,
+                          "index": index,
+                          "size": len(data),
+                          "sha256": h,
                           "telegram_message_id":
                               msg.id
                       })
 
-                      try:
-                          os.remove(temp)
-                      except Exception:
-                          pass
+                      os.remove(temp)
 
                       index += 1
 
               return chunks
-
 
           async def sync():
 
@@ -1438,12 +1436,9 @@ jobs:
                   )
 
                   new_records.append({
-                      "path":
-                          relative,
-                      "size":
-                          item["size"],
-                      "sha256":
-                          item["sha256"],
+                      "path": relative,
+                      "size": item["size"],
+                      "sha256": item["sha256"],
                       "chunk_size":
                           CHUNK_SIZE,
                       "chunk_count":
@@ -1455,8 +1450,7 @@ jobs:
                   })
 
               master = {
-                  "version":
-                      3,
+                  "version": 3,
                   "type":
                       "persistent-rdp-master-index",
                   "updated_at":
@@ -1491,7 +1485,6 @@ jobs:
                   "PERSISTENT-RDP SYNC COMPLETE"
               )
 
-
           async def main():
 
               await client.start()
@@ -1508,7 +1501,6 @@ jobs:
                   "INITIAL PERSISTENCE READY"
               )
 
-
           with client:
 
               client.loop.run_until_complete(
@@ -1520,15 +1512,7 @@ jobs:
               -Path $script `
               -Encoding UTF8
 
-          # ----------------------------------------------------
-          # Initial restore + sync
-          # ----------------------------------------------------
-
           python $script
-
-          # ----------------------------------------------------
-          # Background sync loop
-          # ----------------------------------------------------
 
           $runner =
             "$env:TEMP\persistent_rdp_sync_loop.ps1"
@@ -1569,321 +1553,4 @@ jobs:
 
           Write-Host ""
           Write-Host "========================================"
-          Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
-          Write-Host "BACKGROUND SYNC: EVERY 5 MINUTES"
-          Write-Host "========================================"
-
-
-      # ========================================================
-      # VERIFY D:
-      # ========================================================
-
-      - name: Verify persistent D storage
-        shell: pwsh
-        run: |
-
-          $root =
-            "D:\Persistent-RDP"
-
-          if (-not (Test-Path $root)) {
-            throw "Persistent storage missing."
-          }
-
-          $test =
-            "$root\Persistent-RDP-Test"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $test `
-            -Force |
-            Out-Null
-
-          $file =
-            "$test\runner-test.txt"
-
-          Set-Content `
-            -Path $file `
-            -Value `
-              "Persistent-RDP test $(Get-Date -Format o)" `
-            -Encoding UTF8
-
-          if (-not (Test-Path $file)) {
-            throw "D WRITE FAILED."
-          }
-
-          Get-Content `
-            $file
-
-          Write-Host ""
-          Write-Host "D: WRITE SUCCESS"
-          Write-Host "D: PERSISTENT-RDP READY"
-
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
-
-
-      # ========================================================
-      # RUSTDESK
-      # ========================================================
-
-      - name: Install RustDesk
-        shell: pwsh
-        run: |
-
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
-
-          if (-not (Test-Path $rdExe)) {
-
-            $rdUrl =
-              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
-
-            $installerPath =
-              "$env:TEMP\rustdesk.msi"
-
-            Invoke-WebRequest `
-              -Uri $rdUrl `
-              -OutFile $installerPath `
-              -ErrorAction Stop
-
-            Start-Process `
-              msiexec.exe `
-              -ArgumentList `
-              "/i",
-              "`"$installerPath`"",
-              "/quiet",
-              "/norestart" `
-              -Wait
-
-            Remove-Item `
-              $installerPath `
-              -Force `
-              -ErrorAction SilentlyContinue
-          }
-
-
-      - name: Open RustDesk ports
-        shell: pwsh
-        run: |
-
-          for ($p = 21115; $p -le 21119; $p++) {
-
-            $name =
-              "APP-PORT-TCP-$p"
-
-            netsh advfirewall firewall delete rule `
-              name=$name 2>$null
-
-            netsh advfirewall firewall add rule `
-              name=$name `
-              dir=in `
-              action=allow `
-              protocol=TCP `
-              localport=$p
-          }
-
-
-      - name: Launch RustDesk
-        shell: pwsh
-        run: |
-
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
-
-          if (Test-Path $rdExe) {
-
-            Start-Process `
-              -FilePath $rdExe `
-              -ErrorAction SilentlyContinue
-
-            Start-Sleep -Seconds 5
-          }
-
-
-      # ========================================================
-      # DISPLAY CONNECTION INFORMATION
-      # ========================================================
-
-      - name: Display RDP connection information
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT-RDP READY"
-          Write-Host "=========================================="
-
-          Write-Host ""
-          Write-Host "TAILSCALE HOSTNAME:"
-          Write-Host "$env:TS_HOSTNAME"
-
-          Write-Host ""
-          Write-Host "TAILSCALE IP:"
-          Write-Host "$env:TAILSCALE_IP"
-
-          Write-Host ""
-          Write-Host "RDP USER:"
-          Write-Host "$env:RDP_USER"
-
-          Write-Host ""
-          Write-Host "RDP PORT:"
-          Write-Host "3389"
-
-          Write-Host ""
-          Write-Host "PERSISTENT STORAGE:"
-          Write-Host "D:\Persistent-RDP"
-
-          Write-Host ""
-          Write-Host "RUNTIME:"
-          Write-Host "$env:RUNTIME_MINUTES minutes"
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "CONNECT USING:"
-          Write-Host "$env:TAILSCALE_IP`:3389"
-          Write-Host "=========================================="
-
-
-      # ========================================================
-      # DISPLAY STORAGE STATUS
-      # ========================================================
-
-      - name: Display storage status
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT-RDP STORAGE"
-          Write-Host "=========================================="
-
-          Write-Host "Drive: D:"
-          Write-Host "Path: D:\Persistent-RDP"
-
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
-
-          Write-Host ""
-          Write-Host "Persistent folders:"
-
-          Get-ChildItem `
-            "D:\Persistent-RDP" `
-            -Force |
-            Select-Object `
-              Name,
-              Length,
-              LastWriteTime
-
-
-      # ========================================================
-      # KEEP ALIVE
-      # ========================================================
-
-      - name: Keep alive
-        shell: pwsh
-        run: |
-
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
-
-          $end =
-            (Get-Date).AddMinutes($mins)
-
-          while (
-            (Get-Date) -lt $end
-          ) {
-
-            Write-Host (
-              "Heartbeat " +
-              (Get-Date).ToString("HH:mm:ss")
-            )
-
-            Write-Host `
-              "Persistent-RDP background sync is running."
-
-            Start-Sleep `
-              -Seconds 60
-          }
-
-
-      # ========================================================
-      # FINAL SYNC
-      # ========================================================
-
-      - name: Final Persistent-RDP sync
-        if: always()
-        shell: pwsh
-        env:
-          API_ID: ${{ secrets.TELEGRAM_API_ID }}
-          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
-          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
-
-        run: |
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "FINAL PERSISTENT-RDP SYNC"
-          Write-Host "========================================"
-
-          $script =
-            "$env:TEMP\persistent_rdp_sync.py"
-
-          if (Test-Path $script) {
-
-            python $script
-
-          }
-          else {
-
-            Write-Host `
-              "Sync script not found."
-          }
-
-
-      # ========================================================
-      # STOP / NEXT
-      # ========================================================
-
-      - name: Dispatch next or stop
-        if: always()
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-        run: |
-
-          $cycles = 0
-
-          if (
-            "${{ inputs.cycles }}"
-            -match '^\d+$'
-          ) {
-
-            $cycles =
-              [int]"${{ inputs.cycles }}"
-          }
-
-          if ($cycles -gt 0) {
-
-            $next =
-              $cycles - 1
-
-            Write-Host `
-              "Next cycle: $next"
-
-          }
-          else {
-
-            Write-Host `
-              "No cycles configured. Done."
-          }
+          Write-Host
