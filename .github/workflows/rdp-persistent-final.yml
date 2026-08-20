@@ -68,6 +68,7 @@ defaults:
   run:
     shell: pwsh
 
+
 jobs:
 
   # ============================================================
@@ -744,49 +745,15 @@ jobs:
 
 
       # ========================================================
-      # RDP USER + FIREWALL
+      # RDP USER
       # ========================================================
 
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
 
-          $ErrorActionPreference = "Stop"
-
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
-
-          Write-Host "========================================"
-          Write-Host "CONFIGURING WINDOWS RDP"
-          Write-Host "========================================"
-
-          # ----------------------------------------------------
-          # Make sure Remote Desktop service exists and is running
-          # ----------------------------------------------------
-
-          $termService = Get-Service `
-            -Name "TermService" `
-            -ErrorAction Stop
-
-          if ($termService.StartType -ne "Automatic") {
-
-            Set-Service `
-              -Name "TermService" `
-              -StartupType Automatic
-          }
-
-          if ($termService.Status -ne "Running") {
-
-            Start-Service `
-              -Name "TermService" `
-              -ErrorAction SilentlyContinue
-
-            Start-Sleep -Seconds 3
-          }
-
-          # ----------------------------------------------------
-          # Create / update local RDP account
-          # ----------------------------------------------------
 
           $sec =
             ConvertTo-SecureString `
@@ -794,237 +761,106 @@ jobs:
               -AsPlainText `
               -Force
 
-          $existingUser =
+          $existing =
             Get-LocalUser `
               -Name $u `
               -ErrorAction SilentlyContinue
 
-          if (-not $existingUser) {
-
-            Write-Host "Creating user: $u"
+          if (-not $existing) {
 
             New-LocalUser `
               -Name $u `
               -Password $sec `
-              -FullName $u `
-              -Description "Persistent-RDP user" `
               -AccountNeverExpires `
-              -PasswordNeverExpires `
-              -UserMayNotChangePassword:$false `
-              -ErrorAction Stop |
-              Out-Null
+              -PasswordNeverExpires:$true `
+              -UserMayNotChangePassword:$false
+
           }
           else {
-
-            Write-Host "Updating existing user: $u"
 
             Set-LocalUser `
               -Name $u `
-              -Password $sec `
-              -AccountNeverExpires $true `
-              -PasswordNeverExpires $true `
-              -ErrorAction Stop
+              -Password $sec
 
             Enable-LocalUser `
-              -Name $u `
+              -Name $u
+          }
+
+          $adminGroup =
+            Get-LocalGroup `
+              -SID "S-1-5-32-544"
+
+          $rdpGroup =
+            Get-LocalGroup `
+              -SID "S-1-5-32-555"
+
+          $adminMember =
+            Get-LocalGroupMember `
+              -Group $adminGroup.Name `
+              -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -match "\\$([regex]::Escape($u))$"
+            }
+
+          if (-not $adminMember) {
+
+            Add-LocalGroupMember `
+              -Group $adminGroup.Name `
+              -Member $u `
               -ErrorAction SilentlyContinue
           }
 
-          # ----------------------------------------------------
-          # Add user to Administrators using net localgroup.
-          # This avoids Add-LocalGroupMember duplicate errors.
-          # ----------------------------------------------------
+          $rdpMember =
+            Get-LocalGroupMember `
+              -Group $rdpGroup.Name `
+              -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -match "\\$([regex]::Escape($u))$"
+            }
 
-          Write-Host "Adding $u to Administrators..."
+          if (-not $rdpMember) {
 
-          $adminOutput =
-            & net.exe localgroup Administrators $u /add 2>&1
-
-          Write-Host ($adminOutput -join "`n")
-
-          # Error 1378 = already a member.
-          # Treat it as success.
-          if ($LASTEXITCODE -ne 0 -and
-              ($adminOutput -join " ") -notmatch
-              "already a member|1378") {
-
-            Write-Warning `
-              "Administrators group command returned exit code $LASTEXITCODE"
+            Add-LocalGroupMember `
+              -Group $rdpGroup.Name `
+              -Member $u `
+              -ErrorAction SilentlyContinue
           }
-
-          # ----------------------------------------------------
-          # Add user to Remote Desktop Users.
-          # Again use net.exe so duplicates do not break the job.
-          # ----------------------------------------------------
-
-          Write-Host "Adding $u to Remote Desktop Users..."
-
-          $rdpGroupOutput =
-            & net.exe localgroup "Remote Desktop Users" $u /add 2>&1
-
-          Write-Host ($rdpGroupOutput -join "`n")
-
-          if ($LASTEXITCODE -ne 0 -and
-              ($rdpGroupOutput -join " ") -notmatch
-              "already a member|1378") {
-
-            Write-Warning `
-              "Remote Desktop Users command returned exit code $LASTEXITCODE"
-          }
-
-          # ----------------------------------------------------
-          # Enable RDP in registry
-          # ----------------------------------------------------
-
-          Write-Host "Enabling RDP registry settings..."
 
           Set-ItemProperty `
-            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
-            -Name "fDenyTSConnections" `
-            -Type DWord `
-            -Value 0 `
-            -Force
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name fDenyTSConnections `
+            -Value 0
 
           Set-ItemProperty `
-            -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
-            -Name "fAllowToGetHelp" `
-            -Type DWord `
-            -Value 0 `
-            -Force
+            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            -Name UserAuthentication `
+            -Value 0
 
-          # ----------------------------------------------------
-          # Make sure Network Level Authentication does not prevent
-          # the connection if the runner image has an unusual state.
-          # ----------------------------------------------------
+          Set-Service `
+            -Name TermService `
+            -StartupType Automatic
 
-          $rdpTcpPath =
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp"
+          Start-Service `
+            -Name TermService `
+            -ErrorAction SilentlyContinue
 
-          if (Test-Path $rdpTcpPath) {
+          Get-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue |
+            Enable-NetFirewallRule `
+            -ErrorAction SilentlyContinue
 
-            Set-ItemProperty `
-              -Path $rdpTcpPath `
-              -Name "UserAuthentication" `
-              -Type DWord `
-              -Value 1 `
-              -Force
-          }
-
-          # ----------------------------------------------------
-          # Firewall
-          #
-          # Do NOT depend only on DisplayGroup because that can
-          # fail on images/localizations where the display name
-          # is different.
-          # ----------------------------------------------------
-
-          Write-Host "Configuring Windows Firewall..."
-
-          netsh.exe advfirewall set allprofiles state on |
-            Out-Null
-
-          # Enable the built-in Remote Desktop firewall rules.
-          netsh.exe advfirewall firewall set rule `
-            group="remote desktop" `
-            new enable=Yes 2>&1 |
-            Write-Host
-
-          # Explicit TCP 3389 rule as a fallback.
-          netsh.exe advfirewall firewall delete rule `
-            name="Persistent-RDP-TCP-3389" 2>$null |
-            Out-Null
-
-          netsh.exe advfirewall firewall add rule `
-            name="Persistent-RDP-TCP-3389" `
+          netsh advfirewall firewall add rule `
+            name="RDP-TCP-3389" `
             dir=in `
             action=allow `
             protocol=TCP `
-            localport=3389 |
-            Out-Null
+            localport=3389 `
+            profile=any `
+            2>$null
 
-          # Explicit UDP 3389 rule.
-          netsh.exe advfirewall firewall delete rule `
-            name="Persistent-RDP-UDP-3389" 2>$null |
-            Out-Null
-
-          netsh.exe advfirewall firewall add rule `
-            name="Persistent-RDP-UDP-3389" `
-            dir=in `
-            action=allow `
-            protocol=UDP `
-            localport=3389 |
-            Out-Null
-
-          # ----------------------------------------------------
-          # Restart Remote Desktop service
-          # ----------------------------------------------------
-
-          Write-Host "Restarting Remote Desktop service..."
-
-          Restart-Service `
-            -Name "TermService" `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Start-Sleep -Seconds 5
-
-          # ----------------------------------------------------
-          # Verification
-          # ----------------------------------------------------
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "RDP CONFIGURATION VERIFICATION"
-          Write-Host "========================================"
-
-          $deny =
-            Get-ItemPropertyValue `
-              -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server" `
-              -Name "fDenyTSConnections"
-
-          Write-Host "fDenyTSConnections = $deny"
-
-          if ($deny -ne 0) {
-            throw "RDP registry configuration failed."
-          }
-
-          $svc =
-            Get-Service `
-              -Name "TermService"
-
-          Write-Host "TermService status = $($svc.Status)"
-
-          if ($svc.Status -ne "Running") {
-            throw "TermService is not running."
-          }
-
-          Write-Host ""
-          Write-Host "Testing TCP 3389 listener..."
-
-          $listener =
-            Get-NetTCPConnection `
-              -LocalPort 3389 `
-              -State Listen `
-              -ErrorAction SilentlyContinue
-
-          if ($listener) {
-
-            Write-Host "TCP 3389 LISTENING = YES"
-          }
-          else {
-
-            Write-Warning `
-              "TCP 3389 listener was not detected yet."
-          }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "RDP USER + FIREWALL READY"
-          Write-Host "========================================"
-          Write-Host "Username: $u"
-          Write-Host "RDP: ENABLED"
-          Write-Host "TCP 3389: ALLOWED"
-          Write-Host "========================================"
+          Write-Host "RDP USER READY"
+          Write-Host "RDP FIREWALL READY"
 
 
       # ========================================================
@@ -1043,6 +879,186 @@ jobs:
             pyautogui `
             pynput `
             pillow
+
+
+      # ========================================================
+      # REAL D: EXPANSION
+      # ========================================================
+
+      - name: Maximize D storage
+        shell: pwsh
+        run: |
+
+          Write-Host "=========================================="
+          Write-Host "MAXIMIZING REAL D: STORAGE"
+          Write-Host "=========================================="
+
+          $dVolume =
+            Get-Volume `
+              -DriveLetter D `
+              -ErrorAction Stop
+
+          $dPartition =
+            Get-Partition `
+              -DriveLetter D `
+              -ErrorAction Stop
+
+          $dBefore =
+            [math]::Round(
+              $dPartition.Size / 1GB,
+              2
+            )
+
+          Write-Host "D: before = $dBefore GB"
+
+          # ----------------------------------------------------
+          # Disk 0 contains C:
+          # Disk 1 contains D:
+          #
+          # We calculate the maximum amount Windows can safely
+          # shrink from C:, then use that REAL unallocated space
+          # to extend D:.
+          # ----------------------------------------------------
+
+          $supported =
+            Get-PartitionSupportedSize `
+              -DriveLetter C `
+              -ErrorAction Stop
+
+          $cPartition =
+            Get-Partition `
+              -DriveLetter C `
+              -ErrorAction Stop
+
+          $availableShrink =
+            $cPartition.Size -
+            $supported.SizeMin
+
+          $shrinkGB =
+            [math]::Floor(
+              $availableShrink / 1GB
+            )
+
+          # Keep a small safety margin.
+          if ($shrinkGB -gt 2) {
+            $shrinkGB = $shrinkGB - 1
+          }
+
+          if ($shrinkGB -lt 1) {
+
+            Write-Host "No safe C: space available for expansion."
+            Write-Host "D: remains at $dBefore GB."
+
+          }
+          else {
+
+            Write-Host "Maximum safe C: shrink = $shrinkGB GB"
+
+            $shrinkMB =
+              [int](
+                $shrinkGB * 1024
+              )
+
+            # ------------------------------------------------
+            # Shrink C: physically.
+            # ------------------------------------------------
+
+            Resize-Partition `
+              -DriveLetter C `
+              -Size (
+                $cPartition.Size -
+                ($shrinkMB * 1MB)
+              ) `
+              -ErrorAction Stop
+
+            Write-Host "C: physically reduced."
+
+            Start-Sleep -Seconds 2
+
+            # ------------------------------------------------
+            # Convert both disks to Dynamic so the D volume
+            # can use the newly-created real unallocated space
+            # on Disk 0.
+            # ------------------------------------------------
+
+            $scriptPath =
+              "$env:TEMP\expand_d_diskpart.txt"
+
+            @"
+            select disk 0
+            convert dynamic
+            select disk 1
+            convert dynamic
+            select volume D
+            extend disk=0
+            exit
+            "@ |
+              Set-Content `
+                -Path $scriptPath `
+                -Encoding ASCII
+
+            diskpart /s $scriptPath
+
+            if ($LASTEXITCODE -ne 0) {
+
+              Write-Host ""
+              Write-Host "DiskPart returned exit code $LASTEXITCODE"
+              Write-Host "Checking resulting D: size..."
+
+            }
+
+            Start-Sleep -Seconds 3
+
+            $dPartition =
+              Get-Partition `
+                -DriveLetter D `
+                -ErrorAction Stop
+
+            $dAfter =
+              [math]::Round(
+                $dPartition.Size / 1GB,
+                2
+              )
+
+            Write-Host ""
+            Write-Host "D: after = $dAfter GB"
+
+            if ($dAfter -le $dBefore) {
+
+              throw `
+                "D: was not expanded. Before=$dBefore GB After=$dAfter GB"
+            }
+
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host "REAL D: EXPANSION SUCCESS"
+            Write-Host "=========================================="
+          }
+
+          Get-Disk |
+            Format-Table `
+              Number,
+              FriendlyName,
+              PartitionStyle,
+              @{N="SizeGB";E={
+                [math]::Round(
+                  $_.Size / 1GB,
+                  2
+                )
+              }}
+
+          Get-Partition |
+            Format-Table `
+              DiskNumber,
+              PartitionNumber,
+              DriveLetter,
+              @{N="SizeGB";E={
+                [math]::Round(
+                  $_.Size / 1GB,
+                  2
+                )
+              }},
+              Type
 
 
       # ========================================================
@@ -1092,6 +1108,7 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
+              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1118,11 +1135,9 @@ jobs:
 
           @'
           import os
-          import sys
           import json
           import base64
           import hashlib
-          import math
           import time
           from datetime import datetime, timezone
           from telethon import TelegramClient
@@ -1642,8 +1657,7 @@ jobs:
           python $script
 
           # ----------------------------------------------------
-          # Create a background sync loop.
-          # This keeps saving changes while Keep Alive runs.
+          # Background sync every 30 seconds
           # ----------------------------------------------------
 
           $runner =
@@ -1666,7 +1680,7 @@ jobs:
                     "PERSISTENT SYNC ERROR: `$(`$_.Exception.Message)"
               }
 
-              Start-Sleep -Seconds 300
+              Start-Sleep -Seconds 30
           }
           "@ |
             Set-Content `
@@ -1686,7 +1700,7 @@ jobs:
           Write-Host ""
           Write-Host "========================================"
           Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
-          Write-Host "BACKGROUND SYNC: EVERY 5 MINUTES"
+          Write-Host "BACKGROUND SYNC: EVERY 30 SECONDS"
           Write-Host "========================================"
 
 
@@ -1738,6 +1752,7 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
+              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1839,6 +1854,7 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
+              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1904,10 +1920,6 @@ jobs:
           Write-Host "========================================"
           Write-Host "FINAL PERSISTENT-RDP SYNC"
           Write-Host "========================================"
-
-          # The background sync has already been
-          # saving every 5 minutes.
-          # This final pass saves the latest changes.
 
           $script =
             "$env:TEMP\persistent_rdp_sync.py"
