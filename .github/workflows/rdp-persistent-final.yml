@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (A)
+name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (FINAL)
 
 on:
   workflow_dispatch:
@@ -7,53 +7,44 @@ on:
         description: "Tailscale tailnet"
         required: true
         type: string
-
       ts_api_key:
         description: "Tailscale API key"
         required: true
         type: string
-
       ts_authkey:
         description: "Tailscale Auth key"
         required: true
         type: string
-
       quick_test:
         description: "Run 5-minute test"
         required: false
         type: boolean
         default: false
-
       runtime_minutes:
         description: "Runtime in minutes (maximum 360)"
         required: false
         type: string
         default: "355"
-
       do_purge:
         description: "Purge bullet devices at start"
         required: false
         type: boolean
         default: true
-
       cycles:
         description: "0 = stop after A; N = handoffs left"
         required: false
         type: string
         default: "0"
-
       rdp_count:
         description: "Number of RDP instances"
         required: false
         type: string
         default: "1"
-
       crd_code:
         description: "Chrome Remote Desktop code"
         required: false
         type: string
         default: ""
-
       crd_pin:
         description: "Chrome Remote Desktop PIN"
         required: false
@@ -70,15 +61,10 @@ defaults:
 
 jobs:
 
-  # ============================================================
-  # TELEGRAM STORAGE TEST
-  # ============================================================
-
   telegram-test:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Install Telethon
         shell: bash
         run: |
@@ -91,13 +77,9 @@ jobs:
           mkdir -p test_workspace/Projects/AE
           mkdir -p test_workspace/Assets/Fonts
 
-          echo "Persistent-RDP test $(date -u)" \
-            > test_workspace/Projects/AE/project.txt
+          echo "Persistent-RDP test $(date -u)" > test_workspace/Projects/AE/project.txt
+          echo "Persistent-RDP asset $(date -u)" > test_workspace/Assets/Fonts/test-font.txt
 
-          echo "Persistent-RDP asset $(date -u)" \
-            > test_workspace/Assets/Fonts/test-font.txt
-
-          echo "Created test tree:"
           find test_workspace -type f -print
 
       - name: Telegram persistent storage test
@@ -123,11 +105,7 @@ jobs:
           with open("unlim_session.session", "wb") as f:
               f.write(base64.b64decode(session_b64))
 
-          client = TelegramClient(
-              "unlim_session",
-              api_id,
-              api_hash
-          )
+          client = TelegramClient("unlim_session", api_id, api_hash)
 
           STORAGE_ROOT = "test_workspace"
           INDEX_FILE = "file_index.json"
@@ -135,27 +113,20 @@ jobs:
 
           def sha256(path):
               h = hashlib.sha256()
-
               with open(path, "rb") as f:
                   while True:
                       chunk = f.read(1024 * 1024)
-
                       if not chunk:
                           break
-
                       h.update(chunk)
-
               return h.hexdigest()
 
           def utc_now():
-              return datetime.now(
-                  timezone.utc
-              ).isoformat()
+              return datetime.now(timezone.utc).isoformat()
 
           def build_file_record(local_path):
               relative_path = os.path.relpath(
-                  local_path,
-                  STORAGE_ROOT
+                  local_path, STORAGE_ROOT
               ).replace("\\", "/")
 
               size = os.path.getsize(local_path)
@@ -178,22 +149,19 @@ jobs:
               }
 
           async def upload_file(file_record, local_path):
-
               with open(local_path, "rb") as f:
                   data = f.read()
 
               total_size = len(data)
 
               chunk_count = (
-                  1
-                  if total_size == 0
+                  1 if total_size == 0
                   else math.ceil(total_size / CHUNK_SIZE)
               )
 
               file_record["chunk_count"] = chunk_count
 
               for index in range(chunk_count):
-
                   start = index * CHUNK_SIZE
                   end = min(
                       start + CHUNK_SIZE,
@@ -208,10 +176,7 @@ jobs:
                       + ".bin"
                   )
 
-                  with open(
-                      chunk_name,
-                      "wb"
-                  ) as chunk_file:
+                  with open(chunk_name, "wb") as chunk_file:
                       chunk_file.write(chunk_data)
 
                   chunk_hash = sha256(chunk_name)
@@ -244,32 +209,23 @@ jobs:
                   os.remove(chunk_name)
 
           async def main():
-
               await client.start()
 
               print("TELEGRAM CONNECTED")
 
               files = []
 
-              for root, dirs, filenames in os.walk(
-                  STORAGE_ROOT
-              ):
+              for root, dirs, filenames in os.walk(STORAGE_ROOT):
                   dirs.sort()
                   filenames.sort()
 
                   for filename in filenames:
-
-                      local_path = os.path.join(
-                          root,
-                          filename
+                      files.append(
+                          os.path.join(root, filename)
                       )
 
-                      files.append(local_path)
-
               if not files:
-                  raise SystemExit(
-                      "NO TEST FILES FOUND"
-                  )
+                  raise SystemExit("NO TEST FILES FOUND")
 
               print(
                   f"FILE DISCOVERY SUCCESS: {len(files)} files"
@@ -287,22 +243,11 @@ jobs:
               }
 
               for local_path in files:
+                  record = build_file_record(local_path)
 
-                  record = build_file_record(
-                      local_path
-                  )
-
-                  print(
-                      f"FILE: {record['path']}"
-                  )
-
-                  print(
-                      f"SIZE: {record['size']}"
-                  )
-
-                  print(
-                      f"SHA256: {record['sha256']}"
-                  )
+                  print(f"FILE: {record['path']}")
+                  print(f"SIZE: {record['size']}")
+                  print(f"SHA256: {record['sha256']}")
 
                   await upload_file(
                       record,
@@ -324,8 +269,6 @@ jobs:
                       indent=2,
                       ensure_ascii=False
                   )
-
-              print("FILE INDEX CREATED")
 
               index_message = await client.send_file(
                   "me",
@@ -357,9 +300,7 @@ jobs:
 
               print("FILE INDEX LOOKUP SUCCESS")
 
-              restored_index_file = (
-                  "file_index_restored.json"
-              )
+              restored_index_file = "file_index_restored.json"
 
               await client.download_media(
                   found_index_message,
@@ -388,7 +329,6 @@ jobs:
               print("FILE INDEX READ SUCCESS")
 
               for record in restored_index["files"]:
-
                   if not record["path"].startswith("/"):
                       raise SystemExit(
                           "PATH VERIFICATION FAILED"
@@ -417,7 +357,6 @@ jobs:
               print("FILE RECORD VERIFICATION SUCCESS")
 
               for record in restored_index["files"]:
-
                   expected_indexes = list(
                       range(record["chunk_count"])
                   )
@@ -433,7 +372,6 @@ jobs:
                       )
 
                   for chunk in record["chunks"]:
-
                       if not chunk.get(
                           "telegram_message_id"
                       ):
@@ -507,10 +445,6 @@ jobs:
             file_index_restored.json
             test_workspace
 
-  # ============================================================
-  # SETUP
-  # ============================================================
-
   setup:
     runs-on: ubuntu-latest
 
@@ -519,11 +453,9 @@ jobs:
       multi: ${{ steps.mk.outputs.multi }}
 
     steps:
-
       - id: mk
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -532,7 +464,6 @@ jobs:
             $n = 1
           }
           else {
-
             $n = 1
 
             if ("${{ inputs.rdp_count }}" -match '^\d+$') {
@@ -561,10 +492,7 @@ jobs:
           } | ConvertTo-Json -Compress
 
           "matrix=$json" |
-            Out-File `
-              $env:GITHUB_OUTPUT `
-              -Append `
-              -Encoding utf8
+            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
           $multi = if ($n -gt 1) {
             "1"
@@ -574,17 +502,11 @@ jobs:
           }
 
           "multi=$multi" |
-            Out-File `
-              $env:GITHUB_OUTPUT `
-              -Append `
-              -Encoding utf8
-
-  # ============================================================
-  # WINDOWS RDP
-  # ============================================================
+            Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
   rdp:
     needs: setup
+
     runs-on: windows-latest
 
     strategy:
@@ -599,51 +521,32 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------------
-      # CRD FLAG
-      # --------------------------------------------------------
-
       - name: Set CRD flag
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
-              Out-File `
-                -Append `
-                $env:GITHUB_ENV
-
+              Out-File -Append $env:GITHUB_ENV
           }
           else {
-
             "CRD_ENABLED=0" |
-              Out-File `
-                -Append `
-                $env:GITHUB_ENV
+              Out-File -Append $env:GITHUB_ENV
           }
-
-      # --------------------------------------------------------
-      # INSTALL CRD
-      # --------------------------------------------------------
 
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
-
             $exePath = "$env:TEMP\chromeremotedesktophost.exe"
 
             try {
-
               Invoke-WebRequest `
                 -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile $exePath `
@@ -654,13 +557,9 @@ jobs:
                 -ArgumentList "/silent","/install" `
                 -Wait
 
-              Remove-Item `
-                $exePath `
-                -Force
-
+              Remove-Item $exePath -Force
             }
             catch {
-
               $msi = "$env:TEMP\chromeremotedesktophost.msi"
 
               Invoke-WebRequest `
@@ -677,21 +576,14 @@ jobs:
                   "/norestart" `
                 -Wait
 
-              Remove-Item `
-                $msi `
-                -Force
+              Remove-Item $msi -Force
             }
           }
-
-      # --------------------------------------------------------
-      # START CRD
-      # --------------------------------------------------------
 
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -711,17 +603,14 @@ jobs:
           $code = $null
 
           if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
-
             $code = (
               [regex]::Match(
                 $raw,
                 '--code\s*=\s*"?([^"\s]+)'
               )
             ).Groups[1].Value
-
           }
           elseif ($raw -match '^4\/') {
-
             $code = $raw
           }
 
@@ -743,14 +632,9 @@ jobs:
             -FilePath $starter `
             -ArgumentList $args
 
-      # --------------------------------------------------------
-      # HOSTNAME + RUNTIME
-      # --------------------------------------------------------
-
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
-
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -759,16 +643,13 @@ jobs:
           }
 
           "TS_HOSTNAME=$hn" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
+            Out-File -Append $env:GITHUB_ENV
 
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
 
           function IntOr($v,$d) {
-
             if ("$v" -match '^\d+$') {
               return [int]$v
             }
@@ -797,30 +678,22 @@ jobs:
           }
 
           "RUNTIME_MINUTES=$runtime" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-      # --------------------------------------------------------
-      # PURGE TAILSCALE DEVICES
-      # --------------------------------------------------------
+            Out-File -Append $env:GITHUB_ENV
 
       - name: Purge bullet devices
         if: needs.setup.outputs.multi == '0'
         shell: pwsh
         run: |
-
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          if (-not (Yes("${{ inputs.do_purge }}")) ) {
+          if (-not (Yes("${{ inputs.do_purge }}"))) {
             Write-Host "Purge disabled."
             exit 0
           }
 
           try {
-
             $auth = [Convert]::ToBase64String(
               [Text.Encoding]::ASCII.GetBytes(
                 "${{ inputs.ts_api_key }}:"
@@ -839,9 +712,7 @@ jobs:
               }
 
             foreach ($d in $list.devices) {
-
               if ($d.hostname -match '^bullet[0-9]*$') {
-
                 Invoke-RestMethod `
                   -Method Delete `
                   -Uri `
@@ -852,25 +723,17 @@ jobs:
                   -ErrorAction SilentlyContinue
               }
             }
-
           }
           catch {
-
             Write-Host "Purge warning: $($_.Exception.Message)"
           }
-
-      # --------------------------------------------------------
-      # TAILSCALE
-      # --------------------------------------------------------
 
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
-
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (-not (Test-Path $ts)) {
-
             $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
             $dst = "$env:TEMP\tailscale.msi"
 
@@ -887,9 +750,7 @@ jobs:
                 "/norestart" `
               -Wait
 
-            Remove-Item `
-              $dst `
-              -Force
+            Remove-Item $dst -Force
           }
 
           & $ts logout 2>$null | Out-Null
@@ -906,20 +767,13 @@ jobs:
           )
 
           "TAILSCALE_IP=$ip4" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
+            Out-File -Append $env:GITHUB_ENV
 
           Write-Host "TAILSCALE IP: $ip4"
-
-      # --------------------------------------------------------
-      # RDP USER
-      # --------------------------------------------------------
 
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
-
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
@@ -933,15 +787,12 @@ jobs:
               -Name $u `
               -ErrorAction SilentlyContinue
           )) {
-
             New-LocalUser `
               -Name $u `
               -Password $sec `
               -AccountNeverExpires
-
           }
           else {
-
             Set-LocalUser `
               -Name $u `
               -Password $sec `
@@ -970,30 +821,21 @@ jobs:
             -DisplayGroup "Remote Desktop" |
             Out-Null
 
-      # --------------------------------------------------------
-      # PYTHON
-      # --------------------------------------------------------
-
       - name: Install Python libs
         shell: pwsh
         run: |
-
           python -m pip install --upgrade pip
 
           python -m pip install `
             --force-reinstall `
             pyautogui `
             pynput `
-            pillow
-
-      # --------------------------------------------------------
-      # WINFSP
-      # --------------------------------------------------------
+            pillow `
+            telethon
 
       - name: Install WinFSP
         shell: pwsh
         run: |
-
           Write-Host "===== WINFSP ====="
 
           $installed = Get-ItemProperty `
@@ -1001,7 +843,6 @@ jobs:
             -ErrorAction SilentlyContinue
 
           if (-not $installed) {
-
             choco install winfsp `
               -y `
               --no-progress
@@ -1015,9 +856,7 @@ jobs:
           $found = $false
 
           foreach ($p in $paths) {
-
             if (Test-Path $p) {
-
               Write-Host "WinFSP FOUND: $p"
               $found = $true
             }
@@ -1029,28 +868,18 @@ jobs:
 
           Write-Host "WINFSP READY"
 
-      # --------------------------------------------------------
-      # GO
-      # --------------------------------------------------------
-
       - name: Prepare Go
         shell: pwsh
         run: |
-
           go version
 
           if ($LASTEXITCODE -ne 0) {
             throw "Go is not available."
           }
 
-      # --------------------------------------------------------
-      # BUILD WINFSP PASSTHROUGH
-      # --------------------------------------------------------
-
       - name: Build persistent passthrough
         shell: pwsh
         run: |
-
           $src = "$env:RUNNER_TEMP\go-winfsp"
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
 
@@ -1082,18 +911,12 @@ jobs:
 
           Write-Host "PASSTHROUGH READY: $exe"
 
-      # --------------------------------------------------------
-      # PERSISTENT BACKING STORAGE
-      # --------------------------------------------------------
-
       - name: Prepare persistent U backing storage
         shell: pwsh
         run: |
-
           $root = "C:\Persistent-RDP-U"
 
           if (-not (Test-Path $root)) {
-
             New-Item `
               -ItemType Directory `
               -Path $root `
@@ -1113,14 +936,9 @@ jobs:
             throw "Backing storage was not created."
           }
 
-      # --------------------------------------------------------
-      # CREATE MOUNT SCRIPT
-      # --------------------------------------------------------
-
       - name: Create U mount script
         shell: pwsh
         run: |
-
           $scriptPath = "C:\Persistent-RDP-U\mount-u.ps1"
 
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
@@ -1137,9 +955,7 @@ jobs:
           `$root = "$root"
 
           while (`$true) {
-
               try {
-
                   `$existing = Get-PSDrive U -ErrorAction SilentlyContinue
 
                   if (`$existing) {
@@ -1167,7 +983,6 @@ jobs:
                   while (-not `$p.HasExited) {
                       Start-Sleep -Seconds 5
                   }
-
               }
               catch {
                   Start-Sleep -Seconds 5
@@ -1182,14 +997,9 @@ jobs:
 
           Write-Host "MOUNT SCRIPT CREATED: $scriptPath"
 
-      # --------------------------------------------------------
-      # CREATE LOGON TASK
-      # --------------------------------------------------------
-
       - name: Create U logon task
         shell: pwsh
         run: |
-
           $taskName = "Persistent-RDP-U"
 
           schtasks.exe `
@@ -1216,14 +1026,9 @@ jobs:
 
           Write-Host "U LOGON TASK CREATED"
 
-      # --------------------------------------------------------
-      # START U FOR CURRENT TEST
-      # --------------------------------------------------------
-
       - name: Start U filesystem
         shell: pwsh
         run: |
-
           $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
           $root = "C:\Persistent-RDP-U"
 
@@ -1253,7 +1058,6 @@ jobs:
           Start-Sleep -Seconds 8
 
           if ($process.HasExited) {
-
             Write-Host "===== U STDOUT ====="
 
             if (Test-Path $stdout) {
@@ -1271,14 +1075,68 @@ jobs:
 
           Write-Host "U filesystem process is running."
 
-      # --------------------------------------------------------
-      # TEST BACKING STORAGE
-      # --------------------------------------------------------
+      - name: VERIFY U DRIVE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=========================================="
+          Write-Host "VERIFYING U: DRIVE"
+          Write-Host "=========================================="
+
+          $deadline = (Get-Date).AddSeconds(30)
+          $drive = $null
+
+          while ((Get-Date) -lt $deadline) {
+            $drive = Get-PSDrive U -ErrorAction SilentlyContinue
+
+            if ($drive) {
+              break
+            }
+
+            Start-Sleep -Seconds 2
+          }
+
+          if (-not $drive) {
+            throw "U: DRIVE WAS NOT CREATED."
+          }
+
+          Write-Host "U: DRIVE FOUND"
+          Write-Host "Root: $($drive.Root)"
+
+          New-Item `
+            -ItemType Directory `
+            -Path "U:\Persistent-RDP-Test" `
+            -Force |
+            Out-Null
+
+          $testFile = "U:\Persistent-RDP-Test\runner-test.txt"
+
+          Set-Content `
+            -Path $testFile `
+            -Value "Persistent-RDP U test $(Get-Date -Format o)" `
+            -Encoding UTF8
+
+          if (-not (Test-Path $testFile)) {
+            throw "U: WRITE TEST FAILED."
+          }
+
+          $content = Get-Content `
+            -Path $testFile `
+            -Raw
+
+          Write-Host "U: WRITE TEST SUCCESS"
+          Write-Host "U: READ TEST SUCCESS"
+          Write-Host "TEST CONTENT: $content"
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "U: DRIVE READY"
+          Write-Host "=========================================="
 
       - name: Test U backing storage
         shell: pwsh
         run: |
-
           $root = "C:\Persistent-RDP-U"
 
           New-Item `
@@ -1300,14 +1158,9 @@ jobs:
 
           Write-Host "BACKING STORAGE WRITE SUCCESS"
 
-      # --------------------------------------------------------
-      # U STATUS
-      # --------------------------------------------------------
-
       - name: Display U status
         shell: pwsh
         run: |
-
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "PERSISTENT U BACKING STATUS"
@@ -1324,30 +1177,28 @@ jobs:
           }
 
           Write-Host ""
+          Write-Host "U: filesystem:"
+
+          Get-PSDrive U -ErrorAction SilentlyContinue
+
+          Write-Host ""
           Write-Host "Files:"
 
           Get-ChildItem `
-            "C:\Persistent-RDP-U" `
+            "U:\" `
             -Recurse `
-            -Force
+            -Force `
+            -ErrorAction SilentlyContinue
 
           Write-Host ""
-          Write-Host "NOTE:"
-          Write-Host "U: is created in the interactive user session."
-          Write-Host "The logon task will mount U: when RDP_USER logs in."
-
-      # --------------------------------------------------------
-      # RUSTDESK
-      # --------------------------------------------------------
+          Write-Host "U: IS READY FOR THE TEST."
 
       - name: Install RustDesk
         shell: pwsh
         run: |
-
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (-not (Test-Path $rdExe)) {
-
             $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
 
             $installerPath = "$env:TEMP\rustdesk.msi"
@@ -1370,16 +1221,10 @@ jobs:
               -Force
           }
 
-      # --------------------------------------------------------
-      # RUSTDESK PORTS
-      # --------------------------------------------------------
-
       - name: Open RustDesk ports
         shell: pwsh
         run: |
-
           for ($p = 21115; $p -le 21119; $p++) {
-
             $name = "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
@@ -1393,18 +1238,12 @@ jobs:
               localport=$p
           }
 
-      # --------------------------------------------------------
-      # LAUNCH RUSTDESK
-      # --------------------------------------------------------
-
       - name: Launch RustDesk
         shell: pwsh
         run: |
-
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (Test-Path $rdExe) {
-
             Start-Process `
               -FilePath $rdExe `
               -ErrorAction SilentlyContinue
@@ -1412,14 +1251,9 @@ jobs:
             Start-Sleep -Seconds 5
           }
 
-      # --------------------------------------------------------
-      # KEEP ALIVE
-      # --------------------------------------------------------
-
       - name: Keep alive
         shell: pwsh
         run: |
-
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end = (
@@ -1429,18 +1263,18 @@ jobs:
           while (
             (Get-Date) -lt $end
           ) {
-
             Write-Host (
               "Heartbeat " +
               (Get-Date).ToString("HH:mm:ss")
             )
 
+            Write-Host (
+              "U drive: " +
+              [bool](Get-PSDrive U -ErrorAction SilentlyContinue)
+            )
+
             Start-Sleep -Seconds 60
           }
-
-      # --------------------------------------------------------
-      # STOP / NEXT
-      # --------------------------------------------------------
 
       - name: Dispatch next or stop
         if: always()
@@ -1448,7 +1282,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-
           $cycles = 0
 
           if ("${{ inputs.cycles }}" -match '^\d+$') {
@@ -1456,13 +1289,9 @@ jobs:
           }
 
           if ($cycles -gt 0) {
-
             $next = $cycles - 1
-
             Write-Host "Next cycle: $next"
-
           }
           else {
-
             Write-Host "No cycles configured. Done."
           }
