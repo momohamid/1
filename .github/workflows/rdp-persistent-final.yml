@@ -441,6 +441,7 @@ jobs:
               print("CHUNK METADATA SUCCESS")
 
               first_record = restored_index["files"][0]
+
               first_chunk = first_record["chunks"][0]
 
               first_chunk_message = await client.get_messages(
@@ -498,6 +499,7 @@ jobs:
             file_index.json
             file_index_restored.json
             test_workspace
+
 
   # ============================================================
   # SETUP
@@ -569,12 +571,14 @@ jobs:
               -Append `
               -Encoding utf8
 
+
   # ============================================================
   # WINDOWS RDP
   # ============================================================
 
   rdp:
     needs: setup
+
     runs-on: windows-latest
 
     strategy:
@@ -612,6 +616,7 @@ jobs:
                 -Append `
                 $env:GITHUB_ENV
           }
+
 
       # --------------------------------------------------------
       # INSTALL CRD
@@ -652,9 +657,9 @@ jobs:
               Start-Process `
                 msiexec.exe `
                 -ArgumentList `
-                  "/i",
-                  "`"$msi`"",
-                  "/quiet",
+                  "/i", `
+                  "`"$msi`"", `
+                  "/quiet", `
                   "/norestart" `
                 -Wait
 
@@ -663,6 +668,7 @@ jobs:
                 -Force
             }
           }
+
 
       # --------------------------------------------------------
       # START CRD
@@ -707,6 +713,7 @@ jobs:
           }
 
           $redir = "https://remotedesktop.google.com/_/oauthredirect"
+
           $name = $Env:COMPUTERNAME
 
           $args = @(
@@ -719,6 +726,7 @@ jobs:
           Start-Process `
             -FilePath $starter `
             -ArgumentList $args
+
 
       # --------------------------------------------------------
       # HOSTNAME + RUNTIME
@@ -776,6 +784,7 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
+
       # --------------------------------------------------------
       # PURGE TAILSCALE DEVICES
       # --------------------------------------------------------
@@ -828,6 +837,7 @@ jobs:
             Write-Host "Purge warning: $($_.Exception.Message)"
           }
 
+
       # --------------------------------------------------------
       # TAILSCALE
       # --------------------------------------------------------
@@ -839,6 +849,7 @@ jobs:
 
           if (-not (Test-Path $ts)) {
             $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+
             $dst = "$env:TEMP\tailscale.msi"
 
             Invoke-WebRequest `
@@ -848,9 +859,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$dst`"",
-                "/quiet",
+                "/i", `
+                "`"$dst`"", `
+                "/quiet", `
                 "/norestart" `
               -Wait
 
@@ -878,6 +889,7 @@ jobs:
               $env:GITHUB_ENV
 
           Write-Host "TAILSCALE IP: $ip4"
+
 
       # --------------------------------------------------------
       # RDP USER
@@ -942,6 +954,7 @@ jobs:
 
           Write-Host "RDP USER READY: $u"
 
+
       # --------------------------------------------------------
       # PYTHON
       # --------------------------------------------------------
@@ -956,6 +969,7 @@ jobs:
             pyautogui `
             pynput `
             pillow
+
 
       # --------------------------------------------------------
       # LOCAL PERSISTENT-RDP STORAGE
@@ -986,6 +1000,12 @@ jobs:
             -Force |
             Out-Null
 
+          New-Item `
+            -ItemType Directory `
+            -Path "$root\Persistent-Test" `
+            -Force |
+            Out-Null
+
           Write-Host "LOCAL STORAGE: $root"
 
           Get-Volume -DriveLetter D |
@@ -993,29 +1013,150 @@ jobs:
 
           Write-Host "D: STORAGE READY"
 
+
       # --------------------------------------------------------
-      # OPTIONAL U ALIAS
+      # RESTORE PERSISTENCE TEST FROM TELEGRAM
       # --------------------------------------------------------
 
-      - name: Create U alias
+      - name: Restore persistent test files
         shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
         run: |
-          $root = "D:\Persistent-RDP"
+          python -m pip install telethon
 
-          if (Test-Path "U:\") {
-            subst U: /D 2>$null
-          }
+          $script = @'
+          import os
+          import base64
+          import hashlib
+          import json
+          from telethon import TelegramClient
 
-          subst U: $root
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
 
-          Start-Sleep -Seconds 2
+          ROOT = r"D:\Persistent-RDP\Persistent-Test"
+          INDEX_NAME = "PERSISTENT-RDP-TEST-INDEX"
 
-          if (Test-Path "U:\") {
-            Write-Host "U: ALIAS READY -> $root"
-          }
-          else {
-            Write-Host "U: alias unavailable; continuing with D:\Persistent-RDP"
-          }
+          os.makedirs(ROOT, exist_ok=True)
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(SESSION_B64))
+
+          client = TelegramClient(
+              "unlim_session",
+              API_ID,
+              API_HASH
+          )
+
+          def sha256(path):
+              h = hashlib.sha256()
+
+              with open(path, "rb") as f:
+                  while True:
+                      data = f.read(1024 * 1024)
+
+                      if not data:
+                          break
+
+                      h.update(data)
+
+              return h.hexdigest()
+
+          async def main():
+              await client.start()
+
+              print("TELEGRAM CONNECTED")
+
+              index_message = None
+
+              async for msg in client.iter_messages(
+                  "me",
+                  search=INDEX_NAME,
+                  limit=20
+              ):
+                  if msg.message and INDEX_NAME in msg.message:
+                      index_message = msg
+                      break
+
+              if not index_message:
+                  print(
+                      "NO PREVIOUS PERSISTENT TEST FOUND"
+                  )
+                  return
+
+              print(
+                  f"FOUND PERSISTENT INDEX: "
+                  f"{index_message.id}"
+              )
+
+              index_file = "persistent_test_index.json"
+
+              await client.download_media(
+                  index_message,
+                  file=index_file
+              )
+
+              with open(
+                  index_file,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+                  index = json.load(f)
+
+              for record in index.get("files", []):
+                  filename = record["name"]
+
+                  message = await client.get_messages(
+                      "me",
+                      ids=record["message_id"]
+                  )
+
+                  if not message:
+                      raise RuntimeError(
+                          f"Missing Telegram message "
+                          f"for {filename}"
+                      )
+
+                  destination = os.path.join(
+                      ROOT,
+                      filename
+                  )
+
+                  await client.download_media(
+                      message,
+                      file=destination
+                  )
+
+                  actual = sha256(destination)
+
+                  if actual != record["sha256"]:
+                      raise RuntimeError(
+                          f"SHA256 FAILED: {filename}"
+                      )
+
+                  print(
+                      f"RESTORE SUCCESS: {filename}"
+                  )
+
+              print("================================")
+              print("PERSISTENT TEST RESTORE SUCCESS")
+              print("================================")
+
+          with client:
+              client.loop.run_until_complete(main())
+          '@
+
+          Set-Content `
+            -Path "$env:TEMP\restore_persistence.py" `
+            -Value $script `
+            -Encoding UTF8
+
+          python "$env:TEMP\restore_persistence.py"
+
 
       # --------------------------------------------------------
       # TEST LOCAL STORAGE
@@ -1053,18 +1194,6 @@ jobs:
           Write-Host "LOCAL STORAGE READ SUCCESS"
           Write-Host "TEST CONTENT: $content"
 
-          if (Test-Path "U:\") {
-            $uTest = "U:\Persistent-RDP-Test\u-alias-test.txt"
-
-            Set-Content `
-              -Path $uTest `
-              -Value "U alias test $(Get-Date -Format o)" `
-              -Encoding UTF8
-
-            if (Test-Path $uTest) {
-              Write-Host "U ALIAS WRITE SUCCESS"
-            }
-          }
 
       # --------------------------------------------------------
       # DISPLAY STORAGE STATUS
@@ -1091,13 +1220,6 @@ jobs:
             throw "D:\Persistent-RDP missing."
           }
 
-          if (Test-Path "U:\") {
-            Write-Host "U: ALIAS READY"
-          }
-          else {
-            Write-Host "U: alias not available"
-          }
-
           Write-Host ""
           Write-Host "Storage tree:"
 
@@ -1106,6 +1228,7 @@ jobs:
             -Recurse `
             -Force |
             Select-Object FullName,Length,LastWriteTime
+
 
       # --------------------------------------------------------
       # RUSTDESK
@@ -1118,6 +1241,7 @@ jobs:
 
           if (-not (Test-Path $rdExe)) {
             $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
             $installerPath = "$env:TEMP\rustdesk.msi"
 
             Invoke-WebRequest `
@@ -1127,9 +1251,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$installerPath`"",
-                "/quiet",
+                "/i", `
+                "`"$installerPath`"", `
+                "/quiet", `
                 "/norestart" `
               -Wait
 
@@ -1137,6 +1261,7 @@ jobs:
               $installerPath `
               -Force
           }
+
 
       # --------------------------------------------------------
       # RUSTDESK PORTS
@@ -1159,6 +1284,7 @@ jobs:
               localport=$p
           }
 
+
       # --------------------------------------------------------
       # LAUNCH RUSTDESK
       # --------------------------------------------------------
@@ -1175,6 +1301,7 @@ jobs:
 
             Start-Sleep -Seconds 5
           }
+
 
       # --------------------------------------------------------
       # KEEP ALIVE
@@ -1199,6 +1326,172 @@ jobs:
 
             Start-Sleep -Seconds 60
           }
+
+
+      # --------------------------------------------------------
+      # SAVE PERSISTENCE TEST TO TELEGRAM
+      # --------------------------------------------------------
+
+      - name: Save persistence test to Telegram
+        if: always()
+        shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+        run: |
+          python -m pip install telethon
+
+          $script = @'
+          import os
+          import base64
+          import hashlib
+          import json
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          ROOT = r"D:\Persistent-RDP\Persistent-Test"
+          INDEX_NAME = "PERSISTENT-RDP-TEST-INDEX"
+
+          with open("unlim_session.session", "wb") as f:
+              f.write(base64.b64decode(SESSION_B64))
+
+          client = TelegramClient(
+              "unlim_session",
+              API_ID,
+              API_HASH
+          )
+
+          def sha256(path):
+              h = hashlib.sha256()
+
+              with open(path, "rb") as f:
+                  while True:
+                      data = f.read(1024 * 1024)
+
+                      if not data:
+                          break
+
+                      h.update(data)
+
+              return h.hexdigest()
+
+          async def main():
+              await client.start()
+
+              print("TELEGRAM CONNECTED")
+
+              if not os.path.isdir(ROOT):
+                  print(
+                      "PERSISTENT TEST DIRECTORY EMPTY"
+                  )
+                  return
+
+              files = []
+
+              for name in sorted(
+                  os.listdir(ROOT)
+              ):
+                  path = os.path.join(
+                      ROOT,
+                      name
+                  )
+
+                  if os.path.isfile(path):
+                      files.append(path)
+
+              print(
+                  f"FILES TO SAVE: {len(files)}"
+              )
+
+              records = []
+
+              for path in files:
+                  name = os.path.basename(path)
+                  file_hash = sha256(path)
+                  size = os.path.getsize(path)
+
+                  print(
+                      f"UPLOADING: {name}"
+                  )
+
+                  print(
+                      f"SIZE: {size}"
+                  )
+
+                  print(
+                      f"SHA256: {file_hash}"
+                  )
+
+                  message = await client.send_file(
+                      "me",
+                      path,
+                      caption=(
+                          "PERSISTENT-RDP-TEST-FILE\n"
+                          f"name={name}\n"
+                          f"sha256={file_hash}"
+                      )
+                  )
+
+                  records.append({
+                      "name": name,
+                      "size": size,
+                      "sha256": file_hash,
+                      "message_id": message.id
+                  })
+
+                  print(
+                      f"UPLOAD SUCCESS: "
+                      f"{name} "
+                      f"message_id={message.id}"
+                  )
+
+              with open(
+                  "persistent_test_index.json",
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+                  json.dump(
+                      {
+                          "version": 1,
+                          "type":
+                              "persistent-rdp-test",
+                          "files": records
+                      },
+                      f,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+
+              index_message = await client.send_file(
+                  "me",
+                  "persistent_test_index.json",
+                  caption=INDEX_NAME
+              )
+
+              print(
+                  f"INDEX SAVED: "
+                  f"{index_message.id}"
+              )
+
+              print("================================")
+              print("PERSISTENT TEST SAVE SUCCESS")
+              print("================================")
+
+          with client:
+              client.loop.run_until_complete(main())
+          '@
+
+          Set-Content `
+            -Path "$env:TEMP\save_persistence.py" `
+            -Value $script `
+            -Encoding UTF8
+
+          python "$env:TEMP\save_persistence.py"
+
 
       # --------------------------------------------------------
       # STOP / NEXT
