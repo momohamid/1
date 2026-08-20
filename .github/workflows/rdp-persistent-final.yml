@@ -68,7 +68,6 @@ defaults:
   run:
     shell: pwsh
 
-
 jobs:
 
   # ============================================================
@@ -334,7 +333,6 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -418,7 +416,6 @@ jobs:
       - name: Set CRD flag
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -441,7 +438,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -503,7 +499,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -569,7 +564,6 @@ jobs:
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
-
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -629,7 +623,6 @@ jobs:
         if: needs.setup.outputs.multi == '0'
         shell: pwsh
         run: |
-
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
@@ -691,7 +684,6 @@ jobs:
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
-
           $ts =
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
@@ -751,7 +743,6 @@ jobs:
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
-
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
@@ -772,8 +763,7 @@ jobs:
               -Name $u `
               -Password $sec `
               -AccountNeverExpires `
-              -PasswordNeverExpires:$true `
-              -UserMayNotChangePassword:$false
+              -PasswordNeverExpires
 
           }
           else {
@@ -786,42 +776,34 @@ jobs:
               -Name $u
           }
 
-          $adminGroup =
-            Get-LocalGroup `
-              -SID "S-1-5-32-544"
-
-          $rdpGroup =
-            Get-LocalGroup `
-              -SID "S-1-5-32-555"
-
           $adminMember =
             Get-LocalGroupMember `
-              -Group $adminGroup.Name `
+              -Group "Administrators" `
               -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.Name -match "\\$([regex]::Escape($u))$"
-            }
+              Where-Object {
+                $_.Name -eq "$env:COMPUTERNAME\$u" -or
+                $_.Name -eq $u
+              }
 
           if (-not $adminMember) {
-
             Add-LocalGroupMember `
-              -Group $adminGroup.Name `
+              -Group "Administrators" `
               -Member $u `
               -ErrorAction SilentlyContinue
           }
 
           $rdpMember =
             Get-LocalGroupMember `
-              -Group $rdpGroup.Name `
+              -Group "Remote Desktop Users" `
               -ErrorAction SilentlyContinue |
-            Where-Object {
-              $_.Name -match "\\$([regex]::Escape($u))$"
-            }
+              Where-Object {
+                $_.Name -eq "$env:COMPUTERNAME\$u" -or
+                $_.Name -eq $u
+              }
 
           if (-not $rdpMember) {
-
             Add-LocalGroupMember `
-              -Group $rdpGroup.Name `
+              -Group "Remote Desktop Users" `
               -Member $u `
               -ErrorAction SilentlyContinue
           }
@@ -832,17 +814,9 @@ jobs:
             -Value 0
 
           Set-ItemProperty `
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
             -Name UserAuthentication `
-            -Value 0
-
-          Set-Service `
-            -Name TermService `
-            -StartupType Automatic
-
-          Start-Service `
-            -Name TermService `
-            -ErrorAction SilentlyContinue
+            -Value 1
 
           Get-NetFirewallRule `
             -DisplayGroup "Remote Desktop" `
@@ -850,17 +824,13 @@ jobs:
             Enable-NetFirewallRule `
             -ErrorAction SilentlyContinue
 
-          netsh advfirewall firewall add rule `
-            name="RDP-TCP-3389" `
-            dir=in `
-            action=allow `
-            protocol=TCP `
-            localport=3389 `
-            profile=any `
-            2>$null
+          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
 
+          Write-Host ""
+          Write-Host "========================================"
           Write-Host "RDP USER READY"
-          Write-Host "RDP FIREWALL READY"
+          Write-Host "USER: $u"
+          Write-Host "========================================"
 
 
       # ========================================================
@@ -870,7 +840,6 @@ jobs:
       - name: Install Python libs
         shell: pwsh
         run: |
-
           python -m pip install --upgrade pip
 
           python -m pip install `
@@ -882,183 +851,75 @@ jobs:
 
 
       # ========================================================
-      # REAL D: EXPANSION
+      # MAXIMIZE D STORAGE
       # ========================================================
 
       - name: Maximize D storage
         shell: pwsh
         run: |
+          $diskNumber = 1
 
-          Write-Host "=========================================="
-          Write-Host "MAXIMIZING REAL D: STORAGE"
-          Write-Host "=========================================="
-
-          $dVolume =
-            Get-Volume `
-              -DriveLetter D `
+          $disk =
+            Get-Disk `
+              -Number $diskNumber `
               -ErrorAction Stop
 
-          $dPartition =
+          Write-Host "========================================"
+          Write-Host "D STORAGE CHECK"
+          Write-Host "Disk Number: $diskNumber"
+          Write-Host "Disk Size: $($disk.Size)"
+          Write-Host "Partition Style: $($disk.PartitionStyle)"
+          Write-Host "========================================"
+
+          $partition =
             Get-Partition `
-              -DriveLetter D `
+              -DiskNumber $diskNumber `
+              -PartitionNumber 1 `
               -ErrorAction Stop
 
-          $dBefore =
-            [math]::Round(
-              $dPartition.Size / 1GB,
-              2
-            )
-
-          Write-Host "D: before = $dBefore GB"
-
-          # ----------------------------------------------------
-          # Disk 0 contains C:
-          # Disk 1 contains D:
-          #
-          # We calculate the maximum amount Windows can safely
-          # shrink from C:, then use that REAL unallocated space
-          # to extend D:.
-          # ----------------------------------------------------
+          Write-Host "Current D partition size: $($partition.Size)"
 
           $supported =
-            Get-PartitionSupportedSize `
-              -DriveLetter C `
+            $partition |
+            Get-PartitionSupportedSize
+
+          Write-Host "Maximum supported partition size: $($supported.SizeMax)"
+
+          if ($supported.SizeMax -gt $partition.Size) {
+
+            Resize-Partition `
+              -DiskNumber $diskNumber `
+              -PartitionNumber $partition.PartitionNumber `
+              -Size $supported.SizeMax `
               -ErrorAction Stop
 
-          $cPartition =
-            Get-Partition `
-              -DriveLetter C `
-              -ErrorAction Stop
-
-          $availableShrink =
-            $cPartition.Size -
-            $supported.SizeMin
-
-          $shrinkGB =
-            [math]::Floor(
-              $availableShrink / 1GB
-            )
-
-          # Keep a small safety margin.
-          if ($shrinkGB -gt 2) {
-            $shrinkGB = $shrinkGB - 1
-          }
-
-          if ($shrinkGB -lt 1) {
-
-            Write-Host "No safe C: space available for expansion."
-            Write-Host "D: remains at $dBefore GB."
+            Write-Host "D partition expanded successfully."
 
           }
           else {
 
-            Write-Host "Maximum safe C: shrink = $shrinkGB GB"
+            Write-Host "D is already using all available space on Disk $diskNumber."
 
-            $shrinkMB =
-              [int](
-                $shrinkGB * 1024
-              )
-
-            # ------------------------------------------------
-            # Shrink C: physically.
-            # ------------------------------------------------
-
-            Resize-Partition `
-              -DriveLetter C `
-              -Size (
-                $cPartition.Size -
-                ($shrinkMB * 1MB)
-              ) `
-              -ErrorAction Stop
-
-            Write-Host "C: physically reduced."
-
-            Start-Sleep -Seconds 2
-
-            # ------------------------------------------------
-            # Convert both disks to Dynamic so the D volume
-            # can use the newly-created real unallocated space
-            # on Disk 0.
-            # ------------------------------------------------
-
-            $scriptPath =
-              "$env:TEMP\expand_d_diskpart.txt"
-
-            @"
-            select disk 0
-            convert dynamic
-            select disk 1
-            convert dynamic
-            select volume D
-            extend disk=0
-            exit
-            "@ |
-              Set-Content `
-                -Path $scriptPath `
-                -Encoding ASCII
-
-            diskpart /s $scriptPath
-
-            if ($LASTEXITCODE -ne 0) {
-
-              Write-Host ""
-              Write-Host "DiskPart returned exit code $LASTEXITCODE"
-              Write-Host "Checking resulting D: size..."
-
-            }
-
-            Start-Sleep -Seconds 3
-
-            $dPartition =
-              Get-Partition `
-                -DriveLetter D `
-                -ErrorAction Stop
-
-            $dAfter =
-              [math]::Round(
-                $dPartition.Size / 1GB,
-                2
-              )
-
-            Write-Host ""
-            Write-Host "D: after = $dAfter GB"
-
-            if ($dAfter -le $dBefore) {
-
-              throw `
-                "D: was not expanded. Before=$dBefore GB After=$dAfter GB"
-            }
-
-            Write-Host ""
-            Write-Host "=========================================="
-            Write-Host "REAL D: EXPANSION SUCCESS"
-            Write-Host "=========================================="
           }
 
-          Get-Disk |
-            Format-Table `
-              Number,
-              FriendlyName,
-              PartitionStyle,
-              @{N="SizeGB";E={
-                [math]::Round(
-                  $_.Size / 1GB,
-                  2
-                )
-              }}
+          Start-Sleep -Seconds 2
 
-          Get-Partition |
+          Get-Partition `
+            -DiskNumber $diskNumber |
             Format-Table `
               DiskNumber,
               PartitionNumber,
               DriveLetter,
-              @{N="SizeGB";E={
-                [math]::Round(
-                  $_.Size / 1GB,
-                  2
-                )
-              }},
+              Size,
               Type
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
 
       # ========================================================
@@ -1068,7 +929,6 @@ jobs:
       - name: Prepare persistent D storage
         shell: pwsh
         run: |
-
           $root =
             "D:\Persistent-RDP"
 
@@ -1108,7 +968,6 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
-              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1126,7 +985,6 @@ jobs:
           SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
 
         run: |
-
           $root =
             "D:\Persistent-RDP"
 
@@ -1176,16 +1034,11 @@ jobs:
 
 
           def sha256(path):
-
               h = hashlib.sha256()
 
               with open(path, "rb") as f:
-
                   while True:
-
-                      data = f.read(
-                          4 * 1024 * 1024
-                      )
+                      data = f.read(4 * 1024 * 1024)
 
                       if not data:
                           break
@@ -1196,19 +1049,15 @@ jobs:
 
 
           def now():
-
               return datetime.now(
                   timezone.utc
               ).isoformat()
 
 
           def build_index():
-
               records = []
 
-              for root, dirs, files in os.walk(
-                  ROOT
-              ):
+              for root, dirs, files in os.walk(ROOT):
 
                   dirs[:] = [
                       d for d in dirs
@@ -1227,9 +1076,7 @@ jobs:
 
                       try:
 
-                          size = os.path.getsize(
-                              path
-                          )
+                          size = os.path.getsize(path)
 
                           records.append({
                               "path":
@@ -1650,15 +1497,7 @@ jobs:
               -Path $script `
               -Encoding UTF8
 
-          # ----------------------------------------------------
-          # Initial restore + sync
-          # ----------------------------------------------------
-
           python $script
-
-          # ----------------------------------------------------
-          # Background sync every 30 seconds
-          # ----------------------------------------------------
 
           $runner =
             "$env:TEMP\persistent_rdp_sync_loop.ps1"
@@ -1680,7 +1519,7 @@ jobs:
                     "PERSISTENT SYNC ERROR: `$(`$_.Exception.Message)"
               }
 
-              Start-Sleep -Seconds 30
+              Start-Sleep -Seconds 40
           }
           "@ |
             Set-Content `
@@ -1700,7 +1539,7 @@ jobs:
           Write-Host ""
           Write-Host "========================================"
           Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
-          Write-Host "BACKGROUND SYNC: EVERY 30 SECONDS"
+          Write-Host "BACKGROUND SYNC: EVERY 40 SECONDS"
           Write-Host "========================================"
 
 
@@ -1711,7 +1550,6 @@ jobs:
       - name: Verify persistent D storage
         shell: pwsh
         run: |
-
           $root =
             "D:\Persistent-RDP"
 
@@ -1752,7 +1590,6 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
-              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1765,7 +1602,6 @@ jobs:
       - name: Install RustDesk
         shell: pwsh
         run: |
-
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1799,7 +1635,6 @@ jobs:
       - name: Open RustDesk ports
         shell: pwsh
         run: |
-
           for ($p = 21115; $p -le 21119; $p++) {
 
             $name =
@@ -1820,7 +1655,6 @@ jobs:
       - name: Launch RustDesk
         shell: pwsh
         run: |
-
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1841,7 +1675,6 @@ jobs:
       - name: Display storage status
         shell: pwsh
         run: |
-
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "PERSISTENT-RDP STORAGE"
@@ -1854,7 +1687,6 @@ jobs:
             -DriveLetter D |
             Format-List `
               DriveLetter,
-              FileSystemLabel,
               FileSystem,
               Size,
               SizeRemaining
@@ -1872,37 +1704,6 @@ jobs:
 
 
       # ========================================================
-      # KEEP ALIVE
-      # ========================================================
-
-      - name: Keep alive
-        shell: pwsh
-        run: |
-
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
-
-          $end =
-            (Get-Date).AddMinutes($mins)
-
-          while (
-            (Get-Date) -lt $end
-          ) {
-
-            Write-Host (
-              "Heartbeat " +
-              (Get-Date).ToString("HH:mm:ss")
-            )
-
-            Write-Host `
-              "Persistent-RDP background sync is running."
-
-            Start-Sleep `
-              -Seconds 60
-          }
-
-
-      # ========================================================
       # FINAL SYNC
       # ========================================================
 
@@ -1915,7 +1716,6 @@ jobs:
           SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
 
         run: |
-
           Write-Host ""
           Write-Host "========================================"
           Write-Host "FINAL PERSISTENT-RDP SYNC"
@@ -1947,29 +1747,53 @@ jobs:
           GH_TOKEN: ${{ github.token }}
 
         run: |
+          $cyclesText = "${{ inputs.cycles }}"
 
-          $cycles = 0
-
-          if (
-            "${{ inputs.cycles }}"
-            -match '^\d+$'
-          ) {
-
-            $cycles =
-              [int]"${{ inputs.cycles }}"
+          if ($cyclesText -match '^\d+$') {
+              $cycles = [int]$cyclesText
+          }
+          else {
+              $cycles = 0
           }
 
           if ($cycles -gt 0) {
 
-            $next =
-              $cycles - 1
+              $next = $cycles - 1
 
-            Write-Host `
-              "Next cycle: $next"
+              Write-Host "Next cycle: $next"
+
+              $body = @{
+                  ref = "${{ github.ref_name }}"
+                  inputs = @{
+                      ts_tailnet = "${{ inputs.ts_tailnet }}"
+                      ts_api_key = "${{ inputs.ts_api_key }}"
+                      ts_authkey = "${{ inputs.ts_authkey }}"
+                      quick_test = "${{ inputs.quick_test }}"
+                      runtime_minutes = "${{ inputs.runtime_minutes }}"
+                      do_purge = "${{ inputs.do_purge }}"
+                      cycles = "$next"
+                      rdp_count = "${{ inputs.rdp_count }}"
+                      crd_code = "${{ inputs.crd_code }}"
+                      crd_pin = "${{ inputs.crd_pin }}"
+                  }
+              } | ConvertTo-Json -Depth 10
+
+              Invoke-RestMethod `
+                -Method Post `
+                -Uri "https://api.github.com/repos/${{ github.repository }}/actions/workflows/${{ github.workflow }}.yml/dispatches" `
+                -Headers @{
+                    Authorization = "Bearer $env:GH_TOKEN"
+                    Accept = "application/vnd.github+json"
+                    "X-GitHub-Api-Version" = "2022-11-28"
+                } `
+                -ContentType "application/json" `
+                -Body $body
+
+              Write-Host "Next workflow dispatched successfully."
 
           }
           else {
 
-            Write-Host `
-              "No cycles configured. Done."
+              Write-Host "No cycles configured. Done."
+
           }
