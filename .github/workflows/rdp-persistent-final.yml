@@ -242,7 +242,6 @@ jobs:
                   os.remove(chunk_name)
 
           async def main():
-
               await client.start()
 
               print("TELEGRAM CONNECTED")
@@ -284,7 +283,6 @@ jobs:
               }
 
               for local_path in files:
-
                   record = build_file_record(
                       local_path
                   )
@@ -315,7 +313,6 @@ jobs:
                   "w",
                   encoding="utf-8"
               ) as f:
-
                   json.dump(
                       index,
                       f,
@@ -344,7 +341,6 @@ jobs:
                   search="PERSISTENT-RDP-FILE-INDEX",
                   limit=50
               ):
-
                   if msg.id == index_message_id:
                       found_index_message = msg
                       break
@@ -372,7 +368,6 @@ jobs:
                   "r",
                   encoding="utf-8"
               ) as f:
-
                   restored_index = json.load(f)
 
               if restored_index["version"] != 2:
@@ -388,7 +383,6 @@ jobs:
               print("FILE INDEX READ SUCCESS")
 
               for record in restored_index["files"]:
-
                   if not record["path"].startswith("/"):
                       raise SystemExit(
                           "PATH VERIFICATION FAILED"
@@ -417,7 +411,6 @@ jobs:
               print("FILE RECORD VERIFICATION SUCCESS")
 
               for record in restored_index["files"]:
-
                   expected_indexes = list(
                       range(record["chunk_count"])
                   )
@@ -433,7 +426,6 @@ jobs:
                       )
 
                   for chunk in record["chunks"]:
-
                       if not chunk.get(
                           "telegram_message_id"
                       ):
@@ -523,7 +515,6 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -550,11 +541,9 @@ jobs:
           $inc = @()
 
           for ($i = 1; $i -le $n; $i++) {
-
             $inc += @{
               id = $i
             }
-
           }
 
           $json = @{
@@ -586,7 +575,6 @@ jobs:
 
   rdp:
     needs: setup
-
     runs-on: windows-latest
 
     strategy:
@@ -608,26 +596,21 @@ jobs:
       - name: Set CRD flag
         shell: pwsh
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
 
       # --------------------------------------------------------
@@ -638,15 +621,12 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
-
             $exePath = "$env:TEMP\chromeremotedesktophost.exe"
 
             try {
-
               Invoke-WebRequest `
                 -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile $exePath `
@@ -660,10 +640,8 @@ jobs:
               Remove-Item `
                 $exePath `
                 -Force
-
             }
             catch {
-
               $msi = "$env:TEMP\chromeremotedesktophost.msi"
 
               Invoke-WebRequest `
@@ -674,9 +652,9 @@ jobs:
               Start-Process `
                 msiexec.exe `
                 -ArgumentList `
-                  "/i", `
-                  "`"$msi`"", `
-                  "/quiet", `
+                  "/i",
+                  "`"$msi`"",
+                  "/quiet",
                   "/norestart" `
                 -Wait
 
@@ -694,7 +672,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         shell: pwsh
         run: |
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -714,19 +691,15 @@ jobs:
           $code = $null
 
           if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
-
             $code = (
               [regex]::Match(
                 $raw,
                 '--code\s*=\s*"?([^"\s]+)'
               )
             ).Groups[1].Value
-
           }
           elseif ($raw -match '^4\/') {
-
             $code = $raw
-
           }
 
           if (-not $code) {
@@ -754,7 +727,6 @@ jobs:
       - name: Decide hostname + runtime
         shell: pwsh
         run: |
-
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -772,7 +744,6 @@ jobs:
           }
 
           function IntOr($v,$d) {
-
             if ("$v" -match '^\d+$') {
               return [int]$v
             }
@@ -813,7 +784,6 @@ jobs:
         if: needs.setup.outputs.multi == '0'
         shell: pwsh
         run: |
-
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
@@ -824,7 +794,6 @@ jobs:
           }
 
           try {
-
             $auth = [Convert]::ToBase64String(
               [Text.Encoding]::ASCII.GetBytes(
                 "${{ inputs.ts_api_key }}:"
@@ -843,9 +812,7 @@ jobs:
               }
 
             foreach ($d in $list.devices) {
-
               if ($d.hostname -match '^bullet[0-9]*$') {
-
                 Invoke-RestMethod `
                   -Method Delete `
                   -Uri `
@@ -856,12 +823,9 @@ jobs:
                   -ErrorAction SilentlyContinue
               }
             }
-
           }
           catch {
-
             Write-Host "Purge warning: $($_.Exception.Message)"
-
           }
 
       # --------------------------------------------------------
@@ -871,11 +835,9 @@ jobs:
       - name: Install + Up Tailscale
         shell: pwsh
         run: |
-
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (-not (Test-Path $ts)) {
-
             $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
             $dst = "$env:TEMP\tailscale.msi"
 
@@ -886,9 +848,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i", `
-                "`"$dst`"", `
-                "/quiet", `
+                "/i",
+                "`"$dst`"",
+                "/quiet",
                 "/norestart" `
               -Wait
 
@@ -924,56 +886,36 @@ jobs:
       - name: Enable RDP user + firewall
         shell: pwsh
         run: |
-
-          $ErrorActionPreference = "Stop"
-
-          # FIX:
-          # Do NOT read RDP_USER/RDP_PASS from GitHub Secrets.
-          # Use the values defined in the job-level environment.
-          $u = "Yousif190"
-          $p = "Yousif1990"
+          $u = $env:RDP_USER
+          $p = $env:RDP_PASS
 
           if ([string]::IsNullOrWhiteSpace($u)) {
-            throw "RDP username is empty."
+            throw "RDP_USER is empty."
           }
 
           if ([string]::IsNullOrWhiteSpace($p)) {
-            throw "RDP password is empty."
+            throw "RDP_PASS is empty."
           }
-
-          Write-Host "RDP USER: $u"
 
           $sec = ConvertTo-SecureString `
             $p `
             -AsPlainText `
             -Force
 
-          $existing = Get-LocalUser `
-            -Name $u `
-            -ErrorAction SilentlyContinue
-
-          if (-not $existing) {
-
-            Write-Host "Creating RDP user..."
-
+          if (-not (
+            Get-LocalUser `
+              -Name $u `
+              -ErrorAction SilentlyContinue
+          )) {
             New-LocalUser `
               -Name $u `
               -Password $sec `
-              -AccountNeverExpires `
-              -PasswordNeverExpires `
-              -UserMayNotChangePassword `
-              -Description "Persistent-RDP user"
-
+              -AccountNeverExpires
           }
           else {
-
-            Write-Host "RDP user already exists. Updating password..."
-
             Set-LocalUser `
               -Name $u `
-              -Password $sec `
-              -AccountNeverExpires `
-              -PasswordNeverExpires:$true
+              -Password $sec
 
             Enable-LocalUser `
               -Name $u
@@ -994,23 +936,11 @@ jobs:
             -Name fDenyTSConnections `
             -Value 0
 
-          Set-ItemProperty `
-            "HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
-            -Name UserAuthentication `
-            -Value 1
-
           Enable-NetFirewallRule `
             -DisplayGroup "Remote Desktop" |
             Out-Null
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "RDP USER READY"
-          Write-Host "=========================================="
-          Write-Host "Username: $u"
-          Write-Host "RDP enabled: YES"
-          Write-Host "Firewall enabled: YES"
-          Write-Host "=========================================="
+          Write-Host "RDP USER READY: $u"
 
       # --------------------------------------------------------
       # PYTHON
@@ -1019,7 +949,6 @@ jobs:
       - name: Install Python libs
         shell: pwsh
         run: |
-
           python -m pip install --upgrade pip
 
           python -m pip install `
@@ -1029,146 +958,15 @@ jobs:
             pillow
 
       # --------------------------------------------------------
-      # WINFSP
+      # LOCAL PERSISTENT-RDP STORAGE
       # --------------------------------------------------------
 
-      - name: Install WinFSP
+      - name: Prepare local persistent storage
         shell: pwsh
         run: |
-
-          Write-Host "===== WINFSP ====="
-
-          $installed = Get-ItemProperty `
-            "HKLM:\SOFTWARE\WOW6432Node\WinFsp" `
-            -ErrorAction SilentlyContinue
-
-          if (-not $installed) {
-
-            choco install winfsp `
-              -y `
-              --no-progress
-          }
-
-          $paths = @(
-            "$env:ProgramFiles\WinFsp\bin\winfsp-x64.dll",
-            "${env:ProgramFiles(x86)}\WinFsp\bin\winfsp-x64.dll"
-          )
-
-          $found = $false
-
-          foreach ($p in $paths) {
-
-            if (Test-Path $p) {
-
-              Write-Host "WinFSP FOUND: $p"
-              $found = $true
-
-            }
-          }
-
-          if (-not $found) {
-            throw "WinFSP was not found."
-          }
-
-          Write-Host "WINFSP READY"
-
-          Get-Service |
-            Where-Object {
-              $_.Name -match "WinFsp"
-            } |
-            Format-Table Name, Status, StartType
-
-          Get-Service |
-            Where-Object {
-              $_.Name -match "WinFsp"
-            } |
-            ForEach-Object {
-
-              if ($_.Status -ne "Running") {
-
-                Start-Service `
-                  $_.Name `
-                  -ErrorAction SilentlyContinue
-
-              }
-            }
-
-          Start-Sleep -Seconds 3
-
-          Write-Host "WINFSP SERVICES AFTER START:"
-
-          Get-Service |
-            Where-Object {
-              $_.Name -match "WinFsp"
-            } |
-            Format-Table Name, Status, StartType
-
-      # --------------------------------------------------------
-      # GO
-      # --------------------------------------------------------
-
-      - name: Prepare Go
-        shell: pwsh
-        run: |
-
-          go version
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Go is not available."
-          }
-
-      # --------------------------------------------------------
-      # BUILD WINFSP PASSTHROUGH
-      # --------------------------------------------------------
-
-      - name: Build persistent passthrough
-        shell: pwsh
-        run: |
-
-          $src = "$env:RUNNER_TEMP\go-winfsp"
-          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
-
-          if (Test-Path $src) {
-
-            Remove-Item `
-              $src `
-              -Recurse `
-              -Force
-          }
-
-          git clone `
-            --depth 1 `
-            https://github.com/winfsp/go-winfsp.git `
-            $src
-
-          if (-not (Test-Path $src)) {
-            throw "go-winfsp source was not downloaded."
-          }
-
-          Set-Location $src
-
-          go build `
-            -o $exe `
-            ./examples/passthrough/cmd/main.go
-
-          if (-not (Test-Path $exe)) {
-            throw "persistent-passthrough.exe was not created."
-          }
-
-          Write-Host "PASSTHROUGH READY: $exe"
-
-      # --------------------------------------------------------
-      # PERSISTENT BACKING STORAGE
-      # --------------------------------------------------------
-
-      - name: Prepare persistent U backing storage
-        shell: pwsh
-        run: |
-
-          $root = "C:\Persistent-RDP-U"
+          $root = "D:\Persistent-RDP"
 
           if (-not (Test-Path $root)) {
-
             New-Item `
               -ItemType Directory `
               -Path $root `
@@ -1178,410 +976,136 @@ jobs:
 
           New-Item `
             -ItemType Directory `
-            -Path "$root\Test" `
+            -Path "$root\Projects\AE" `
             -Force |
             Out-Null
-
-          Write-Host "U BACKING STORAGE: $root"
-
-          if (-not (Test-Path $root)) {
-            throw "Backing storage was not created."
-          }
-
-      # --------------------------------------------------------
-      # CREATE MOUNT SCRIPT
-      # --------------------------------------------------------
-
-      - name: Create U mount script
-        shell: pwsh
-        run: |
-
-          $scriptPath = "C:\Persistent-RDP-U\mount-u.ps1"
-
-          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
-          $root = "C:\Persistent-RDP-U"
-
-          if (-not (Test-Path $exe)) {
-            throw "Passthrough executable not found."
-          }
-
-          $content = @"
-          `$ErrorActionPreference = "Continue"
-
-          `$exe = "$exe"
-          `$root = "$root"
-
-          while (`$true) {
-
-              try {
-
-                  `$existing = Get-PSDrive U -ErrorAction SilentlyContinue
-
-                  if (`$existing) {
-
-                      Start-Sleep -Seconds 10
-                      continue
-                  }
-
-                  `$p = Start-Process `
-                      -FilePath `$exe `
-                      -ArgumentList @(
-                          "-m",
-                          "U:",
-                          `$root
-                      ) `
-                      -PassThru `
-                      -WindowStyle Hidden
-
-                  Start-Sleep -Seconds 5
-
-                  if (`$p.HasExited) {
-
-                      Start-Sleep -Seconds 5
-                      continue
-                  }
-
-                  while (-not `$p.HasExited) {
-
-                      Start-Sleep -Seconds 5
-                  }
-
-              }
-              catch {
-
-                  Start-Sleep -Seconds 5
-              }
-          }
-          "@
-
-          Set-Content `
-            -Path $scriptPath `
-            -Value $content `
-            -Encoding UTF8
-
-          Write-Host "MOUNT SCRIPT CREATED: $scriptPath"
-
-      # --------------------------------------------------------
-      # CREATE LOGON TASK
-      # --------------------------------------------------------
-
-      - name: Create U logon task
-        shell: pwsh
-        run: |
-
-          $taskName = "Persistent-RDP-U"
-
-          schtasks.exe `
-            /Delete `
-            /TN $taskName `
-            /F 2>$null
-
-          $action =
-            'powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "C:\Persistent-RDP-U\mount-u.ps1"'
-
-          schtasks.exe `
-            /Create `
-            /TN $taskName `
-            /TR $action `
-            /SC ONLOGON `
-            /RU "Yousif190" `
-            /RP "Yousif1990" `
-            /RL HIGHEST `
-            /F
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Failed to create Persistent-RDP-U logon task."
-          }
-
-          Write-Host "U LOGON TASK CREATED"
-
-      # --------------------------------------------------------
-      # START U FOR CURRENT TEST
-      # --------------------------------------------------------
-
-      - name: Start U filesystem
-        shell: pwsh
-        run: |
-
-          $ErrorActionPreference = "Stop"
-
-          $exe = "$env:RUNNER_TEMP\persistent-passthrough.exe"
-          $root = "C:\Persistent-RDP-U"
-
-          $stdout = "$env:RUNNER_TEMP\persistent_u_stdout.log"
-          $stderr = "$env:RUNNER_TEMP\persistent_u_stderr.log"
-
-          Remove-Item `
-            $stdout, `
-            $stderr `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          if (-not (Test-Path $exe)) {
-            throw "Passthrough executable not found."
-          }
-
-          if (-not (Test-Path $root)) {
-
-            New-Item `
-              -ItemType Directory `
-              -Path $root `
-              -Force |
-              Out-Null
-          }
-
-          Write-Host "=========================================="
-          Write-Host "STARTING WINFSP PASSTHROUGH"
-          Write-Host "EXE: $exe"
-          Write-Host "ROOT: $root"
-          Write-Host "MOUNT: U:"
-          Write-Host "=========================================="
-
-          $process = Start-Process `
-            -FilePath $exe `
-            -ArgumentList @(
-              "-m",
-              "U:",
-              $root
-            ) `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -PassThru `
-            -WindowStyle Hidden
-
-          Write-Host "U PROCESS ID: $($process.Id)"
-
-          Start-Sleep -Seconds 10
-
-          if ($process.HasExited) {
-
-            Write-Host "===== U STDOUT ====="
-
-            if (Test-Path $stdout) {
-              Get-Content $stdout
-            }
-
-            Write-Host "===== U STDERR ====="
-
-            if (Test-Path $stderr) {
-              Get-Content $stderr
-            }
-
-            throw "U filesystem exited with code $($process.ExitCode)."
-          }
-
-          Write-Host "WinFSP passthrough process is running."
-
-          Write-Host "===== U PROCESS ====="
-
-          Get-Process `
-            -Id $process.Id `
-            -ErrorAction SilentlyContinue |
-            Format-List Id,ProcessName,Path,StartTime
-
-          Write-Host "Waiting for U: mount..."
-
-          $deadline = (Get-Date).AddSeconds(30)
-          $mounted = $false
-
-          while ((Get-Date) -lt $deadline) {
-
-            if (Test-Path "U:\") {
-
-              $mounted = $true
-              break
-            }
-
-            Start-Sleep -Seconds 2
-          }
-
-          if (-not $mounted) {
-
-            Write-Host "===== U STDOUT ====="
-
-            if (Test-Path $stdout) {
-              Get-Content $stdout
-            }
-
-            Write-Host "===== U STDERR ====="
-
-            if (Test-Path $stderr) {
-              Get-Content $stderr
-            }
-
-            Write-Host "===== ALL DRIVES ====="
-
-            Get-PSDrive |
-              Sort-Object Name |
-              Format-Table Name,Root,Provider
-
-            throw "U: DRIVE WAS NOT CREATED."
-          }
-
-          Write-Host "=========================================="
-          Write-Host "U: DRIVE CREATED SUCCESSFULLY"
-          Write-Host "=========================================="
-
-          Get-PSDrive U -ErrorAction SilentlyContinue |
-            Format-List *
-
-      # --------------------------------------------------------
-      # VERIFY U DRIVE
-      # --------------------------------------------------------
-
-      - name: Verify U drive
-        shell: pwsh
-        run: |
-
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=========================================="
-          Write-Host "VERIFYING U: DRIVE"
-          Write-Host "=========================================="
-
-          $deadline = (Get-Date).AddSeconds(30)
-          $mounted = $false
-
-          while ((Get-Date) -lt $deadline) {
-
-            if (Test-Path "U:\") {
-
-              $mounted = $true
-              break
-            }
-
-            Start-Sleep -Seconds 2
-          }
-
-          if (-not $mounted) {
-
-            Write-Host "U: not visible through Test-Path."
-
-            Write-Host "===== PS DRIVES ====="
-
-            Get-PSDrive |
-              Sort-Object Name |
-              Format-Table Name,Root,Provider
-
-            throw "U: DRIVE WAS NOT CREATED."
-          }
-
-          Write-Host "U: DRIVE FOUND"
-          Write-Host "U: ROOT ACCESS SUCCESS"
-
-          $drive = Get-PSDrive U `
-            -ErrorAction SilentlyContinue
-
-          if ($drive) {
-            Write-Host "Root: $($drive.Root)"
-          }
 
           New-Item `
             -ItemType Directory `
-            -Path "U:\Persistent-RDP-Test" `
+            -Path "$root\Assets\Fonts" `
             -Force |
             Out-Null
 
-          $testFile =
-            "U:\Persistent-RDP-Test\runner-test.txt"
+          Write-Host "LOCAL STORAGE: $root"
+
+          Get-Volume -DriveLetter D |
+            Format-List DriveLetter,FileSystem,Size,SizeRemaining
+
+          Write-Host "D: STORAGE READY"
+
+      # --------------------------------------------------------
+      # OPTIONAL U ALIAS
+      # --------------------------------------------------------
+
+      - name: Create U alias
+        shell: pwsh
+        run: |
+          $root = "D:\Persistent-RDP"
+
+          if (Test-Path "U:\") {
+            subst U: /D 2>$null
+          }
+
+          subst U: $root
+
+          Start-Sleep -Seconds 2
+
+          if (Test-Path "U:\") {
+            Write-Host "U: ALIAS READY -> $root"
+          }
+          else {
+            Write-Host "U: alias unavailable; continuing with D:\Persistent-RDP"
+          }
+
+      # --------------------------------------------------------
+      # TEST LOCAL STORAGE
+      # --------------------------------------------------------
+
+      - name: Test local storage
+        shell: pwsh
+        run: |
+          $root = "D:\Persistent-RDP"
+
+          $testDir = "$root\Persistent-RDP-Test"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $testDir `
+            -Force |
+            Out-Null
+
+          $testFile = "$testDir\runner-test.txt"
 
           Set-Content `
             -Path $testFile `
-            -Value "Persistent-RDP U test $(Get-Date -Format o)" `
+            -Value "Persistent-RDP test $(Get-Date -Format o)" `
             -Encoding UTF8
 
           if (-not (Test-Path $testFile)) {
-            throw "U: WRITE TEST FAILED."
+            throw "LOCAL STORAGE WRITE TEST FAILED."
           }
 
           $content = Get-Content `
             -Path $testFile `
             -Raw
 
-          Write-Host "U: WRITE TEST SUCCESS"
-          Write-Host "U: READ TEST SUCCESS"
+          Write-Host "LOCAL STORAGE WRITE SUCCESS"
+          Write-Host "LOCAL STORAGE READ SUCCESS"
           Write-Host "TEST CONTENT: $content"
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "U: DRIVE READY"
-          Write-Host "=========================================="
+          if (Test-Path "U:\") {
+            $uTest = "U:\Persistent-RDP-Test\u-alias-test.txt"
 
-      # --------------------------------------------------------
-      # TEST BACKING STORAGE
-      # --------------------------------------------------------
+            Set-Content `
+              -Path $uTest `
+              -Value "U alias test $(Get-Date -Format o)" `
+              -Encoding UTF8
 
-      - name: Test U backing storage
-        shell: pwsh
-        run: |
-
-          $root = "C:\Persistent-RDP-U"
-
-          New-Item `
-            -ItemType Directory `
-            -Path "$root\Test" `
-            -Force |
-            Out-Null
-
-          $file =
-            "$root\Test\runner-test.txt"
-
-          Set-Content `
-            -Path $file `
-            -Value "Persistent U test $(Get-Date -Format o)" `
-            -Encoding UTF8
-
-          if (-not (Test-Path $file)) {
-            throw "Backing storage test failed."
+            if (Test-Path $uTest) {
+              Write-Host "U ALIAS WRITE SUCCESS"
+            }
           }
 
-          Write-Host "BACKING STORAGE WRITE SUCCESS"
-
       # --------------------------------------------------------
-      # U STATUS
+      # DISPLAY STORAGE STATUS
       # --------------------------------------------------------
 
-      - name: Display U status
+      - name: Display storage status
         shell: pwsh
         run: |
-
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENT U BACKING STATUS"
+          Write-Host "PERSISTENT-RDP LOCAL STORAGE"
           Write-Host "=========================================="
 
-          Write-Host "Backing path:"
-          Write-Host "C:\Persistent-RDP-U"
+          Write-Host "Drive: D:"
+          Write-Host "Path: D:\Persistent-RDP"
 
-          if (Test-Path "C:\Persistent-RDP-U") {
-            Write-Host "BACKING STORAGE READY"
+          Get-Volume -DriveLetter D |
+            Format-List DriveLetter,FileSystem,Size,SizeRemaining
+
+          if (Test-Path "D:\Persistent-RDP") {
+            Write-Host "D:\Persistent-RDP READY"
           }
           else {
-            throw "Backing storage missing."
+            throw "D:\Persistent-RDP missing."
           }
-
-          Write-Host ""
-          Write-Host "U drive:"
 
           if (Test-Path "U:\") {
-            Write-Host "U DRIVE READY"
+            Write-Host "U: ALIAS READY"
           }
           else {
-            Write-Host "U DRIVE NOT VISIBLE"
+            Write-Host "U: alias not available"
           }
 
           Write-Host ""
-          Write-Host "Files:"
+          Write-Host "Storage tree:"
 
           Get-ChildItem `
-            "C:\Persistent-RDP-U" `
+            "D:\Persistent-RDP" `
             -Recurse `
-            -Force
-
-          Write-Host ""
-          Write-Host "NOTE:"
-          Write-Host "U: is created in the interactive user session."
-          Write-Host "The logon task will mount U: when RDP_USER logs in."
+            -Force |
+            Select-Object FullName,Length,LastWriteTime
 
       # --------------------------------------------------------
       # RUSTDESK
@@ -1590,17 +1114,11 @@ jobs:
       - name: Install RustDesk
         shell: pwsh
         run: |
-
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (-not (Test-Path $rdExe)) {
-
-            $rdUrl =
-              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
-
-            $installerPath =
-              "$env:TEMP\rustdesk.msi"
+            $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+            $installerPath = "$env:TEMP\rustdesk.msi"
 
             Invoke-WebRequest `
               -Uri $rdUrl `
@@ -1609,9 +1127,9 @@ jobs:
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i", `
-                "`"$installerPath`"", `
-                "/quiet", `
+                "/i",
+                "`"$installerPath`"",
+                "/quiet",
                 "/norestart" `
               -Wait
 
@@ -1627,9 +1145,7 @@ jobs:
       - name: Open RustDesk ports
         shell: pwsh
         run: |
-
           for ($p = 21115; $p -le 21119; $p++) {
-
             $name = "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
@@ -1650,12 +1166,9 @@ jobs:
       - name: Launch RustDesk
         shell: pwsh
         run: |
-
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (Test-Path $rdExe) {
-
             Start-Process `
               -FilePath $rdExe `
               -ErrorAction SilentlyContinue
@@ -1670,17 +1183,15 @@ jobs:
       - name: Keep alive
         shell: pwsh
         run: |
+          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
 
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
-
-          $end =
-            (Get-Date).AddMinutes($mins)
+          $end = (
+            Get-Date
+          ).AddMinutes($mins)
 
           while (
             (Get-Date) -lt $end
           ) {
-
             Write-Host (
               "Heartbeat " +
               (Get-Date).ToString("HH:mm:ss")
@@ -1699,7 +1210,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-
           $cycles = 0
 
           if ("${{ inputs.cycles }}" -match '^\d+$') {
@@ -1707,14 +1217,10 @@ jobs:
           }
 
           if ($cycles -gt 0) {
-
             $next = $cycles - 1
 
             Write-Host "Next cycle: $next"
-
           }
           else {
-
             Write-Host "No cycles configured. Done."
-
           }
