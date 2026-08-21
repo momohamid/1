@@ -91,8 +91,11 @@ jobs:
           mkdir -p test_workspace/Projects/AE
           mkdir -p test_workspace/Assets/Fonts
 
-          echo "Persistent-RDP test $(date -u)" > test_workspace/Projects/AE/project.txt
-          echo "Persistent-RDP asset $(date -u)" > test_workspace/Assets/Fonts/test-font.txt
+          echo "Persistent-RDP test $(date -u)" \
+            > test_workspace/Projects/AE/project.txt
+
+          echo "Persistent-RDP asset $(date -u)" \
+            > test_workspace/Assets/Fonts/test-font.txt
 
           find test_workspace -type f -print
 
@@ -120,7 +123,11 @@ jobs:
           with open("unlim_session.session", "wb") as f:
               f.write(base64.b64decode(session_b64))
 
-          client = TelegramClient("unlim_session", api_id, api_hash)
+          client = TelegramClient(
+              "unlim_session",
+              api_id,
+              api_hash
+          )
 
           STORAGE_ROOT = "test_workspace"
           INDEX_FILE = "file_index.json"
@@ -151,7 +158,9 @@ jobs:
                   filenames.sort()
 
                   for filename in filenames:
-                      files.append(os.path.join(root, filename))
+                      files.append(
+                          os.path.join(root, filename)
+                      )
 
               if not files:
                   raise SystemExit("NO TEST FILES FOUND")
@@ -194,6 +203,7 @@ jobs:
 
                   with open(local_path, "rb") as f:
                       for index_no in range(chunk_count):
+
                           data = f.read(CHUNK_SIZE)
 
                           chunk_name = (
@@ -202,7 +212,10 @@ jobs:
                               + ".bin"
                           )
 
-                          with open(chunk_name, "wb") as cf:
+                          with open(
+                              chunk_name,
+                              "wb"
+                          ) as cf:
                               cf.write(data)
 
                           chunk_hash = sha256(chunk_name)
@@ -230,7 +243,11 @@ jobs:
 
                   index["files"].append(record)
 
-              with open(INDEX_FILE, "w", encoding="utf-8") as f:
+              with open(
+                  INDEX_FILE,
+                  "w",
+                  encoding="utf-8"
+              ) as f:
                   json.dump(
                       index,
                       f,
@@ -244,7 +261,10 @@ jobs:
                   caption="PERSISTENT-RDP-FILE-INDEX"
               )
 
-              print("INDEX_MESSAGE_ID=" + str(index_message.id))
+              print(
+                  "INDEX_MESSAGE_ID="
+                  + str(index_message.id)
+              )
 
               found = await client.get_messages(
                   "me",
@@ -252,7 +272,9 @@ jobs:
               )
 
               if not found:
-                  raise SystemExit("FILE INDEX LOOKUP FAILED")
+                  raise SystemExit(
+                      "FILE INDEX LOOKUP FAILED"
+                  )
 
               restored = "file_index_restored.json"
 
@@ -261,11 +283,17 @@ jobs:
                   file=restored
               )
 
-              with open(restored, "r", encoding="utf-8") as f:
+              with open(
+                  restored,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
                   restored_index = json.load(f)
 
               if restored_index["version"] != 2:
-                  raise SystemExit("INDEX VERSION FAILED")
+                  raise SystemExit(
+                      "INDEX VERSION FAILED"
+                  )
 
               print("FILE INDEX READ SUCCESS")
               print("PERSISTENT STORAGE TEST SUCCESS")
@@ -711,7 +739,8 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "TAILSCALE IP: $ip4"
+          Write-Host `
+            "TAILSCALE IP: $ip4"
 
 
       # ========================================================
@@ -742,7 +771,7 @@ jobs:
               -Name $u `
               -Password $sec `
               -AccountNeverExpires `
-              -PasswordNeverExpires:$true
+              -PasswordNeverExpires
 
           }
           else {
@@ -758,9 +787,12 @@ jobs:
           $admin =
             Get-LocalGroupMember `
               -Group "Administrators" `
-              -ErrorAction SilentlyContinue
+              -ErrorAction SilentlyContinue |
+              Where-Object {
+                $_.Name -match "\\$([regex]::Escape($u))$"
+              }
 
-          if (-not ($admin.Name -match "\\$([regex]::Escape($u))$")) {
+          if (-not $admin) {
 
             Add-LocalGroupMember `
               -Group "Administrators" `
@@ -768,12 +800,15 @@ jobs:
               -ErrorAction SilentlyContinue
           }
 
-          $rdpUsers =
+          $rdp =
             Get-LocalGroupMember `
               -Group "Remote Desktop Users" `
-              -ErrorAction SilentlyContinue
+              -ErrorAction SilentlyContinue |
+              Where-Object {
+                $_.Name -match "\\$([regex]::Escape($u))$"
+              }
 
-          if (-not ($rdpUsers.Name -match "\\$([regex]::Escape($u))$")) {
+          if (-not $rdp) {
 
             Add-LocalGroupMember `
               -Group "Remote Desktop Users" `
@@ -791,11 +826,15 @@ jobs:
             -Name UserAuthentication `
             -Value 0
 
-          Enable-NetFirewallRule `
+          Get-NetFirewallRule `
             -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue |
+            Enable-NetFirewallRule `
             -ErrorAction SilentlyContinue
 
-          netsh advfirewall firewall set rule group="remote desktop" new enable=Yes
+          netsh advfirewall firewall set rule `
+            group="remote desktop" `
+            new enable=Yes
 
           Write-Host "RDP USER READY"
           Write-Host "RDP FIREWALL READY"
@@ -820,102 +859,7 @@ jobs:
 
 
       # ========================================================
-      # MAXIMIZE D STORAGE
-      # ========================================================
-
-      - name: Maximize D storage
-        shell: pwsh
-        run: |
-
-          $disk = Get-Disk -Number 1 -ErrorAction Stop
-
-          if ($disk.PartitionStyle -eq "RAW") {
-            Initialize-Disk `
-              -Number 1 `
-              -PartitionStyle GPT `
-              -ErrorAction Stop
-
-            $partition =
-              New-Partition `
-                -DiskNumber 1 `
-                -UseMaximumSize `
-                -DriveLetter D
-          }
-          else {
-
-            $partition =
-              Get-Partition `
-                -DiskNumber 1 `
-                -DriveLetter D `
-                -ErrorAction Stop
-          }
-
-          $partition =
-            Get-Partition `
-              -DiskNumber 1 `
-              -DriveLetter D `
-              -ErrorAction Stop
-
-          $supported =
-            Get-PartitionSupportedSize `
-              -DiskNumber 1 `
-              -PartitionNumber $partition.PartitionNumber
-
-          if ($partition.Size -lt $supported.SizeMax) {
-
-            Resize-Partition `
-              -DiskNumber 1 `
-              -PartitionNumber $partition.PartitionNumber `
-              -Size $supported.SizeMax
-          }
-
-          $volume =
-            Get-Volume `
-              -DriveLetter D `
-              -ErrorAction Stop
-
-          if ($volume.FileSystem -ne "NTFS") {
-
-            Format-Volume `
-              -DriveLetter D `
-              -FileSystem NTFS `
-              -NewFileSystemLabel "Persistent-RDP" `
-              -Confirm:$false
-          }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "D STORAGE MAXIMIZED"
-          Write-Host "========================================"
-
-          Get-Disk -Number 1 |
-            Format-Table `
-              Number,
-              FriendlyName,
-              Size,
-              PartitionStyle
-
-          Get-Partition `
-            -DiskNumber 1 |
-            Format-Table `
-              DiskNumber,
-              PartitionNumber,
-              DriveLetter,
-              Size,
-              Type
-
-          Get-Volume `
-            -DriveLetter D |
-            Format-Table `
-              DriveLetter,
-              FileSystemLabel,
-              FileSystem,
-              Size,
-              SizeRemaining
-
-
-      # ========================================================
-      # PREPARE D
+      # PREPARE D:
       # ========================================================
 
       - name: Prepare persistent D storage
@@ -1013,7 +957,9 @@ jobs:
           )
 
           with open(SESSION_FILE, "wb") as f:
-              f.write(base64.b64decode(SESSION_B64))
+              f.write(
+                  base64.b64decode(SESSION_B64)
+              )
 
           client = TelegramClient(
               os.path.join(
@@ -1043,12 +989,8 @@ jobs:
                   timezone.utc
               ).isoformat()
 
-          def build_index(old_map=None):
-
+          def build_index():
               records = []
-
-              if old_map is None:
-                  old_map = {}
 
               for root, dirs, files in os.walk(ROOT):
 
@@ -1068,31 +1010,21 @@ jobs:
                       )
 
                       try:
-
-                          stat = os.stat(path)
-                          relative = os.path.relpath(
-                              path,
-                              ROOT
-                          ).replace("\\", "/")
-
-                          previous = old_map.get(relative)
-
-                          if (
-                              previous
-                              and
-                              previous.get("size") == stat.st_size
-                              and
-                              previous.get("mtime") == stat.st_mtime
-                          ):
-
-                              records.append(previous)
-                              continue
+                          size = os.path.getsize(path)
 
                           records.append({
-                              "path": relative,
-                              "size": stat.st_size,
-                              "mtime": stat.st_mtime,
-                              "sha256": sha256(path)
+                              "path":
+                                  os.path.relpath(
+                                      path,
+                                      ROOT
+                                  ).replace(
+                                      "\\",
+                                      "/"
+                                  ),
+                              "size":
+                                  size,
+                              "sha256":
+                                  sha256(path)
                           })
 
                       except Exception as e:
@@ -1239,8 +1171,13 @@ jobs:
 
           async def restore():
 
-              print("================================")
-              print("PERSISTENT-RDP RESTORE START")
+              print(
+                  "================================"
+              )
+
+              print(
+                  "PERSISTENT-RDP RESTORE START"
+              )
 
               old = await download_index()
 
@@ -1279,6 +1216,8 @@ jobs:
               path,
               relative
           ):
+
+              size = os.path.getsize(path)
 
               chunks = []
 
@@ -1339,8 +1278,13 @@ jobs:
 
           async def sync():
 
-              print("================================")
-              print("PERSISTENT-RDP SYNC START")
+              print(
+                  "================================"
+              )
+
+              print(
+                  "PERSISTENT-RDP SYNC START"
+              )
 
               old = await download_index()
 
@@ -1357,9 +1301,7 @@ jobs:
                           r["path"]
                       ] = r
 
-              current = build_index(
-                  old_map
-              )
+              current = build_index()
 
               new_records = []
 
@@ -1379,9 +1321,6 @@ jobs:
                       and
                       previous.get("sha256")
                       == item["sha256"]
-                      and
-                      previous.get("mtime")
-                      == item["mtime"]
                   ):
 
                       new_records.append(
@@ -1411,7 +1350,6 @@ jobs:
                   new_records.append({
                       "path": relative,
                       "size": item["size"],
-                      "mtime": item["mtime"],
                       "sha256": item["sha256"],
                       "chunk_size":
                           CHUNK_SIZE,
@@ -1451,7 +1389,8 @@ jobs:
               await client.send_file(
                   "me",
                   INDEX_LOCAL,
-                  caption="PERSISTENT-RDP-MASTER-INDEX"
+                  caption=
+                  "PERSISTENT-RDP-MASTER-INDEX"
               )
 
               print(
@@ -1475,17 +1414,24 @@ jobs:
               )
 
           with client:
-
               client.loop.run_until_complete(
                   main()
               )
-
           '@ |
             Set-Content `
               -Path $script `
               -Encoding UTF8
 
+          # ----------------------------------------------------
+          # Initial restore + sync
+          # ----------------------------------------------------
+
           python $script
+
+          # ----------------------------------------------------
+          # Background sync loop
+          # 40 seconds between scans
+          # ----------------------------------------------------
 
           $runner =
             "$env:TEMP\persistent_rdp_sync_loop.ps1"
@@ -1497,15 +1443,17 @@ jobs:
 
                   python "$script"
 
-                  Write-Host "PERSISTENT SYNC FINISHED"
+                  Write-Host `
+                    "PERSISTENT SYNC FINISHED"
 
               }
               catch {
 
-                  Write-Host "PERSISTENT SYNC ERROR: `$(`$_.Exception.Message)"
+                  Write-Host `
+                    "PERSISTENT SYNC ERROR: `$(`$_.Exception.Message)"
               }
 
-              Start-Sleep -Seconds 30
+              Start-Sleep -Seconds 40
           }
           "@ |
             Set-Content `
@@ -1525,12 +1473,12 @@ jobs:
           Write-Host ""
           Write-Host "========================================"
           Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
-          Write-Host "BACKGROUND SYNC: EVERY 30 SECONDS"
+          Write-Host "BACKGROUND SYNC: EVERY 40 SECONDS"
           Write-Host "========================================"
 
 
       # ========================================================
-      # VERIFY D
+      # VERIFY D:
       # ========================================================
 
       - name: Verify persistent D storage
@@ -1558,14 +1506,16 @@ jobs:
 
           Set-Content `
             -Path $file `
-            -Value "Persistent-RDP test $(Get-Date -Format o)" `
+            -Value `
+              "Persistent-RDP test $(Get-Date -Format o)" `
             -Encoding UTF8
 
           if (-not (Test-Path $file)) {
             throw "D WRITE FAILED."
           }
 
-          Get-Content $file
+          Get-Content `
+            $file
 
           Write-Host ""
           Write-Host "D: WRITE SUCCESS"
@@ -1700,49 +1650,27 @@ jobs:
         shell: pwsh
         run: |
 
-          $mins = 355
+          $mins =
+            [int]"${{ env.RUNTIME_MINUTES }}"
 
-          if ("${{ env.RUNTIME_MINUTES }}" -match '^\d+$') {
-            $mins = [int]"${{ env.RUNTIME_MINUTES }}"
-          }
+          $end =
+            (Get-Date).AddMinutes($mins)
 
-          if ($mins -lt 1) {
-            $mins = 355
-          }
-
-          if ($mins -gt 360) {
-            $mins = 360
-          }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "PERSISTENT-RDP KEEP ALIVE"
-          Write-Host "RUNTIME: $mins MINUTES"
-          Write-Host "========================================"
-
-          $end = (Get-Date).AddMinutes($mins)
-
-          while ((Get-Date) -lt $end) {
-
-            $remaining = $end - (Get-Date)
+          while (
+            (Get-Date) -lt $end
+          ) {
 
             Write-Host (
-              "Heartbeat: " +
-              (Get-Date).ToString("HH:mm:ss") +
-              " | Remaining: " +
-              $remaining.ToString("hh\:mm\:ss")
+              "Heartbeat " +
+              (Get-Date).ToString("HH:mm:ss")
             )
 
-            Write-Host "Persistent-RDP background sync is running."
+            Write-Host `
+              "Persistent-RDP background sync is running."
 
-            Start-Sleep -Seconds 60
+            Start-Sleep `
+              -Seconds 60
           }
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "KEEP ALIVE FINISHED"
-          Write-Host "Starting final sync..."
-          Write-Host "========================================"
 
 
       # ========================================================
@@ -1774,7 +1702,8 @@ jobs:
           }
           else {
 
-            Write-Host "Sync script not found."
+            Write-Host `
+              "Sync script not found."
           }
 
 
@@ -1793,17 +1722,22 @@ jobs:
           $cycles = 0
 
           if ("${{ inputs.cycles }}" -match '^\d+$') {
-            $cycles = [int]"${{ inputs.cycles }}"
+
+            $cycles =
+              [int]"${{ inputs.cycles }}"
           }
 
           if ($cycles -gt 0) {
 
-            $next = $cycles - 1
+            $next =
+              $cycles - 1
 
-            Write-Host "Next cycle: $next"
+            Write-Host `
+              "Next cycle: $next"
 
           }
           else {
 
-            Write-Host "No cycles configured. Done."
+            Write-Host `
+              "No cycles configured. Done."
           }
