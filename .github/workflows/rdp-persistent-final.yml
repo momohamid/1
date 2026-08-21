@@ -406,7 +406,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: ${{ secrets.RDP_PASSWORD }}
+      RDP_PASS: Yousif1990
 
     steps:
 
@@ -754,10 +754,6 @@ jobs:
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
-          if ([string]::IsNullOrWhiteSpace($p)) {
-            throw "RDP password is empty. Add repository secret RDP_PASSWORD."
-          }
-
           $sec =
             ConvertTo-SecureString `
               $p `
@@ -863,15 +859,15 @@ jobs:
 
 
       # ========================================================
-      # PREPARE PERSISTENT STORAGE
+      # PREPARE D:
       # ========================================================
 
-      - name: Prepare persistent storage
+      - name: Prepare persistent D storage
         shell: pwsh
         run: |
 
           $root =
-            "C:\Persistent-RDP"
+            "D:\Persistent-RDP"
 
           $dirs = @(
             $root,
@@ -902,8 +898,16 @@ jobs:
           }
 
           Write-Host "===================================="
-          Write-Host "C: PERSISTENT STORAGE READY"
+          Write-Host "D: PERSISTENT STORAGE READY"
           Write-Host "===================================="
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
 
       # ========================================================
@@ -920,7 +924,7 @@ jobs:
         run: |
 
           $root =
-            "C:\Persistent-RDP"
+            "D:\Persistent-RDP"
 
           $script =
             "$env:TEMP\persistent_rdp_sync.py"
@@ -930,7 +934,6 @@ jobs:
           import json
           import base64
           import hashlib
-          import time
           from datetime import datetime, timezone
           from telethon import TelegramClient
 
@@ -938,7 +941,7 @@ jobs:
           API_HASH = os.environ["API_HASH"]
           SESSION_B64 = os.environ["SESSION_B64"]
 
-          ROOT = r"C:\Persistent-RDP"
+          ROOT = r"D:\Persistent-RDP"
 
           INDEX_LOCAL = os.path.join(
               ROOT,
@@ -1006,10 +1009,6 @@ jobs:
                       )
 
                       try:
-
-                          if name == "persistent_index.json":
-                              continue
-
                           size = os.path.getsize(path)
 
                           records.append({
@@ -1368,7 +1367,7 @@ jobs:
                   "updated_at":
                       now(),
                   "root":
-                      "C:\\Persistent-RDP",
+                      "D:\\Persistent-RDP",
                   "files":
                       new_records
               }
@@ -1469,15 +1468,15 @@ jobs:
 
 
       # ========================================================
-      # VERIFY PERSISTENT STORAGE
+      # VERIFY D:
       # ========================================================
 
-      - name: Verify persistent storage
+      - name: Verify persistent D storage
         shell: pwsh
         run: |
 
           $root =
-            "C:\Persistent-RDP"
+            "D:\Persistent-RDP"
 
           if (-not (Test-Path $root)) {
             throw "Persistent storage missing."
@@ -1502,61 +1501,23 @@ jobs:
             -Encoding UTF8
 
           if (-not (Test-Path $file)) {
-            throw "PERSISTENT WRITE FAILED."
+            throw "D WRITE FAILED."
           }
 
           Get-Content `
             $file
 
           Write-Host ""
-          Write-Host "PERSISTENT STORAGE WRITE SUCCESS"
-          Write-Host "PERSISTENT-RDP READY"
+          Write-Host "D: WRITE SUCCESS"
+          Write-Host "D: PERSISTENT-RDP READY"
 
-
-      # ========================================================
-      # CREATE EASY DESKTOP/EXPLORER FOLDER
-      # ========================================================
-
-      - name: Create Persistent-RDP Explorer folder
-        shell: pwsh
-        run: |
-
-          $root =
-            "C:\Persistent-RDP"
-
-          $desktop =
-            [Environment]::GetFolderPath(
-              "Desktop"
-            )
-
-          $shortcut =
-            "$desktop\Persistent-RDP.lnk"
-
-          $shell =
-            New-Object -ComObject WScript.Shell
-
-          $link =
-            $shell.CreateShortcut(
-              $shortcut
-            )
-
-          $link.TargetPath =
-            $root
-
-          $link.WorkingDirectory =
-            $root
-
-          $link.Description =
-            "Persistent-RDP synchronized storage"
-
-          $link.Save()
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "PERSISTENT-RDP FOLDER READY"
-          Write-Host "PATH: $root"
-          Write-Host "DESKTOP SHORTCUT CREATED"
-          Write-Host "========================================"
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
 
       # ========================================================
@@ -1648,20 +1609,22 @@ jobs:
           Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
 
-          Write-Host "Path: C:\Persistent-RDP"
+          Write-Host "Drive: D:"
+          Write-Host "Path: D:\Persistent-RDP"
 
-          Get-Item `
-            "C:\Persistent-RDP" |
+          Get-Volume `
+            -DriveLetter D |
             Format-List `
-              FullName,
-              CreationTime,
-              LastWriteTime
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
           Write-Host ""
           Write-Host "Persistent folders:"
 
           Get-ChildItem `
-            "C:\Persistent-RDP" `
+            "D:\Persistent-RDP" `
             -Force |
             Select-Object `
               Name,
