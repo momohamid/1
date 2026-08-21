@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + Telegram Persistent Storage + Jottacloud Sync (FINAL)
+name: RDP + Tailscale + RustDesk + Telegram Persistent Storage (FINAL)
 
 on:
   workflow_dispatch:
@@ -406,7 +406,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASSWORD }}
 
     steps:
 
@@ -754,6 +754,10 @@ jobs:
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
+          if ([string]::IsNullOrWhiteSpace($p)) {
+            throw "RDP_PASSWORD secret is missing."
+          }
+
           $sec =
             ConvertTo-SecureString `
               $p `
@@ -859,677 +863,605 @@ jobs:
 
 
       # ========================================================
-      # JOTTACLOUD DESKTOP
+      # PREPARE D:
       # ========================================================
 
-      - name: Download Jottacloud Desktop
+      - name: Prepare persistent D storage
         shell: pwsh
         run: |
 
-          $ErrorActionPreference = "Stop"
+          $root =
+            "D:\Persistent-RDP"
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "JOTTACLOUD DESKTOP DOWNLOAD"
-          Write-Host "=========================================="
-
-          $installer =
-            "$env:TEMP\jottacloud-setup.exe"
-
-          $urls = @(
-            "https://desktop.jottacloud.com/download/windows",
-            "https://jottacloud.com/en/download"
+          $dirs = @(
+            $root,
+            "$root\Desktop",
+            "$root\Documents",
+            "$root\Downloads",
+            "$root\Pictures",
+            "$root\Videos",
+            "$root\Users",
+            "$root\AppData",
+            "$root\ProgramData",
+            "$root\ProgramFiles",
+            "$root\ProgramFiles-x86",
+            "$root\Projects",
+            "$root\Projects\AE",
+            "$root\Assets",
+            "$root\Assets\Fonts",
+            "$root\Plugins"
           )
 
-          $downloaded = $false
+          foreach ($d in $dirs) {
 
-          foreach ($url in $urls) {
-
-            try {
-
-              Write-Host "Trying: $url"
-
-              Invoke-WebRequest `
-                -Uri $url `
-                -OutFile $installer `
-                -UseBasicParsing `
-                -MaximumRedirection 10 `
-                -ErrorAction Stop
-
-              if (Test-Path $installer) {
-
-                $size =
-                  (Get-Item $installer).Length
-
-                Write-Host `
-                  "Downloaded size: $size bytes"
-
-                if ($size -gt 100000) {
-
-                  $downloaded = $true
-                  break
-                }
-              }
-
-            }
-            catch {
-
-              Write-Host `
-                "Download attempt failed:"
-              Write-Host `
-                $_.Exception.Message
-            }
+            New-Item `
+              -ItemType Directory `
+              -Path $d `
+              -Force |
+              Out-Null
           }
 
-          if (-not $downloaded) {
+          Write-Host "===================================="
+          Write-Host "D: PERSISTENT STORAGE READY"
+          Write-Host "===================================="
 
-            throw `
-              "Unable to download the official Jottacloud Windows installer."
-          }
-
-          "JOTTA_INSTALLER=$installer" |
-            Out-File `
-              $env:GITHUB_ENV `
-              -Append `
-              -Encoding utf8
-
-          Write-Host "JOTTACLOUD INSTALLER READY"
-
-
-      - name: Install Jottacloud Desktop
-        shell: pwsh
-        run: |
-
-          $ErrorActionPreference = "Stop"
-
-          $installer =
-            $env:JOTTA_INSTALLER
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "INSTALLING JOTTACLOUD DESKTOP"
-          Write-Host "=========================================="
-
-          $ext =
-            [IO.Path]::GetExtension($installer)
-
-          if ($ext -ieq ".msi") {
-
-            $p =
-              Start-Process `
-                msiexec.exe `
-                -ArgumentList `
-                  "/i",
-                  "`"$installer`"",
-                  "/quiet",
-                  "/norestart" `
-                -Wait `
-                -PassThru
-
-            if (
-              $p.ExitCode -ne 0 -and
-              $p.ExitCode -ne 3010
-            ) {
-
-              throw `
-                "Jottacloud MSI installation failed: $($p.ExitCode)"
-            }
-
-          }
-          else {
-
-            $p =
-              Start-Process `
-                -FilePath $installer `
-                -ArgumentList `
-                  "/S",
-                  "/quiet",
-                  "/norestart" `
-                -Wait `
-                -PassThru
-
-            if (
-              $p.ExitCode -ne 0
-            ) {
-
-              Write-Host `
-                "Installer returned $($p.ExitCode)."
-
-              Write-Host `
-                "Continuing to locate the installed application..."
-            }
-          }
-
-          Remove-Item `
-            $installer `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Write-Host "JOTTACLOUD INSTALLATION STEP COMPLETE"
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
 
       # ========================================================
-      # FIND JOTTACLOUD DESKTOP
+      # TELEGRAM RESTORE + SYNC ENGINE
       # ========================================================
 
-      - name: Locate Jottacloud Desktop
+      - name: Restore and start Persistent-RDP Sync
         shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+
         run: |
 
-          $ErrorActionPreference = "Stop"
+          $root =
+            "D:\Persistent-RDP"
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "LOCATING JOTTACLOUD DESKTOP"
-          Write-Host "=========================================="
+          $script =
+            "$env:TEMP\persistent_rdp_sync.py"
 
-          $names = @(
-            "jottacloud.exe",
-            "Jottacloud.exe",
-            "jotta.exe",
-            "Jotta.exe"
+          @'
+          import os
+          import json
+          import base64
+          import hashlib
+          import time
+          from datetime import datetime, timezone
+          from telethon import TelegramClient
+
+          API_ID = int(os.environ["API_ID"])
+          API_HASH = os.environ["API_HASH"]
+          SESSION_B64 = os.environ["SESSION_B64"]
+
+          ROOT = r"D:\Persistent-RDP"
+
+          INDEX_LOCAL = os.path.join(
+              ROOT,
+              "persistent_index.json"
           )
 
-          $roots = @(
-            $env:ProgramFiles,
-            ${env:ProgramFiles(x86)},
-            $env:LOCALAPPDATA,
-            $env:APPDATA
+          CHUNK_SIZE = 4 * 1024 * 1024
+
+          SESSION_FILE = os.path.join(
+              os.environ["TEMP"],
+              "unlim_session.session"
           )
 
-          $found = $null
+          with open(SESSION_FILE, "wb") as f:
+              f.write(
+                  base64.b64decode(SESSION_B64)
+              )
 
-          foreach ($root in $roots) {
+          client = TelegramClient(
+              os.path.join(
+                  os.environ["TEMP"],
+                  "unlim_session"
+              ),
+              API_ID,
+              API_HASH
+          )
 
-            if (
-              -not $root -or
-              -not (Test-Path $root)
-            ) {
-              continue
-            }
+          def sha256(path):
+              h = hashlib.sha256()
 
-            foreach ($name in $names) {
+              with open(path, "rb") as f:
+                  while True:
+                      data = f.read(4 * 1024 * 1024)
 
-              try {
+                      if not data:
+                          break
 
-                $result =
-                  Get-ChildItem `
-                    -Path $root `
-                    -Filter $name `
-                    -File `
-                    -Recurse `
-                    -ErrorAction SilentlyContinue |
-                    Select-Object -First 1
+                      h.update(data)
 
-                if ($result) {
+              return h.hexdigest()
 
-                  $found =
-                    $result.FullName
+          def now():
+              return datetime.now(
+                  timezone.utc
+              ).isoformat()
 
-                  break
-                }
+          def build_index():
+              records = []
 
-              }
-              catch {
-              }
-            }
+              for root, dirs, files in os.walk(ROOT):
 
-            if ($found) {
-              break
-            }
-          }
+                  dirs[:] = [
+                      d for d in dirs
+                      if d not in (
+                          ".sync",
+                          "TelegramCache"
+                      )
+                  ]
 
-          if (-not $found) {
+                  for name in files:
 
-            $uninstallRoots = @(
-              "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*",
-              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*",
-              "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*"
-            )
+                      path = os.path.join(
+                          root,
+                          name
+                      )
 
-            foreach ($reg in $uninstallRoots) {
+                      try:
+                          size = os.path.getsize(path)
 
-              try {
+                          records.append({
+                              "path":
+                                  os.path.relpath(
+                                      path,
+                                      ROOT
+                                  ).replace(
+                                      "\\",
+                                      "/"
+                                  ),
+                              "size":
+                                  size,
+                              "sha256":
+                                  sha256(path)
+                          })
 
-                $apps =
-                  Get-ItemProperty `
-                    $reg `
-                    -ErrorAction SilentlyContinue |
-                    Where-Object {
-                      $_.DisplayName -match "Jottacloud"
-                    }
+                      except Exception as e:
 
-                foreach ($app in $apps) {
+                          print(
+                              "SKIP:",
+                              path,
+                              e
+                          )
+
+              return records
+
+          async def find_index():
+
+              async for msg in client.iter_messages(
+                  "me",
+                  search="PERSISTENT-RDP-MASTER-INDEX",
+                  limit=20
+              ):
+
+                  if msg.file:
+                      return msg
+
+              return None
+
+          async def download_index():
+
+              msg = await find_index()
+
+              if not msg:
+                  return None
+
+              temp = os.path.join(
+                  os.environ["TEMP"],
+                  "persistent_master_index.json"
+              )
+
+              await client.download_media(
+                  msg,
+                  file=temp
+              )
+
+              with open(
+                  temp,
+                  "r",
+                  encoding="utf-8"
+              ) as f:
+
+                  return json.load(f)
+
+          async def restore_file(record):
+
+              target = os.path.join(
+                  ROOT,
+                  record["path"].replace(
+                      "/",
+                      os.sep
+                  )
+              )
+
+              if os.path.exists(target):
+
+                  try:
+
+                      if (
+                          os.path.getsize(target)
+                          == record["size"]
+                          and
+                          sha256(target)
+                          == record["sha256"]
+                      ):
+                          return
+
+                  except Exception:
+                      pass
+
+              os.makedirs(
+                  os.path.dirname(target),
+                  exist_ok=True
+              )
+
+              output = target + ".restore"
+
+              with open(
+                  output,
+                  "wb"
+              ) as out:
+
+                  for chunk in record["chunks"]:
+
+                      msg_id = chunk[
+                          "telegram_message_id"
+                      ]
+
+                      msg = await client.get_messages(
+                          "me",
+                          ids=msg_id
+                      )
+
+                      if not msg:
+                          raise RuntimeError(
+                              "Missing Telegram chunk "
+                              + str(msg_id)
+                          )
+
+                      temp = os.path.join(
+                          os.environ["TEMP"],
+                          "restore_chunk.bin"
+                      )
+
+                      await client.download_media(
+                          msg,
+                          file=temp
+                      )
+
+                      if (
+                          sha256(temp)
+                          != chunk["sha256"]
+                      ):
+                          raise RuntimeError(
+                              "Chunk SHA256 mismatch"
+                          )
+
+                      with open(
+                          temp,
+                          "rb"
+                      ) as f:
+
+                          while True:
+
+                              data = f.read(
+                                  4 * 1024 * 1024
+                              )
+
+                              if not data:
+                                  break
+
+                              out.write(data)
+
+              os.replace(
+                  output,
+                  target
+              )
+
+          async def restore():
+
+              print(
+                  "================================"
+              )
+
+              print(
+                  "PERSISTENT-RDP RESTORE START"
+              )
+
+              old = await download_index()
+
+              if not old:
+
+                  print(
+                      "NO PREVIOUS MASTER INDEX"
+                  )
+
+                  return
+
+              for record in old.get(
+                  "files",
+                  []
+              ):
+
+                  try:
+
+                      await restore_file(
+                          record
+                      )
+
+                  except Exception as e:
+
+                      print(
+                          "RESTORE FAILED:",
+                          record.get("path"),
+                          e
+                      )
+
+              print(
+                  "PERSISTENT-RDP RESTORE COMPLETE"
+              )
+
+          async def upload_file(
+              path,
+              relative
+          ):
+
+              size = os.path.getsize(path)
+
+              chunks = []
+
+              with open(
+                  path,
+                  "rb"
+              ) as f:
+
+                  index = 0
+
+                  while True:
+
+                      data = f.read(
+                          CHUNK_SIZE
+                      )
+
+                      if not data:
+                          break
+
+                      temp = os.path.join(
+                          os.environ["TEMP"],
+                          "persistent_upload.bin"
+                      )
+
+                      with open(
+                          temp,
+                          "wb"
+                      ) as out:
+
+                          out.write(data)
+
+                      h = sha256(temp)
+
+                      msg = await client.send_file(
+                          "me",
+                          temp,
+                          caption=(
+                              "PERSISTENT-RDP-CHUNK\n"
+                              f"path=/{relative}\n"
+                              f"chunk={index}\n"
+                              f"sha256={h}"
+                          )
+                      )
+
+                      chunks.append({
+                          "index": index,
+                          "size": len(data),
+                          "sha256": h,
+                          "telegram_message_id":
+                              msg.id
+                      })
+
+                      os.remove(temp)
+
+                      index += 1
+
+              return chunks
+
+          async def sync():
+
+              print(
+                  "================================"
+              )
+
+              print(
+                  "PERSISTENT-RDP SYNC START"
+              )
+
+              old = await download_index()
+
+              old_map = {}
+
+              if old:
+
+                  for r in old.get(
+                      "files",
+                      []
+                  ):
+
+                      old_map[
+                          r["path"]
+                      ] = r
+
+              current = build_index()
+
+              new_records = []
+
+              for item in current:
+
+                  relative = item["path"]
+
+                  previous = old_map.get(
+                      relative
+                  )
 
                   if (
-                    $app.InstallLocation -and
-                    (Test-Path $app.InstallLocation)
-                  ) {
+                      previous
+                      and
+                      previous.get("size")
+                      == item["size"]
+                      and
+                      previous.get("sha256")
+                      == item["sha256"]
+                  ):
 
-                    foreach ($name in $names) {
+                      new_records.append(
+                          previous
+                      )
 
-                      $candidate =
-                        Join-Path `
-                          $app.InstallLocation `
-                          $name
+                      continue
 
-                      if (Test-Path $candidate) {
+                  print(
+                      "UPLOAD:",
+                      relative
+                  )
 
-                        $found = $candidate
-                        break
-                      }
-                    }
-                  }
+                  path = os.path.join(
+                      ROOT,
+                      relative.replace(
+                          "/",
+                          os.sep
+                      )
+                  )
 
-                  if ($found) {
-                    break
-                  }
-                }
+                  chunks = await upload_file(
+                      path,
+                      relative
+                  )
 
+                  new_records.append({
+                      "path": relative,
+                      "size": item["size"],
+                      "sha256": item["sha256"],
+                      "chunk_size":
+                          CHUNK_SIZE,
+                      "chunk_count":
+                          len(chunks),
+                      "chunks":
+                          chunks,
+                      "updated_at":
+                          now()
+                  })
+
+              master = {
+                  "version": 3,
+                  "type":
+                      "persistent-rdp-master-index",
+                  "updated_at":
+                      now(),
+                  "root":
+                      "D:\\Persistent-RDP",
+                  "files":
+                      new_records
               }
-              catch {
-              }
 
-              if ($found) {
-                break
-              }
-            }
-          }
-
-          if (-not $found) {
-
-            Write-Host ""
-            Write-Host "Jottacloud-related installed programs:"
-
-            Get-ItemProperty `
-              "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*" `
-              -ErrorAction SilentlyContinue |
-              Where-Object {
-                $_.DisplayName -match "Jottacloud"
-              } |
-              Select-Object `
-                DisplayName,
-                DisplayVersion,
-                InstallLocation
-
-            Get-ItemProperty `
-              "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" `
-              -ErrorAction SilentlyContinue |
-              Where-Object {
-                $_.DisplayName -match "Jottacloud"
-              } |
-              Select-Object `
-                DisplayName,
-                DisplayVersion,
-                InstallLocation
-
-            throw `
-              "Jottacloud Desktop executable was not found after installation."
-          }
-
-          Write-Host ""
-          Write-Host "JOTTACLOUD FOUND:"
-          Write-Host $found
-
-          "JOTTA_EXE=$found" |
-            Out-File `
-              $env:GITHUB_ENV `
-              -Append `
-              -Encoding utf8
-
-
-      # ========================================================
-      # START JOTTACLOUD
-      # ========================================================
-
-      - name: Start Jottacloud Desktop
-        shell: pwsh
-        run: |
-
-          $ErrorActionPreference = "Stop"
-
-          if (
-            -not $env:JOTTA_EXE -or
-            -not (Test-Path $env:JOTTA_EXE)
-          ) {
-
-            throw `
-              "Jottacloud executable is unavailable."
-          }
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "STARTING JOTTACLOUD"
-          Write-Host "=========================================="
-
-          $existing =
-            Get-Process `
-              -Name "jottacloud","jotta" `
-              -ErrorAction SilentlyContinue
-
-          if (-not $existing) {
-
-            Start-Process `
-              -FilePath $env:JOTTA_EXE `
-              -WorkingDirectory `
-              (Split-Path $env:JOTTA_EXE)
-
-            Start-Sleep `
-              -Seconds 15
-          }
-
-          $running =
-            Get-Process `
-              -Name "jottacloud","jotta" `
-              -ErrorAction SilentlyContinue
-
-          if (-not $running) {
-
-            throw `
-              "Jottacloud Desktop did not remain running."
-          }
-
-          Write-Host ""
-          Write-Host "JOTTACLOUD DESKTOP RUNNING"
-
-
-      # ========================================================
-      # JOTTACLOUD STARTUP
-      # ========================================================
-
-      - name: Configure Jottacloud automatic startup
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "JOTTACLOUD STARTUP"
-          Write-Host "=========================================="
-
-          $startup =
-            "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $startup `
-            -Force |
-            Out-Null
-
-          $shortcut =
-            Join-Path `
-              $startup `
-              "Jottacloud.lnk"
-
-          $ws =
-            New-Object `
-              -ComObject WScript.Shell
-
-          $sc =
-            $ws.CreateShortcut($shortcut)
-
-          $sc.TargetPath =
-            $env:JOTTA_EXE
-
-          $sc.WorkingDirectory =
-            Split-Path $env:JOTTA_EXE
-
-          $sc.WindowStyle = 7
-
-          $sc.Save()
-
-          Write-Host `
-            "Jottacloud startup shortcut created."
-
-
-      # ========================================================
-      # WAIT FOR NORMAL JOTTACLOUD SYNC ROOT
-      # ========================================================
-
-      - name: Detect normal Jottacloud Sync Folder
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "WAITING FOR JOTTACLOUD SYNC"
-          Write-Host "=========================================="
-
-          $possible = @(
-            "$env:USERPROFILE\Jottacloud",
-            "$env:USERPROFILE\JottaCloud",
-            "$env:USERPROFILE\Jottacloud\Sync",
-            "$env:USERPROFILE\JottaCloud\Sync"
-          )
-
-          $sync = $null
-
-          for (
-            $attempt = 1;
-            $attempt -le 24;
-            $attempt++
-          ) {
-
-            foreach ($path in $possible) {
-
-              if (
-                Test-Path $path -PathType Container
-              ) {
-
-                $sync = $path
-                break
-              }
-            }
-
-            if ($sync) {
-              break
-            }
-
-            Write-Host `
-              "Waiting for Sync Folder... attempt $attempt/24"
-
-            Start-Sleep `
-              -Seconds 5
-          }
-
-          if ($sync) {
-
-            Write-Host ""
-            Write-Host "=========================================="
-            Write-Host "JOTTACLOUD SYNC FOLDER FOUND"
-            Write-Host "=========================================="
-            Write-Host $sync
-
-            "JOTTA_SYNC_FOLDER=$sync" |
-              Out-File `
-                $env:GITHUB_ENV `
-                -Append `
-                -Encoding utf8
-
-          }
-          else {
-
-            Write-Host ""
-            Write-Host "=========================================="
-            Write-Host "SYNC FOLDER NOT FOUND YET"
-            Write-Host "=========================================="
-
-            Write-Host `
-              "The Jottacloud Desktop setup/login may still be waiting."
-
-            "JOTTA_SYNC_FOLDER=" |
-              Out-File `
-                $env:GITHUB_ENV `
-                -Append `
-                -Encoding utf8
-          }
-
-
-      # ========================================================
-      # JOTTACLOUD SYNC TEST
-      # ========================================================
-
-      - name: Test Jottacloud normal Sync
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "JOTTACLOUD NORMAL SYNC TEST"
-          Write-Host "=========================================="
-
-          if (
-            -not $env:JOTTA_SYNC_FOLDER
-          ) {
-
-            Write-Host `
-              "Sync folder not detected."
-
-            Write-Host `
-              "Skipping test without failing the RDP."
-
-            exit 0
-          }
-
-          if (
-            -not (
-              Test-Path `
-                $env:JOTTA_SYNC_FOLDER `
-                -PathType Container
-            )
-          ) {
-
-            Write-Host `
-              "Sync folder disappeared."
-
-            exit 0
-          }
-
-          $test =
-            Join-Path `
-              $env:JOTTA_SYNC_FOLDER `
-              "Persistent-RDP-Test"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $test `
-            -Force |
-            Out-Null
-
-          $file =
-            Join-Path `
-              $test `
-              "session-test.txt"
-
-          Set-Content `
-            -Path $file `
-            -Value `
-              "Persistent-RDP Jottacloud test $(Get-Date -Format o)" `
-            -Encoding UTF8
-
-          Write-Host ""
-          Write-Host "TEST FILE:"
-          Write-Host $file
-
-          Get-Content `
-            $file
-
-          Write-Host ""
-          Write-Host "JOTTACLOUD SYNC TEST FILE CREATED"
-
-
-      # ========================================================
-      # JOTTACLOUD STATUS
-      # ========================================================
-
-      - name: Display Jottacloud status
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "JOTTACLOUD STATUS"
-          Write-Host "=========================================="
-
-          Get-Process `
-            -Name "jottacloud","jotta" `
-            -ErrorAction SilentlyContinue |
-            Select-Object `
-              Id,
-              ProcessName,
-              StartTime,
-              CPU
-
-          if ($env:JOTTA_SYNC_FOLDER) {
-
-            Write-Host ""
-            Write-Host "SYNC FOLDER:"
-            Write-Host `
-              $env:JOTTA_SYNC_FOLDER
-
-            Write-Host ""
-            Write-Host "SYNC CONTENT:"
-
-            Get-ChildItem `
-              $env:JOTTA_SYNC_FOLDER `
-              -Force `
-              -ErrorAction SilentlyContinue |
-              Select-Object `
-                Name,
-                Length,
-                LastWriteTime
-          }
-
-
-      # ========================================================
-      # JOTTACLOUD WATCHDOG
-      # ========================================================
-
-      - name: Create Jottacloud watchdog
-        shell: pwsh
-        run: |
-
-          $watchdog =
-            "$env:TEMP\jottacloud_watchdog.ps1"
+              with open(
+                  INDEX_LOCAL,
+                  "w",
+                  encoding="utf-8"
+              ) as f:
+
+                  json.dump(
+                      master,
+                      f,
+                      indent=2,
+                      ensure_ascii=False
+                  )
+
+              await client.send_file(
+                  "me",
+                  INDEX_LOCAL,
+                  caption=
+                  "PERSISTENT-RDP-MASTER-INDEX"
+              )
+
+              print(
+                  "PERSISTENT-RDP SYNC COMPLETE"
+              )
+
+          async def main():
+
+              await client.start()
+
+              print(
+                  "TELEGRAM CONNECTED"
+              )
+
+              await restore()
+
+              await sync()
+
+              print(
+                  "INITIAL PERSISTENCE READY"
+              )
+
+          with client:
+              client.loop.run_until_complete(
+                  main()
+              )
+          '@ |
+            Set-Content `
+              -Path $script `
+              -Encoding UTF8
+
+          # ----------------------------------------------------
+          # Initial restore + sync
+          # ----------------------------------------------------
+
+          python $script
+
+          # ----------------------------------------------------
+          # Background sync loop
+          # 40 seconds between scans
+          # ----------------------------------------------------
+
+          $runner =
+            "$env:TEMP\persistent_rdp_sync_loop.ps1"
 
           @"
           while (`$true) {
 
               try {
 
-                  `$running =
-                    Get-Process `
-                      -Name "jottacloud","jotta" `
-                      -ErrorAction SilentlyContinue
+                  python "$script"
 
-                  if (-not `$running) {
-
-                      if (
-                          Test-Path "$env:JOTTA_EXE"
-                      ) {
-
-                          Start-Process `
-                            -FilePath "$env:JOTTA_EXE" `
-                            -WorkingDirectory `
-                            (Split-Path "$env:JOTTA_EXE")
-
-                          Start-Sleep `
-                            -Seconds 10
-                      }
-                  }
+                  Write-Host `
+                    "PERSISTENT SYNC FINISHED"
 
               }
               catch {
 
                   Write-Host `
-                    "Jottacloud watchdog error: `$(`$_.Exception.Message)"
+                    "PERSISTENT SYNC ERROR: `$(`$_.Exception.Message)"
               }
 
-              Start-Sleep `
-                -Seconds 30
+              Start-Sleep -Seconds 40
           }
           "@ |
             Set-Content `
-              -Path $watchdog `
+              -Path $runner `
               -Encoding UTF8
 
           Start-Process `
@@ -1539,12 +1471,67 @@ jobs:
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "`"$watchdog`"" `
+              "`"$runner`"" `
             -WindowStyle Hidden
 
           Write-Host ""
-          Write-Host "JOTTACLOUD WATCHDOG STARTED"
-          Write-Host "CHECK INTERVAL: 30 SECONDS"
+          Write-Host "========================================"
+          Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
+          Write-Host "BACKGROUND SYNC: EVERY 40 SECONDS"
+          Write-Host "========================================"
+
+
+      # ========================================================
+      # VERIFY D:
+      # ========================================================
+
+      - name: Verify persistent D storage
+        shell: pwsh
+        run: |
+
+          $root =
+            "D:\Persistent-RDP"
+
+          if (-not (Test-Path $root)) {
+            throw "Persistent storage missing."
+          }
+
+          $test =
+            "$root\Persistent-RDP-Test"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $test `
+            -Force |
+            Out-Null
+
+          $file =
+            "$test\runner-test.txt"
+
+          Set-Content `
+            -Path $file `
+            -Value `
+              "Persistent-RDP test $(Get-Date -Format o)" `
+            -Encoding UTF8
+
+          if (-not (Test-Path $file)) {
+            throw "D WRITE FAILED."
+          }
+
+          Get-Content `
+            $file
+
+          Write-Host ""
+          Write-Host "D: WRITE SUCCESS"
+          Write-Host "D: PERSISTENT-RDP READY"
+
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
 
       # ========================================================
@@ -1627,39 +1614,36 @@ jobs:
       # DISPLAY STORAGE STATUS
       # ========================================================
 
-      - name: Display Jottacloud storage status
+      - name: Display storage status
         shell: pwsh
         run: |
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENT STORAGE"
+          Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
 
-          if ($env:JOTTA_SYNC_FOLDER) {
+          Write-Host "Drive: D:"
+          Write-Host "Path: D:\Persistent-RDP"
 
-            Write-Host ""
-            Write-Host "JOTTACLOUD SYNC:"
-            Write-Host `
-              $env:JOTTA_SYNC_FOLDER
+          Get-Volume `
+            -DriveLetter D |
+            Format-List `
+              DriveLetter,
+              FileSystem,
+              Size,
+              SizeRemaining
 
-            Write-Host ""
-            Write-Host "FILES:"
+          Write-Host ""
+          Write-Host "Persistent folders:"
 
-            Get-ChildItem `
-              $env:JOTTA_SYNC_FOLDER `
-              -Force `
-              -ErrorAction SilentlyContinue |
-              Select-Object `
-                Name,
-                Length,
-                LastWriteTime
-          }
-          else {
-
-            Write-Host `
-              "Jottacloud Sync Folder is not available yet."
-          }
+          Get-ChildItem `
+            "D:\Persistent-RDP" `
+            -Force |
+            Select-Object `
+              Name,
+              Length,
+              LastWriteTime
 
 
       # ========================================================
@@ -1680,31 +1664,13 @@ jobs:
             (Get-Date) -lt $end
           ) {
 
-            Write-Host ""
             Write-Host (
               "Heartbeat " +
               (Get-Date).ToString("HH:mm:ss")
             )
 
             Write-Host `
-              "Jottacloud background sync is running."
-
-            $running =
-              Get-Process `
-                -Name "jottacloud","jotta" `
-                -ErrorAction SilentlyContinue
-
-            if ($running) {
-
-              Write-Host `
-                "Jottacloud: RUNNING"
-
-            }
-            else {
-
-              Write-Host `
-                "Jottacloud: NOT RUNNING - watchdog will restart it."
-            }
+              "Persistent-RDP background sync is running."
 
             Start-Sleep `
               -Seconds 60
@@ -1712,56 +1678,36 @@ jobs:
 
 
       # ========================================================
-      # FINAL JOTTACLOUD CHECK
+      # FINAL SYNC
       # ========================================================
 
-      - name: Final Jottacloud sync check
+      - name: Final Persistent-RDP sync
         if: always()
         shell: pwsh
+        env:
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          SESSION_B64: ${{ secrets.TELEGRAM_SESSION }}
+
         run: |
 
           Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "FINAL JOTTACLOUD CHECK"
-          Write-Host "=========================================="
+          Write-Host "========================================"
+          Write-Host "FINAL PERSISTENT-RDP SYNC"
+          Write-Host "========================================"
 
-          $running =
-            Get-Process `
-              -Name "jottacloud","jotta" `
-              -ErrorAction SilentlyContinue
+          $script =
+            "$env:TEMP\persistent_rdp_sync.py"
 
-          if ($running) {
+          if (Test-Path $script) {
 
-            Write-Host `
-              "Jottacloud is still running."
+            python $script
 
           }
           else {
 
             Write-Host `
-              "Jottacloud process is not running."
-          }
-
-          if ($env:JOTTA_SYNC_FOLDER) {
-
-            Write-Host ""
-            Write-Host "Sync folder:"
-            Write-Host `
-              $env:JOTTA_SYNC_FOLDER
-
-            Write-Host ""
-            Write-Host "Recent files:"
-
-            Get-ChildItem `
-              $env:JOTTA_SYNC_FOLDER `
-              -Recurse `
-              -File `
-              -ErrorAction SilentlyContinue |
-              Sort-Object LastWriteTime -Descending |
-              Select-Object -First 20 `
-                FullName,
-                Length,
-                LastWriteTime
+              "Sync script not found."
           }
 
 
