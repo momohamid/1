@@ -408,6 +408,14 @@ jobs:
       RDP_USER: Yousif190
       RDP_PASS: Yousif1990
 
+      # ========================================================
+      # NORMAL WINDOWS SYNC FOLDER
+      # No D: drive
+      # No virtual disk
+      # ========================================================
+      SYNC_ROOT: 'C:\Users\Yousif190\Persistent-RDP'
+
+
     steps:
 
       # ========================================================
@@ -859,15 +867,17 @@ jobs:
 
 
       # ========================================================
-      # PREPARE D:
+      # CREATE NORMAL WINDOWS SYNC FOLDER
       # ========================================================
 
-      - name: Prepare persistent D storage
+      - name: Prepare normal Persistent-RDP sync folder
         shell: pwsh
         run: |
 
+          $user = $env:RDP_USER
+
           $root =
-            "D:\Persistent-RDP"
+            "C:\Users\$user\Persistent-RDP"
 
           $dirs = @(
             $root,
@@ -876,11 +886,6 @@ jobs:
             "$root\Downloads",
             "$root\Pictures",
             "$root\Videos",
-            "$root\Users",
-            "$root\AppData",
-            "$root\ProgramData",
-            "$root\ProgramFiles",
-            "$root\ProgramFiles-x86",
             "$root\Projects",
             "$root\Projects\AE",
             "$root\Assets",
@@ -897,17 +902,51 @@ jobs:
               Out-Null
           }
 
-          Write-Host "===================================="
-          Write-Host "D: PERSISTENT STORAGE READY"
-          Write-Host "===================================="
+          # Make the folder easy to find from Explorer.
+          $desktop =
+            "C:\Users\$user\Desktop"
 
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
+          New-Item `
+            -ItemType Directory `
+            -Path $desktop `
+            -Force |
+            Out-Null
+
+          $shortcut =
+            "$desktop\Persistent-RDP.lnk"
+
+          $shell =
+            New-Object `
+              -ComObject WScript.Shell
+
+          $link =
+            $shell.CreateShortcut($shortcut)
+
+          $link.TargetPath = $root
+          $link.WorkingDirectory = $root
+          $link.Description =
+            "Persistent-RDP Cloud Sync Folder"
+
+          $link.Save()
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "NORMAL WINDOWS SYNC FOLDER READY"
+          Write-Host "=========================================="
+          Write-Host "Folder:"
+          Write-Host $root
+          Write-Host ""
+          Write-Host "Desktop shortcut:"
+          Write-Host $shortcut
+          Write-Host ""
+
+          Get-ChildItem `
+            $root `
+            -Force |
+            Select-Object `
+              Name,
+              Length,
+              LastWriteTime
 
 
       # ========================================================
@@ -924,7 +963,13 @@ jobs:
         run: |
 
           $root =
-            "D:\Persistent-RDP"
+            "C:\Users\$env:RDP_USER\Persistent-RDP"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $root `
+            -Force |
+            Out-Null
 
           $script =
             "$env:TEMP\persistent_rdp_sync.py"
@@ -941,7 +986,11 @@ jobs:
           API_HASH = os.environ["API_HASH"]
           SESSION_B64 = os.environ["SESSION_B64"]
 
-          ROOT = r"D:\Persistent-RDP"
+          ROOT = os.path.join(
+              r"C:\Users",
+              os.environ["RDP_USER"],
+              "Persistent-RDP"
+          )
 
           INDEX_LOCAL = os.path.join(
               ROOT,
@@ -974,7 +1023,9 @@ jobs:
 
               with open(path, "rb") as f:
                   while True:
-                      data = f.read(4 * 1024 * 1024)
+                      data = f.read(
+                          4 * 1024 * 1024
+                      )
 
                       if not data:
                           break
@@ -1009,7 +1060,20 @@ jobs:
                       )
 
                       try:
-                          size = os.path.getsize(path)
+
+                          # Do not synchronize the local index itself.
+                          if (
+                              os.path.normcase(path)
+                              ==
+                              os.path.normcase(
+                                  INDEX_LOCAL
+                              )
+                          ):
+                              continue
+
+                          size = os.path.getsize(
+                              path
+                          )
 
                           records.append({
                               "path":
@@ -1367,7 +1431,7 @@ jobs:
                   "updated_at":
                       now(),
                   "root":
-                      "D:\\Persistent-RDP",
+                      "Persistent-RDP",
                   "files":
                       new_records
               }
@@ -1463,23 +1527,25 @@ jobs:
           Write-Host ""
           Write-Host "========================================"
           Write-Host "PERSISTENT-RDP RESTORE + SYNC READY"
+          Write-Host "NORMAL WINDOWS FOLDER:"
+          Write-Host "C:\Users\$env:RDP_USER\Persistent-RDP"
           Write-Host "BACKGROUND SYNC: EVERY 40 SECONDS"
           Write-Host "========================================"
 
 
       # ========================================================
-      # VERIFY D:
+      # VERIFY NORMAL WINDOWS FOLDER
       # ========================================================
 
-      - name: Verify persistent D storage
+      - name: Verify Persistent-RDP folder
         shell: pwsh
         run: |
 
           $root =
-            "D:\Persistent-RDP"
+            "C:\Users\$env:RDP_USER\Persistent-RDP"
 
           if (-not (Test-Path $root)) {
-            throw "Persistent storage missing."
+            throw "Persistent-RDP folder missing."
           }
 
           $test =
@@ -1501,23 +1567,32 @@ jobs:
             -Encoding UTF8
 
           if (-not (Test-Path $file)) {
-            throw "D WRITE FAILED."
+            throw "PERSISTENT-RDP WRITE FAILED."
           }
 
           Get-Content `
             $file
 
           Write-Host ""
-          Write-Host "D: WRITE SUCCESS"
-          Write-Host "D: PERSISTENT-RDP READY"
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP FOLDER WRITE SUCCESS"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Folder:"
+          Write-Host $root
+          Write-Host ""
+          Write-Host "The folder is a normal Windows folder."
+          Write-Host "No D: drive is required."
+          Write-Host "No virtual disk is required."
+          Write-Host ""
 
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
+          Get-ChildItem `
+            $root `
+            -Force |
+            Select-Object `
+              Name,
+              Length,
+              LastWriteTime
 
 
       # ========================================================
@@ -1600,36 +1675,38 @@ jobs:
       # DISPLAY STORAGE STATUS
       # ========================================================
 
-      - name: Display storage status
+      - name: Display Persistent-RDP status
         shell: pwsh
         run: |
+
+          $root =
+            "C:\Users\$env:RDP_USER\Persistent-RDP"
 
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Type: NORMAL WINDOWS FOLDER"
+          Write-Host "Path: $root"
+          Write-Host ""
+          Write-Host "Desktop shortcut:"
+          Write-Host "C:\Users\$env:RDP_USER\Desktop\Persistent-RDP.lnk"
+          Write-Host ""
 
-          Write-Host "Drive: D:"
-          Write-Host "Path: D:\Persistent-RDP"
+          if (Test-Path $root) {
 
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
+            Get-ChildItem `
+              $root `
+              -Force |
+              Select-Object `
+                Name,
+                Length,
+                LastWriteTime
+          }
 
           Write-Host ""
-          Write-Host "Persistent folders:"
-
-          Get-ChildItem `
-            "D:\Persistent-RDP" `
-            -Force |
-            Select-Object `
-              Name,
-              Length,
-              LastWriteTime
+          Write-Host "PERSISTENT-RDP STORAGE READY"
 
 
       # ========================================================
@@ -1657,6 +1734,9 @@ jobs:
 
             Write-Host `
               "Persistent-RDP background sync is running."
+
+            Write-Host `
+              "Folder: C:\Users\$env:RDP_USER\Persistent-RDP"
 
             Start-Sleep `
               -Seconds 60
