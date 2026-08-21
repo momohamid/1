@@ -135,128 +135,184 @@ jobs:
     steps:
 
       # ========================================================
-      # RESTORE OLD GITHUB BACKUP
+      # RESTORE PREVIOUS BACKUP
       # ========================================================
 
       - name: Restore backup from latest release
+        shell: pwsh
         run: |
+          $ErrorActionPreference = "Continue"
+
           $repo = "${{ github.repository }}"
           $url = "https://api.github.com/repos/$repo/releases/latest"
 
-          $release = Invoke-RestMethod `
-            -Uri $url `
+          try {
+            $release = Invoke-RestMethod `
+              -Uri $url `
+              -Headers @{
+                Authorization = "Bearer ${{ github.token }}"
+                Accept = "application/vnd.github+json"
+              } `
+              -ErrorAction Stop
+          }
+          catch {
+            Write-Host "No previous release available. Starting fresh."
+            exit 0
+          }
+
+          if (-not $release -or -not $release.assets) {
+            Write-Host "No previous backup found. Starting fresh."
+            exit 0
+          }
+
+          $asset = $release.assets |
+            Where-Object {
+              $_.name -like "backup-*.zip"
+            } |
+            Select-Object -First 1
+
+          if (-not $asset) {
+            Write-Host "No backup asset found. Starting fresh."
+            exit 0
+          }
+
+          $zip = "$env:TEMP\backup.zip"
+
+          Invoke-WebRequest `
+            -Uri $asset.browser_download_url `
+            -OutFile $zip `
             -Headers @{
               Authorization = "Bearer ${{ github.token }}"
             } `
+            -ErrorAction Stop
+
+          if (-not (Test-Path $zip)) {
+            Write-Host "Backup ZIP was not downloaded."
+            exit 0
+          }
+
+          Remove-Item `
+            "C:\Restore" `
+            -Recurse `
+            -Force `
             -ErrorAction SilentlyContinue
 
-          if ($release -and $release.assets) {
+          New-Item `
+            -ItemType Directory `
+            -Path "C:\Restore" `
+            -Force |
+            Out-Null
 
-            $asset =
-              $release.assets |
-              Where-Object {
-                $_.name -like "backup-*.zip"
-              } |
-              Select-Object -First 1
+          Expand-Archive `
+            -Path $zip `
+            -DestinationPath "C:\Restore" `
+            -Force
 
-            if ($asset) {
+          $map = @{
+            "Desktop"     = "$env:USERPROFILE\Desktop"
+            "Documents"   = "$env:USERPROFILE\Documents"
+            "Downloads"   = "$env:USERPROFILE\Downloads"
+            "AppData"     = "$env:APPDATA"
+            "ProgramData" = "C:\ProgramData"
+          }
 
-              $zip = "$env:TEMP\backup.zip"
+          foreach ($f in $map.Keys) {
 
-              Invoke-WebRequest `
-                -Uri $asset.browser_download_url `
-                -OutFile $zip
+            $src = "C:\Restore\$f"
+            $dst = $map[$f]
 
-              Expand-Archive `
-                -Path $zip `
-                -DestinationPath "C:\Restore" `
-                -Force
+            if (-not (Test-Path $src)) {
+              Write-Host "Not found in backup: $f"
+              continue
+            }
 
-              $map = @{
-                "Desktop"   = "$env:USERPROFILE\Desktop"
-                "Documents" = "$env:USERPROFILE\Documents"
-                "Downloads" = "$env:USERPROFILE\Downloads"
-                "AppData"   = "$env:APPDATA"
-                "ProgramData" = "C:\ProgramData"
-              }
+            New-Item `
+              -ItemType Directory `
+              -Path $dst `
+              -Force |
+              Out-Null
 
-              foreach ($f in $map.Keys) {
+            Write-Host "Restoring $f ..."
 
-                $src = "C:\Restore\$f"
+            robocopy `
+              $src `
+              $dst `
+              /E `
+              /COPY:DAT `
+              /DCOPY:DAT `
+              /R:3 `
+              /W:5 `
+              /NFL `
+              /NDL `
+              /NJH `
+              /NJS
 
-                if (Test-Path $src) {
+            $rc = $LASTEXITCODE
 
-                  robocopy `
-                    $src `
-                    $map[$f] `
-                    /E `
-                    /COPY:DAT `
-                    /R:3 `
-                    /W:10 `
-                    /NFL `
-                    /NDL `
-                    /NJH `
-                    /NJS |
-                    Out-Null
-                }
-              }
-
-              Write-Host `
-                "Backup restored from $($release.tag_name)"
-
+            if ($rc -le 7) {
+              Write-Host "Restore OK: $f (robocopy code $rc)"
             }
             else {
-              Write-Host "No backup asset found."
+              Write-Warning "Restore warning for $f (robocopy code $rc)"
             }
 
+            $global:LASTEXITCODE = 0
           }
-          else {
-            Write-Host `
-              "No previous release found; starting fresh."
-          }
+
+          Remove-Item `
+            $zip `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "BACKUP RESTORED SUCCESSFULLY"
+          Write-Host "=========================================="
+          Write-Host "Release: $($release.tag_name)"
+
+          exit 0
 
 
       # ========================================================
-      # CRD
+      # CRD FLAG
       # ========================================================
 
       - name: Set CRD flag early (safe read)
         run: |
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
           }
 
-          Write-Host `
-            "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
+
+      # ========================================================
+      # CRD INSTALL
+      # ========================================================
 
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
-
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
 
             Write-Host `
-              "CRD host not found, attempting install..."
+              "CRD host not found, attempting install (EXE -> MSI fallback)..."
 
             $exePath =
               "$env:TEMP\chromeremotedesktophost.exe"
@@ -290,7 +346,7 @@ jobs:
             catch {
 
               Write-Host `
-                "EXE installer failed: $($_.Exception.Message)"
+                "EXE installer failed or missing: $($_.Exception.Message)"
             }
 
             if (-not $ok) {
@@ -338,6 +394,10 @@ jobs:
           }
 
 
+      # ========================================================
+      # CRD RUN
+      # ========================================================
+
       - name: Run Chrome Remote Desktop (accept raw code / full cmd / url) with PIN
         if: env.CRD_ENABLED == '1'
         run: |
@@ -373,25 +433,28 @@ jobs:
 
           if (
             $raw -match `
-            'remoting_start_host\.exe'
+              'remoting_start_host\.exe'
           ) {
+
             $isFull = $true
           }
 
           if (
             $raw -match `
-            '--code\s*=\s*"?([^"\s]+)'
+              '--code\s*=\s*"?([^"\s]+)'
           ) {
 
-            $code =
-              (
-                [regex]::Match(
-                  $raw,
-                  '--code\s*=\s*"?([^"\s]+)'
-                )
-              ).Groups[1].Value
+            $code = (
+              [regex]::Match(
+                $raw,
+                '--code\s*=\s*"?([^"\s]+)'
+              )
+            ).Groups[1].Value
+
           }
-          elseif ($raw -match '^4\/') {
+          elseif (
+            $raw -match '^4\/'
+          ) {
 
             $code = $raw
           }
@@ -412,8 +475,10 @@ jobs:
             )
 
             Start-Process `
-              -FilePath $starter `
-              -ArgumentList $args
+              -FilePath `
+              $starter `
+              -ArgumentList `
+              $args
 
           }
           elseif ($isFull) {
@@ -434,7 +499,7 @@ jobs:
           else {
 
             Write-Error `
-              "Could not detect CRD code."
+              "Could not detect CRD code. Provide raw code (4/...), full command, or string containing --code=""4/..."""
 
             exit 1
           }
@@ -442,6 +507,10 @@ jobs:
           Write-Host `
             "CRD launch step completed with PIN."
 
+
+      # ========================================================
+      # CRD VERIFY
+      # ========================================================
 
       - name: Verify CRD registration (service + recent logs)
         if: env.CRD_ENABLED == '1'
@@ -466,9 +535,9 @@ jobs:
 
             if (
               $svc -and
-              $svc.Status -in
-              'Running',
-              'StartPending'
+              $svc.Status -in `
+                'Running',
+                'StartPending'
             ) {
 
               $ok = $true
@@ -483,6 +552,7 @@ jobs:
 
             Write-Host `
               "[$svcName] status: Running or starting."
+
           }
           else {
 
@@ -519,17 +589,24 @@ jobs:
 
 
       # ========================================================
-      # HOSTNAME / RUNTIME
+      # HOSTNAME + RUNTIME
       # ========================================================
 
       - name: Decide hostname + runtime
         run: |
 
-          if ("${{ inputs.rdp_count }}" -gt 1) {
-            $hn = "bullet${{ matrix.id }}"
+          if (
+            "${{ inputs.rdp_count }}" -gt 1
+          ) {
+
+            $hn =
+              "bullet${{ matrix.id }}"
+
           }
           else {
-            $hn = "bullet"
+
+            $hn =
+              "bullet"
           }
 
           "TS_HOSTNAME=$hn" |
@@ -544,10 +621,15 @@ jobs:
 
           function IntOr($v,$d) {
 
-            if ("$v" -match '^\d+$') {
+            if (
+              "$v" -match '^\d+$'
+            ) {
+
               [int]$v
+
             }
             else {
+
               [int]$d
             }
           }
@@ -561,13 +643,17 @@ jobs:
           if (
             Yes("${{ inputs.quick_test }}")
           ) {
+
             $runtime = 5
           }
 
           if (
-            -not (Yes("${{ inputs.quick_test }}")) -and
+            -not (
+              Yes("${{ inputs.quick_test }}")
+            ) -and
             $runtime -lt 6
           ) {
+
             $runtime = 300
           }
 
@@ -581,11 +667,11 @@ jobs:
               $env:GITHUB_ENV
 
           Write-Host `
-            "Hostname: $hn | Runtime: $runtime"
+            "Hostname: $hn  | Runtime: $runtime"
 
 
       # ========================================================
-      # PURGE
+      # PURGE TAILSCALE DEVICES
       # ========================================================
 
       - name: Purge bullet* devices (single-instance only)
@@ -627,8 +713,8 @@ jobs:
               foreach ($d in $list.devices) {
 
                 if (
-                  $d.hostname -match
-                  '^bullet[0-9]*$'
+                  $d.hostname -match `
+                    '^bullet[0-9]*$'
                 ) {
 
                   Invoke-RestMethod `
@@ -715,14 +801,17 @@ jobs:
 
 
       # ========================================================
-      # RDP
+      # RDP USER
       # ========================================================
 
       - name: Enable RDP user + firewall
         run: |
 
-          $u = $env:RDP_USER
-          $p = $env:RDP_PASS
+          $u =
+            $env:RDP_USER
+
+          $p =
+            $env:RDP_PASS
 
           $sec =
             ConvertTo-SecureString `
@@ -783,7 +872,7 @@ jobs:
             Out-Null
 
           Write-Host `
-            "RDP ready. user=$u host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
+            "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
 
       # ========================================================
@@ -794,7 +883,8 @@ jobs:
         run: |
 
           python -m pip install `
-            --upgrade pip
+            --upgrade `
+            pip
 
           python -m pip install `
             --force-reinstall `
@@ -804,478 +894,6 @@ jobs:
 
           python -c `
             "import pyautogui, pynput, PIL; print('Python libs OK')"
-
-
-      # ========================================================
-      # RCLONE + DRIVE
-      # ========================================================
-
-      - name: Install rclone + WinFsp
-        shell: pwsh
-        run: |
-
-          Write-Host "Installing rclone..."
-
-          winget install `
-            --id Rclone.Rclone `
-            -e `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
-
-          Write-Host "Installing WinFsp..."
-
-          winget install `
-            --id WinFsp.WinFsp `
-            -e `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
-
-          $rclone =
-            "$env:ProgramFiles\rclone\rclone.exe"
-
-          if (-not (Test-Path $rclone)) {
-
-            $rclone =
-              "$env:ChocolateyInstall\bin\rclone.exe"
-          }
-
-          if (-not (Test-Path $rclone)) {
-
-            $rclone =
-              (Get-Command rclone `
-                -ErrorAction SilentlyContinue).Source
-          }
-
-          if (-not $rclone) {
-
-            throw `
-              "rclone.exe was not found after installation."
-          }
-
-          "RCLONE_EXE=$rclone" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host `
-            "rclone: $rclone"
-
-
-      # ========================================================
-      # DRIVE CONFIG + RESTORE
-      # ========================================================
-
-      - name: Connect Drive and restore previous session files
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
-        shell: pwsh
-        run: |
-
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:DRIVE_TOKEN
-            )
-          ) {
-
-            throw `
-              "DRIVE_TOKEN secret is missing."
-          }
-
-          $configDir =
-            "$env:APPDATA\rclone"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $configDir `
-            -Force |
-            Out-Null
-
-          $config =
-            "$configDir\rclone.conf"
-
-          @"
-          [drive]
-          type = drive
-          scope = drive
-          token = $env:DRIVE_TOKEN
-          "@ |
-            Set-Content `
-              -Path $config `
-              -Encoding UTF8
-
-          $rclone =
-            $env:RCLONE_EXE
-
-          if (-not (Test-Path $rclone)) {
-            throw "rclone executable missing."
-          }
-
-          & $rclone `
-            --config "$config" `
-            lsd drive: |
-            Out-Host
-
-          $mount =
-            "R:"
-
-          if (Test-Path "$mount\") {
-
-            Write-Host `
-              "R: already exists."
-
-          }
-          else {
-
-            Write-Host `
-              "Mounting Drive as R:"
-
-            Start-Process `
-              -FilePath $rclone `
-              -ArgumentList @(
-                "mount",
-                "drive:",
-                "$mount",
-                "--config",
-                "$config",
-                "--network-mode",
-                "--vfs-cache-mode",
-                "full",
-                "--dir-cache-time",
-                "10s",
-                "--poll-interval",
-                "30s",
-                "--vfs-cache-max-age",
-                "1h",
-                "--vfs-write-back",
-                "5s"
-              ) `
-              -WindowStyle Hidden
-
-            $deadline =
-              (Get-Date).AddSeconds(60)
-
-            while (
-              -not (Test-Path "$mount\")
-              -and
-              (Get-Date) -lt $deadline
-            ) {
-
-              Start-Sleep `
-                -Seconds 2
-            }
-          }
-
-          if (-not (Test-Path "$mount\")) {
-
-            throw `
-              "Drive could not be mounted as R:."
-          }
-
-          Write-Host `
-            "========================================"
-
-          Write-Host `
-            "DRIVE MOUNTED SUCCESSFULLY"
-
-          Write-Host `
-            "File Explorer drive: R:"
-
-          Write-Host `
-            "========================================"
-
-          $state =
-            "R:\Persistent-RDP"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $state `
-            -Force |
-            Out-Null
-
-          $manifest =
-            "$state\session-files.txt"
-
-          if (Test-Path $manifest) {
-
-            Write-Host `
-              "Restoring files from previous sessions..."
-
-            Get-Content $manifest |
-            ForEach-Object {
-
-              $line =
-                $_.Trim()
-
-              if (
-                [string]::IsNullOrWhiteSpace($line)
-              ) {
-                return
-              }
-
-              $parts =
-                $line.Split("|",2)
-
-              if ($parts.Count -ne 2) {
-                return
-              }
-
-              $relative =
-                $parts[0]
-
-              $source =
-                $parts[1]
-
-              $destination =
-                "C:\$relative"
-
-              if (Test-Path $source) {
-
-                $parent =
-                  Split-Path `
-                    $destination `
-                    -Parent
-
-                New-Item `
-                  -ItemType Directory `
-                  -Path $parent `
-                  -Force |
-                  Out-Null
-
-                Copy-Item `
-                  -Path $source `
-                  -Destination $destination `
-                  -Force `
-                  -ErrorAction SilentlyContinue
-
-                Write-Host `
-                  "RESTORED: $destination"
-              }
-            }
-          }
-          else {
-
-            Write-Host `
-              "No previous Drive session files found."
-          }
-
-
-      # ========================================================
-      # SESSION FILE WATCHER
-      # ========================================================
-
-      - name: Start session-only C drive watcher
-        shell: pwsh
-        run: |
-
-          $root =
-            "R:\Persistent-RDP"
-
-          $filesDir =
-            "$root\files"
-
-          $list =
-            "$root\session-files.txt"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $filesDir `
-            -Force |
-            Out-Null
-
-          if (-not (Test-Path $list)) {
-
-            New-Item `
-              -ItemType File `
-              -Path $list `
-              -Force |
-              Out-Null
-          }
-
-          $watcherScript =
-            "$env:TEMP\drive_session_watcher.ps1"
-
-          @"
-          `$root = 'R:\Persistent-RDP'
-          `$filesDir = 'R:\Persistent-RDP\files'
-          `$list = 'R:\Persistent-RDP\session-files.txt'
-
-          New-Item -ItemType Directory -Path `$filesDir -Force | Out-Null
-
-          function Save-ChangedFile(`$path) {
-
-              try {
-
-                  if (
-                      [string]::IsNullOrWhiteSpace(`$path)
-                  ) {
-                      return
-                  }
-
-                  if (
-                      -not (Test-Path -LiteralPath `$path -PathType Leaf)
-                  ) {
-                      return
-                  }
-
-                  `$full =
-                      [System.IO.Path]::GetFullPath(`$path)
-
-                  if (
-                      -not `$full.StartsWith(
-                          'C:\',
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      return
-                  }
-
-                  if (
-                      `$full.StartsWith(
-                          'C:\Windows\',
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      return
-                  }
-
-                  if (
-                      `$full.StartsWith(
-                          'C:\Program Files\',
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      return
-                  }
-
-                  if (
-                      `$full.StartsWith(
-                          'C:\Program Files (x86)\',
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      return
-                  }
-
-                  if (
-                      `$full.StartsWith(
-                          'C:\Restore\',
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      return
-                  }
-
-                  `$relative =
-                      `$full.Substring(3)
-
-                  `$remote =
-                      Join-Path `
-                        `$filesDir `
-                        `$relative
-
-                  `$parent =
-                      Split-Path `
-                        `$remote `
-                        -Parent
-
-                  New-Item `
-                    -ItemType Directory `
-                    -Path `$parent `
-                    -Force |
-                    Out-Null
-
-                  Copy-Item `
-                    -LiteralPath `$full `
-                    -Destination `$remote `
-                    -Force `
-                    -ErrorAction SilentlyContinue
-
-                  if (
-                      Test-Path -LiteralPath `$remote
-                  ) {
-
-                      `$entry =
-                          `$relative + '|' + `$remote
-
-                      Add-Content `
-                        -Path `$list `
-                        -Value `$entry `
-                        -Encoding UTF8
-
-                      Write-Host `
-                        "DRIVE SAVE: `$full"
-                  }
-
-              }
-              catch {
-                  Write-Host `
-                    "WATCHER: `$(`$_.Exception.Message)"
-              }
-          }
-
-          `$watcher =
-              New-Object System.IO.FileSystemWatcher
-
-          `$watcher.Path = 'C:\'
-          `$watcher.IncludeSubdirectories = `$true
-          `$watcher.Filter = '*.*'
-          `$watcher.NotifyFilter =
-              [System.IO.NotifyFilters]::FileName `
-              -bor [System.IO.NotifyFilters]::LastWrite `
-              -bor [System.IO.NotifyFilters]::Size `
-              -bor [System.IO.NotifyFilters]::CreationTime
-
-          `$watcher.EnableRaisingEvents = `$true
-
-          Register-ObjectEvent `
-              -InputObject `$watcher `
-              -EventName Created `
-              -Action {
-                  Save-ChangedFile `$Event.SourceEventArgs.FullPath
-              } |
-              Out-Null
-
-          Register-ObjectEvent `
-              -InputObject `$watcher `
-              -EventName Changed `
-              -Action {
-                  Save-ChangedFile `$Event.SourceEventArgs.FullPath
-              } |
-              Out-Null
-
-          while (`$true) {
-
-              Start-Sleep -Seconds 5
-          }
-          "@ |
-            Set-Content `
-              -Path $watcherScript `
-              -Encoding UTF8
-
-          Start-Process `
-            powershell.exe `
-            -ArgumentList @(
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-File",
-              "`"$watcherScript`""
-            ) `
-            -WindowStyle Hidden
-
-          Write-Host `
-            "========================================"
-
-          Write-Host `
-            "SESSION-ONLY DRIVE WATCHER STARTED"
-
-          Write-Host `
-            "Files created/changed after this point will be saved."
-
-          Write-Host `
-            "========================================"
 
 
       # ========================================================
@@ -1306,6 +924,7 @@ jobs:
 
             Write-Host `
               "RustDesk installed and launched."
+
           }
           else {
 
@@ -1315,6 +934,10 @@ jobs:
             exit 1
           }
 
+
+      # ========================================================
+      # RUSTDESK FIREWALL
+      # ========================================================
 
       - name: Open RustDesk ports (TCP 21115-21119, UDP 21116)
         run: |
@@ -1353,6 +976,10 @@ jobs:
             localport=21116
 
 
+      # ========================================================
+      # RUSTDESK + SCREENSHOT
+      # ========================================================
+
       - name: Launch RustDesk (foreground) + Screenshot to Gofile
         run: |
 
@@ -1379,7 +1006,8 @@ jobs:
             [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 
           $bitmap =
-            New-Object System.Drawing.Bitmap `
+            New-Object `
+              System.Drawing.Bitmap `
               $bounds.Width,
               $bounds.Height
 
@@ -1411,7 +1039,9 @@ jobs:
             $curlResult |
             ConvertFrom-Json
 
-          if ($json.status -eq "ok") {
+          if (
+            $json.status -eq "ok"
+          ) {
 
             "SCREENSHOT_URL=$($json.data.downloadPage)" |
               Out-File `
@@ -1462,105 +1092,7 @@ jobs:
 
 
       # ========================================================
-      # FINAL DRIVE SYNC
-      # ========================================================
-
-      - name: Final Drive sync
-        if: always()
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
-        shell: pwsh
-        run: |
-
-          Write-Host ""
-          Write-Host "========================================"
-          Write-Host "FINAL DRIVE SYNC"
-          Write-Host "========================================"
-
-          if (
-            [string]::IsNullOrWhiteSpace(
-              $env:DRIVE_TOKEN
-            )
-          ) {
-
-            Write-Host `
-              "DRIVE_TOKEN missing; skipping Drive sync."
-
-            exit 0
-          }
-
-          $rclone =
-            $env:RCLONE_EXE
-
-          if (
-            -not $rclone -or
-            -not (Test-Path $rclone)
-          ) {
-
-            $rclone =
-              (Get-Command rclone `
-                -ErrorAction SilentlyContinue).Source
-          }
-
-          if (-not $rclone) {
-
-            Write-Host `
-              "rclone not available."
-
-            exit 0
-          }
-
-          $configDir =
-            "$env:APPDATA\rclone"
-
-          $config =
-            "$configDir\rclone.conf"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $configDir `
-            -Force |
-            Out-Null
-
-          @"
-          [drive]
-          type = drive
-          scope = drive
-          token = $env:DRIVE_TOKEN
-          "@ |
-            Set-Content `
-              -Path $config `
-              -Encoding UTF8
-
-          if (Test-Path "R:\Persistent-RDP\files") {
-
-            & $rclone copy `
-              "R:\Persistent-RDP\files" `
-              "drive:Persistent-RDP/files" `
-              --config "$config" `
-              --transfers 4 `
-              --checkers 8 `
-              --fast-list `
-              --create-empty-src-dirs
-
-            Write-Host `
-              "Drive upload complete."
-          }
-
-          if (Test-Path "R:\Persistent-RDP\session-files.txt") {
-
-            & $rclone copyto `
-              "R:\Persistent-RDP\session-files.txt" `
-              "drive:Persistent-RDP/session-files.txt" `
-              --config "$config"
-          }
-
-          Write-Host `
-            "FINAL DRIVE SYNC COMPLETE"
-
-
-      # ========================================================
-      # BACKUP ALL USER DATA
+      # BACKUP
       # ========================================================
 
       - name: Backup all user data (upload to release)
@@ -1573,7 +1105,8 @@ jobs:
           New-Item `
             -ItemType Directory `
             -Path $backupDir `
-            -Force
+            -Force |
+            Out-Null
 
           $folders = @(
             "$env:USERPROFILE\Desktop",
@@ -1597,13 +1130,26 @@ jobs:
                 $target `
                 /E `
                 /COPY:DAT `
+                /DCOPY:DAT `
                 /R:3 `
-                /W:10 `
+                /W:5 `
                 /NFL `
                 /NDL `
                 /NJH `
-                /NJS |
-                Out-Null
+                /NJS
+
+              $rc = $LASTEXITCODE
+
+              if ($rc -le 7) {
+                Write-Host `
+                  "Backup OK: $f (robocopy code $rc)"
+              }
+              else {
+                Write-Warning `
+                  "Backup warning: $f (robocopy code $rc)"
+              }
+
+              $global:LASTEXITCODE = 0
             }
           }
 
@@ -1648,13 +1194,20 @@ jobs:
           $tag =
             "backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
-          $body =
-            @{
-              tag_name = $tag
-              name = $tag
-              draft = $false
-              prerelease = $false
-            } |
+          $body = @{
+            tag_name =
+              $tag
+
+            name =
+              $tag
+
+            draft =
+              $false
+
+            prerelease =
+              $false
+
+          } |
             ConvertTo-Json
 
           $release =
@@ -1665,6 +1218,9 @@ jobs:
               -Headers @{
                 Authorization =
                   "Bearer ${{ github.token }}"
+
+                Accept =
+                  "application/vnd.github+json"
               } `
               -Body $body `
               -ContentType `
@@ -1672,9 +1228,9 @@ jobs:
 
           $uploadUrl =
             $release.upload_url `
-            -replace `
-            "{?name,label}",
-            "?name=$zipName"
+              -replace `
+                "{?name,label}",
+                "?name=$zipName"
 
           curl `
             -X POST `
@@ -1686,9 +1242,11 @@ jobs:
           Write-Host `
             "Backup uploaded to $tag"
 
+          $global:LASTEXITCODE = 0
+
 
       # ========================================================
-      # NEXT / STOP
+      # NEXT CYCLE / STOP
       # ========================================================
 
       - name: Dispatch next or stop
@@ -1701,12 +1259,16 @@ jobs:
           $cycles =
             [int]"${{ inputs.cycles }}"
 
-          if ($cycles -gt 0) {
+          if (
+            $cycles -gt 0
+          ) {
 
             $next =
               $cycles - 1
 
-            if ($next -le 0) {
+            if (
+              $next -le 0
+            ) {
 
               $url =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
@@ -1734,16 +1296,17 @@ jobs:
 
                 dry_run =
                   "false"
+
               }
 
-              $body =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
+              $body = @{
+                ref =
+                  "${{ github.ref_name }}"
 
-                  inputs =
-                    $payload
-                } |
+                inputs =
+                  $payload
+
+              } |
                 ConvertTo-Json `
                   -Depth 20
 
@@ -1803,14 +1366,14 @@ jobs:
                   "application/vnd.github+json"
               }
 
-              $body2 =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
+              $body2 = @{
+                ref =
+                  "${{ github.ref_name }}"
 
-                  inputs =
-                    $payload
-                } |
+                inputs =
+                  $payload
+
+              } |
                 ConvertTo-Json `
                   -Depth 20
 
