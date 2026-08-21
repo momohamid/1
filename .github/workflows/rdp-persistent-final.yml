@@ -755,7 +755,7 @@ jobs:
           $p = $env:RDP_PASS
 
           if ([string]::IsNullOrWhiteSpace($p)) {
-            throw "RDP_PASSWORD secret is missing."
+            throw "RDP password is empty. Add repository secret RDP_PASSWORD."
           }
 
           $sec =
@@ -863,15 +863,15 @@ jobs:
 
 
       # ========================================================
-      # PREPARE D:
+      # PREPARE PERSISTENT STORAGE
       # ========================================================
 
-      - name: Prepare persistent D storage
+      - name: Prepare persistent storage
         shell: pwsh
         run: |
 
           $root =
-            "D:\Persistent-RDP"
+            "C:\Persistent-RDP"
 
           $dirs = @(
             $root,
@@ -902,16 +902,8 @@ jobs:
           }
 
           Write-Host "===================================="
-          Write-Host "D: PERSISTENT STORAGE READY"
+          Write-Host "C: PERSISTENT STORAGE READY"
           Write-Host "===================================="
-
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
 
 
       # ========================================================
@@ -928,7 +920,7 @@ jobs:
         run: |
 
           $root =
-            "D:\Persistent-RDP"
+            "C:\Persistent-RDP"
 
           $script =
             "$env:TEMP\persistent_rdp_sync.py"
@@ -946,7 +938,7 @@ jobs:
           API_HASH = os.environ["API_HASH"]
           SESSION_B64 = os.environ["SESSION_B64"]
 
-          ROOT = r"D:\Persistent-RDP"
+          ROOT = r"C:\Persistent-RDP"
 
           INDEX_LOCAL = os.path.join(
               ROOT,
@@ -1014,6 +1006,10 @@ jobs:
                       )
 
                       try:
+
+                          if name == "persistent_index.json":
+                              continue
+
                           size = os.path.getsize(path)
 
                           records.append({
@@ -1372,7 +1368,7 @@ jobs:
                   "updated_at":
                       now(),
                   "root":
-                      "D:\\Persistent-RDP",
+                      "C:\\Persistent-RDP",
                   "files":
                       new_records
               }
@@ -1426,16 +1422,7 @@ jobs:
               -Path $script `
               -Encoding UTF8
 
-          # ----------------------------------------------------
-          # Initial restore + sync
-          # ----------------------------------------------------
-
           python $script
-
-          # ----------------------------------------------------
-          # Background sync loop
-          # 40 seconds between scans
-          # ----------------------------------------------------
 
           $runner =
             "$env:TEMP\persistent_rdp_sync_loop.ps1"
@@ -1482,15 +1469,15 @@ jobs:
 
 
       # ========================================================
-      # VERIFY D:
+      # VERIFY PERSISTENT STORAGE
       # ========================================================
 
-      - name: Verify persistent D storage
+      - name: Verify persistent storage
         shell: pwsh
         run: |
 
           $root =
-            "D:\Persistent-RDP"
+            "C:\Persistent-RDP"
 
           if (-not (Test-Path $root)) {
             throw "Persistent storage missing."
@@ -1515,23 +1502,61 @@ jobs:
             -Encoding UTF8
 
           if (-not (Test-Path $file)) {
-            throw "D WRITE FAILED."
+            throw "PERSISTENT WRITE FAILED."
           }
 
           Get-Content `
             $file
 
           Write-Host ""
-          Write-Host "D: WRITE SUCCESS"
-          Write-Host "D: PERSISTENT-RDP READY"
+          Write-Host "PERSISTENT STORAGE WRITE SUCCESS"
+          Write-Host "PERSISTENT-RDP READY"
 
-          Get-Volume `
-            -DriveLetter D |
-            Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
+
+      # ========================================================
+      # CREATE EASY DESKTOP/EXPLORER FOLDER
+      # ========================================================
+
+      - name: Create Persistent-RDP Explorer folder
+        shell: pwsh
+        run: |
+
+          $root =
+            "C:\Persistent-RDP"
+
+          $desktop =
+            [Environment]::GetFolderPath(
+              "Desktop"
+            )
+
+          $shortcut =
+            "$desktop\Persistent-RDP.lnk"
+
+          $shell =
+            New-Object -ComObject WScript.Shell
+
+          $link =
+            $shell.CreateShortcut(
+              $shortcut
+            )
+
+          $link.TargetPath =
+            $root
+
+          $link.WorkingDirectory =
+            $root
+
+          $link.Description =
+            "Persistent-RDP synchronized storage"
+
+          $link.Save()
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "PERSISTENT-RDP FOLDER READY"
+          Write-Host "PATH: $root"
+          Write-Host "DESKTOP SHORTCUT CREATED"
+          Write-Host "========================================"
 
 
       # ========================================================
@@ -1623,22 +1648,20 @@ jobs:
           Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
 
-          Write-Host "Drive: D:"
-          Write-Host "Path: D:\Persistent-RDP"
+          Write-Host "Path: C:\Persistent-RDP"
 
-          Get-Volume `
-            -DriveLetter D |
+          Get-Item `
+            "C:\Persistent-RDP" |
             Format-List `
-              DriveLetter,
-              FileSystem,
-              Size,
-              SizeRemaining
+              FullName,
+              CreationTime,
+              LastWriteTime
 
           Write-Host ""
           Write-Host "Persistent folders:"
 
           Get-ChildItem `
-            "D:\Persistent-RDP" `
+            "C:\Persistent-RDP" `
             -Force |
             Select-Object `
               Name,
