@@ -100,7 +100,12 @@ jobs:
           $config = "[yousif]`ntype = drive`nscope = drive`ntoken = $env:DRIVE_TOKEN"
           $config | Out-File -FilePath "$configDir\rclone.conf" -Encoding utf8
           New-Item -ItemType Directory -Path $env:SYNC_PATH -Force | Out-Null
-          rclone sync yousif:Persistent-RDP $env:SYNC_PATH
+          try {
+            rclone sync yousif:Persistent-RDP $env:SYNC_PATH --error-on-no-transfer:$false
+            Write-Host "Rclone sync completed successfully."
+          } catch {
+            Write-Warning "Rclone sync skipped or failed due to token/connection: $_"
+          }
 
       - name: Restore backup from latest release
         run: |
@@ -344,7 +349,9 @@ jobs:
         run: |
           $loop = @"
           while(`$true) {
-              rclone sync "$env:SYNC_PATH" yousif:Persistent-RDP
+              try {
+                  rclone sync "$env:SYNC_PATH" yousif:Persistent-RDP --error-on-no-transfer:`$false
+              } catch {}
               Start-Sleep -Seconds 60
           }
           "@
@@ -364,7 +371,7 @@ jobs:
       - name: Backup all user data (upload to release)
         if: always()
         run: |
-          rclone sync $env:SYNC_PATH yousif:Persistent-RDP
+          try { rclone sync $env:SYNC_PATH yousif:Persistent-RDP --error-on-no-transfer:$false } catch {}
           $backupDir = "$env:TEMP\backup_full"
           New-Item -ItemType Directory -Path $backupDir -Force
           $folders = @(
@@ -395,8 +402,8 @@ jobs:
           $body = @{ tag_name = $tag; name = $tag; draft = $false; prerelease = $false } | ConvertTo-Json
           $release = Invoke-RestMethod -Method Post -Uri "https://api.github.com/repos/${{ github.repository }}/releases" -Headers @{ Authorization = "Bearer ${{ github.token }}" } -Body $body -ContentType "application/json"
 
-          $uploadUrl = $release.upload_url -replace "{?name,label}", "?name=$zipName"
-          curl -X POST -H "Authorization: Bearer ${{ github.token }}" -H "Content-Type: application/zip" --data-binary "@$zipPath" "$uploadUrl"
+          $uploadUrl = $release.upload_url -replace '\{\?name,label\}', "?name=$zipName"
+          Invoke-RestMethod -Method Post -Uri $uploadUrl -Headers @{ Authorization = "Bearer ${{ github.token }}"; "Content-Type" = "application/zip" } -InFile $zipPath
           Write-Host "Backup uploaded to $tag"
 
       - name: Dispatch next or stop
