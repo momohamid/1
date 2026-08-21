@@ -859,6 +859,421 @@ jobs:
 
 
       # ========================================================
+      # JOTTACLOUD CLI + AUTOMATIC LOGIN + SYNC
+      # ========================================================
+
+      - name: Install Jottacloud CLI
+        shell: pwsh
+        run: |
+
+          $repo =
+            "https://repo.jotta.cloud/archives/windows/amd64/"
+
+          $html =
+            Invoke-WebRequest `
+              -Uri $repo `
+              -UseBasicParsing
+
+          $matches =
+            [regex]::Matches(
+              $html.Content,
+              'href="([^"]+\.msi)"'
+            )
+
+          if ($matches.Count -eq 0) {
+            throw "Jottacloud CLI MSI was not found."
+          }
+
+          $msiName =
+            $matches[$matches.Count - 1].Groups[1].Value
+
+          $msiUrl =
+            $repo + $msiName
+
+          $msiPath =
+            "$env:TEMP\jottacloud-cli.msi"
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD CLI INSTALL"
+          Write-Host "========================================"
+          Write-Host "MSI: $msiName"
+
+          Invoke-WebRequest `
+            -Uri $msiUrl `
+            -OutFile $msiPath `
+            -UseBasicParsing `
+            -ErrorAction Stop
+
+          Start-Process `
+            msiexec.exe `
+            -ArgumentList `
+              "/i",
+              "`"$msiPath`"",
+              "/quiet",
+              "/norestart" `
+            -Wait
+
+          Remove-Item `
+            $msiPath `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          $cli =
+            Get-Command `
+              jotta-cli.exe `
+              -ErrorAction SilentlyContinue
+
+          if (-not $cli) {
+
+            $possible = @(
+              "$env:ProgramFiles\Jottacloud\jotta-cli.exe",
+              "$env:ProgramFiles\JottaCloud\jotta-cli.exe",
+              "$env:ProgramFiles\jottacloud-cli\jotta-cli.exe",
+              "$env:ProgramFiles\Jottacloud CLI\jotta-cli.exe"
+            )
+
+            foreach ($p in $possible) {
+
+              if (Test-Path $p) {
+
+                $cli = Get-Item $p
+                break
+              }
+            }
+          }
+
+          if (-not $cli) {
+            throw "jotta-cli.exe was not found after installation."
+          }
+
+          $cliPath =
+            $cli.Source
+
+          "JOTTA_CLI=$cliPath" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host ""
+          Write-Host "Jottacloud CLI:"
+          Write-Host $cliPath
+
+          & $cliPath version
+
+
+      - name: Start Jottacloud daemon
+        shell: pwsh
+        run: |
+
+          $cli =
+            "$env:JOTTA_CLI"
+
+          if (-not (Test-Path $cli)) {
+            throw "Jottacloud CLI path missing."
+          }
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "START JOTTACLOUD DAEMON"
+          Write-Host "========================================"
+
+          $jottad =
+            Get-Command `
+              jottad.exe `
+              -ErrorAction SilentlyContinue
+
+          if ($jottad) {
+
+            $running =
+              Get-Process `
+                -Name jottad `
+                -ErrorAction SilentlyContinue
+
+            if (-not $running) {
+
+              Start-Process `
+                -FilePath `
+                $jottad.Source `
+                -WindowStyle Hidden
+
+              Start-Sleep `
+                -Seconds 5
+            }
+          }
+
+          Write-Host "Jottacloud daemon start requested."
+
+
+      - name: Automatic Jottacloud login
+        shell: pwsh
+        env:
+          JOTTACLOUD_TOKEN: ${{ secrets.JOTTACLOUD_TOKEN }}
+
+        run: |
+
+          $cli =
+            "$env:JOTTA_CLI"
+
+          if (-not $env:JOTTACLOUD_TOKEN) {
+            throw "JOTTACLOUD_TOKEN GitHub Secret is missing."
+          }
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD AUTOMATIC LOGIN"
+          Write-Host "========================================"
+
+          #
+          # The Jottacloud CLI uses a Personal Login Token.
+          # The token itself is never printed.
+          #
+
+          $loginInput =
+            "$env:TEMP\jottacloud-login-input.txt"
+
+          @(
+            "yes"
+            $env:JOTTACLOUD_TOKEN
+          ) |
+            Set-Content `
+              -Path $loginInput `
+              -Encoding UTF8
+
+          try {
+
+            cmd.exe /c `
+              "`"$cli`" login < `"$loginInput`""
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Jottacloud automatic login failed."
+            }
+
+          }
+          finally {
+
+            Remove-Item `
+              $loginInput `
+              -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+          Write-Host ""
+          Write-Host "Jottacloud login command completed."
+
+          & $cli status
+
+
+      - name: Configure Jottacloud Sync
+        shell: pwsh
+        run: |
+
+          $cli =
+            "$env:JOTTA_CLI"
+
+          $syncRoot =
+            "D:\Persistent-RDP\Jottacloud-Sync"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $syncRoot `
+            -Force |
+            Out-Null
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD SYNC SETUP"
+          Write-Host "========================================"
+          Write-Host "SYNC ROOT:"
+          Write-Host $syncRoot
+
+          #
+          # First try to start an already configured Sync.
+          #
+
+          $started = $false
+
+          try {
+
+            & $cli sync start
+
+            if ($LASTEXITCODE -eq 0) {
+              $started = $true
+            }
+
+          }
+          catch {
+          }
+
+          #
+          # If Sync is not configured yet, perform setup.
+          #
+
+          if (-not $started) {
+
+            Write-Host `
+              "Sync is not configured. Starting setup."
+
+            $setupInput =
+              "$env:TEMP\jottacloud-sync-setup.txt"
+
+            #
+            # Official setup:
+            #   yes  = accept disclaimer
+            #   off  = disable error reporting
+            #   y    = confirm root path
+            #
+            # Selective Sync may be presented afterwards.
+            #
+
+            @(
+              "yes"
+              "off"
+              "y"
+            ) |
+              Set-Content `
+                -Path $setupInput `
+                -Encoding UTF8
+
+            try {
+
+              cmd.exe /c `
+                "`"$cli`" sync setup --root `"$syncRoot`" < `"$setupInput`""
+
+              if ($LASTEXITCODE -ne 0) {
+
+                throw `
+                  "Jottacloud Sync setup failed."
+              }
+
+            }
+            finally {
+
+              Remove-Item `
+                $setupInput `
+                -Force `
+                -ErrorAction SilentlyContinue
+            }
+
+            #
+            # Start continuous Sync.
+            #
+
+            & $cli sync start
+
+            if ($LASTEXITCODE -ne 0) {
+              throw `
+                "Jottacloud Sync failed to start."
+            }
+          }
+
+          Write-Host ""
+          Write-Host "JOTTACLOUD SYNC STARTED"
+
+
+      - name: Verify Jottacloud Sync
+        shell: pwsh
+        run: |
+
+          $cli =
+            "$env:JOTTA_CLI"
+
+          $syncRoot =
+            "D:\Persistent-RDP\Jottacloud-Sync"
+
+          if (-not (Test-Path $syncRoot)) {
+            throw "Jottacloud Sync root does not exist."
+          }
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD SYNC STATUS"
+          Write-Host "========================================"
+
+          & $cli status
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD SYNC LOG"
+          Write-Host "========================================"
+
+          & $cli sync log -n10
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD SYNC ROOT"
+          Write-Host "========================================"
+
+          Get-ChildItem `
+            $syncRoot `
+            -Force `
+            -ErrorAction SilentlyContinue |
+            Select-Object `
+              Name,
+              Length,
+              LastWriteTime
+
+
+      - name: Start Jottacloud Sync watchdog
+        shell: pwsh
+        run: |
+
+          $cli =
+            "$env:JOTTA_CLI"
+
+          $watchdog =
+            "$env:TEMP\jottacloud_sync_watchdog.ps1"
+
+          @"
+          while (`$true) {
+
+              try {
+
+                  & "$cli" status |
+                    Out-Null
+
+                  & "$cli" sync start |
+                    Out-Null
+
+                  Write-Host (
+                    "Jottacloud Sync heartbeat " +
+                    (Get-Date).ToString("HH:mm:ss")
+                  )
+
+              }
+              catch {
+
+                  Write-Host (
+                    "Jottacloud Sync watchdog warning: " +
+                    `$_.Exception.Message
+                  )
+              }
+
+              Start-Sleep -Seconds 60
+          }
+          "@ |
+            Set-Content `
+              -Path $watchdog `
+              -Encoding UTF8
+
+          Start-Process `
+            powershell.exe `
+            -ArgumentList `
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "`"$watchdog`"" `
+            -WindowStyle Hidden
+
+          Write-Host ""
+          Write-Host "========================================"
+          Write-Host "JOTTACLOUD WATCHDOG READY"
+          Write-Host "SYNC CHECK: EVERY 60 SECONDS"
+          Write-Host "========================================"
+
+
+      # ========================================================
       # PREPARE D:
       # ========================================================
 
