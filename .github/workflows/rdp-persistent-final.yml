@@ -39,19 +39,20 @@ jobs:
     steps:
       - id: mk
         run: |
-          $crd = @'${{ inputs.crd_code }}
+          $crd = @'
+          ${{ inputs.crd_code }}
           '@.Trim()
 
-          if ($crd.Length -gt 0) {$n = 1 } else {  
-                  $n = [int]"${{ inputs.rdp_count }}"; if ($n -lt 1) {$n = 1 }; if ($n -gt 10) {$n = 10 }  
+          if ($crd.Length -gt 0) { $n = 1 } else {  
+                  $n = [int]"${{ inputs.rdp_count }}"; if ($n -lt 1) { $n = 1 }; if ($n -gt 10) { $n = 10 }  
                 }  
 
-          $inc = @(); for ($i=1; $i -le $n; $i++){ $inc += @{ id =$i } }  
-          $json = @{ include =$inc } | ConvertTo-Json -Compress  
-          "matrix=$json" \vert{} Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8  
+          $inc = @(); for ($i=1; $i -le $n; $i++){ $inc += @{ id = $i } }  
+          $json = @{ include = $inc } | ConvertTo-Json -Compress  
+          "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8  
 
           $multi = if ($n -gt 1) { '1' } else { '0' }  
-          "multi=$multi" \vert{} Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "multi=$multi" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
   rdp:
     needs: setup
@@ -72,7 +73,8 @@ jobs:
         run: |
           choco install rclone -y
           $configDir = "$env:USERPROFILE\.config\rclone"
-          New-Item -ItemType Directory -Path $configDir -Force \vert{} Out-Null$config = "[yousif]`ntype = drive`nscope = drive`ntoken = $env:DRIVE_TOKEN"
+          New-Item -ItemType Directory -Path $configDir -Force | Out-Null
+          $config = "[yousif]`ntype = drive`nscope = drive`ntoken = $env:DRIVE_TOKEN"
           $config | Out-File -FilePath "$configDir\rclone.conf" -Encoding utf8
           New-Item -ItemType Directory -Path $env:SYNC_PATH -Force | Out-Null
           rclone sync yousif:Persistent-RDP $env:SYNC_PATH
@@ -241,7 +243,7 @@ jobs:
               Start-Sleep -Seconds 60
           }
           "@
-          $loop \vert{} Out-File -FilePath "$env:TEMP\sync.ps1"
+          $loop | Out-File -FilePath "$env:TEMP\sync.ps1"
           Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$env:TEMP\sync.ps1`"" -WindowStyle Hidden
 
       - name: Keep alive  
@@ -261,7 +263,7 @@ jobs:
           rclone sync $env:SYNC_PATH yousif:Persistent-RDP
           $cycles = [int]"${{ inputs.cycles }}"  
           if ($cycles -gt 0) {  
-            $next =$cycles - 1  
+            $next = $cycles - 1  
             Write-Host "Next cycle: $next"  
           } else {  
             Write-Host "No cycles configured. Done."  
