@@ -134,148 +134,87 @@ jobs:
 
     steps:
 
-      # ========================================================
-      # RESTORE PREVIOUS BACKUP
-      # ========================================================
-
       - name: Restore backup from latest release
-        shell: pwsh
         run: |
-          $ErrorActionPreference = "Continue"
-
           $repo = "${{ github.repository }}"
           $url = "https://api.github.com/repos/$repo/releases/latest"
 
-          try {
-            $release = Invoke-RestMethod `
-              -Uri $url `
-              -Headers @{
-                Authorization = "Bearer ${{ github.token }}"
-                Accept = "application/vnd.github+json"
-              } `
-              -ErrorAction Stop
-          }
-          catch {
-            Write-Host "No previous release available. Starting fresh."
-            exit 0
-          }
-
-          if (-not $release -or -not $release.assets) {
-            Write-Host "No previous backup found. Starting fresh."
-            exit 0
-          }
-
-          $asset = $release.assets |
-            Where-Object {
-              $_.name -like "backup-*.zip"
-            } |
-            Select-Object -First 1
-
-          if (-not $asset) {
-            Write-Host "No backup asset found. Starting fresh."
-            exit 0
-          }
-
-          $zip = "$env:TEMP\backup.zip"
-
-          Invoke-WebRequest `
-            -Uri $asset.browser_download_url `
-            -OutFile $zip `
+          $release = Invoke-RestMethod `
+            -Uri $url `
             -Headers @{
               Authorization = "Bearer ${{ github.token }}"
             } `
-            -ErrorAction Stop
-
-          if (-not (Test-Path $zip)) {
-            Write-Host "Backup ZIP was not downloaded."
-            exit 0
-          }
-
-          Remove-Item `
-            "C:\Restore" `
-            -Recurse `
-            -Force `
             -ErrorAction SilentlyContinue
 
-          New-Item `
-            -ItemType Directory `
-            -Path "C:\Restore" `
-            -Force |
-            Out-Null
+          if ($release -and $release.assets) {
 
-          Expand-Archive `
-            -Path $zip `
-            -DestinationPath "C:\Restore" `
-            -Force
+            $asset =
+              $release.assets |
+              Where-Object {
+                $_.name -like "backup-*.zip"
+              } |
+              Select-Object -First 1
 
-          $map = @{
-            "Desktop"     = "$env:USERPROFILE\Desktop"
-            "Documents"   = "$env:USERPROFILE\Documents"
-            "Downloads"   = "$env:USERPROFILE\Downloads"
-            "AppData"     = "$env:APPDATA"
-            "ProgramData" = "C:\ProgramData"
-          }
+            if ($asset) {
 
-          foreach ($f in $map.Keys) {
+              $zip = "$env:TEMP\backup.zip"
 
-            $src = "C:\Restore\$f"
-            $dst = $map[$f]
+              Invoke-WebRequest `
+                -Uri $asset.browser_download_url `
+                -OutFile $zip `
+                -UseBasicParsing
 
-            if (-not (Test-Path $src)) {
-              Write-Host "Not found in backup: $f"
-              continue
-            }
+              Expand-Archive `
+                -Path $zip `
+                -DestinationPath "C:\Restore" `
+                -Force
 
-            New-Item `
-              -ItemType Directory `
-              -Path $dst `
-              -Force |
-              Out-Null
+              $map = @{
+                "Desktop"   = "$env:USERPROFILE\Desktop"
+                "Documents" = "$env:USERPROFILE\Documents"
+                "Downloads" = "$env:USERPROFILE\Downloads"
+                "AppData"   = "$env:APPDATA"
+                "ProgramData" = "C:\ProgramData"
+              }
 
-            Write-Host "Restoring $f ..."
+              foreach ($f in $map.Keys) {
 
-            robocopy `
-              $src `
-              $dst `
-              /E `
-              /COPY:DAT `
-              /DCOPY:DAT `
-              /R:3 `
-              /W:5 `
-              /NFL `
-              /NDL `
-              /NJH `
-              /NJS
+                $src = "C:\Restore\$f"
 
-            $rc = $LASTEXITCODE
+                if (Test-Path $src) {
 
-            if ($rc -le 7) {
-              Write-Host "Restore OK: $f (robocopy code $rc)"
+                  robocopy `
+                    $src `
+                    $map[$f] `
+                    /E `
+                    /COPY:DAT `
+                    /R:3 `
+                    /W:10 `
+                    /NFL `
+                    /NDL `
+                    /NJH `
+                    /NJS |
+                    Out-Null
+                }
+              }
+
+              Write-Host `
+                "Backup restored from $($release.tag_name)"
+
             }
             else {
-              Write-Warning "Restore warning for $f (robocopy code $rc)"
+
+              Write-Host `
+                "No backup asset found."
             }
 
-            $global:LASTEXITCODE = 0
+          }
+          else {
+
+            Write-Host `
+              "No previous release found; starting fresh."
           }
 
-          Remove-Item `
-            $zip `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "BACKUP RESTORED SUCCESSFULLY"
-          Write-Host "=========================================="
-          Write-Host "Release: $($release.tag_name)"
-
-          exit 0
-
-
-      # ========================================================
-      # CRD FLAG
-      # ========================================================
 
       - name: Set CRD flag early (safe read)
         run: |
@@ -284,28 +223,29 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
+
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
+
           }
           else {
+
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
           }
 
-          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+          Write-Host `
+            "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-
-      # ========================================================
-      # CRD INSTALL
-      # ========================================================
 
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
+
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -326,14 +266,15 @@ jobs:
                 "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile `
                 $exePath `
+                -UseBasicParsing `
                 -ErrorAction Stop
 
               Start-Process `
                 -FilePath `
                 $exePath `
                 -ArgumentList `
-                "/silent",
-                "/install" `
+                  "/silent",
+                  "/install" `
                 -Wait
 
               Remove-Item `
@@ -361,15 +302,16 @@ jobs:
                   "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
                   -OutFile `
                   $msi `
+                  -UseBasicParsing `
                   -ErrorAction Stop
 
                 Start-Process `
                   msiexec.exe `
                   -ArgumentList `
-                  "/i",
-                  "`"$msi`"",
-                  "/quiet",
-                  "/norestart" `
+                    "/i",
+                    "`"$msi`"",
+                    "/quiet",
+                    "/norestart" `
                   -Wait
 
                 Remove-Item `
@@ -393,10 +335,6 @@ jobs:
               "CRD host already installed."
           }
 
-
-      # ========================================================
-      # CRD RUN
-      # ========================================================
 
       - name: Run Chrome Remote Desktop (accept raw code / full cmd / url) with PIN
         if: env.CRD_ENABLED == '1'
@@ -431,18 +369,11 @@ jobs:
           $isFull = $false
           $code = $null
 
-          if (
-            $raw -match `
-              'remoting_start_host\.exe'
-          ) {
-
+          if ($raw -match 'remoting_start_host\.exe') {
             $isFull = $true
           }
 
-          if (
-            $raw -match `
-              '--code\s*=\s*"?([^"\s]+)'
-          ) {
+          if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
 
             $code = (
               [regex]::Match(
@@ -452,9 +383,7 @@ jobs:
             ).Groups[1].Value
 
           }
-          elseif (
-            $raw -match '^4\/'
-          ) {
+          elseif ($raw -match '^4\/') {
 
             $code = $raw
           }
@@ -508,10 +437,6 @@ jobs:
             "CRD launch step completed with PIN."
 
 
-      # ========================================================
-      # CRD VERIFY
-      # ========================================================
-
       - name: Verify CRD registration (service + recent logs)
         if: env.CRD_ENABLED == '1'
         run: |
@@ -524,9 +449,7 @@ jobs:
 
           $ok = $false
 
-          while (
-            (Get-Date) -lt $deadline
-          ) {
+          while ((Get-Date) -lt $deadline) {
 
             $svc =
               Get-Service `
@@ -535,9 +458,7 @@ jobs:
 
             if (
               $svc -and
-              $svc.Status -in `
-                'Running',
-                'StartPending'
+              $svc.Status -in 'Running','StartPending'
             ) {
 
               $ok = $true
@@ -588,16 +509,10 @@ jobs:
           }
 
 
-      # ========================================================
-      # HOSTNAME + RUNTIME
-      # ========================================================
-
       - name: Decide hostname + runtime
         run: |
 
-          if (
-            "${{ inputs.rdp_count }}" -gt 1
-          ) {
+          if ("${{ inputs.rdp_count }}" -gt 1) {
 
             $hn =
               "bullet${{ matrix.id }}"
@@ -615,21 +530,15 @@ jobs:
               $env:GITHUB_ENV
 
           function Yes($v) {
-            "$v" -match `
-              '^(?i:true|1|yes|on)$'
+            "$v" -match '^(?i:true|1|yes|on)$'
           }
 
           function IntOr($v,$d) {
 
-            if (
-              "$v" -match '^\d+$'
-            ) {
-
+            if ("$v" -match '^\d+$') {
               [int]$v
-
             }
             else {
-
               [int]$d
             }
           }
@@ -648,9 +557,7 @@ jobs:
           }
 
           if (
-            -not (
-              Yes("${{ inputs.quick_test }}")
-            ) -and
+            -not (Yes("${{ inputs.quick_test }}")) -and
             $runtime -lt 6
           ) {
 
@@ -667,25 +574,18 @@ jobs:
               $env:GITHUB_ENV
 
           Write-Host `
-            "Hostname: $hn  | Runtime: $runtime"
+            "Hostname: $hn | Runtime: $runtime"
 
-
-      # ========================================================
-      # PURGE TAILSCALE DEVICES
-      # ========================================================
 
       - name: Purge bullet* devices (single-instance only)
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
 
           function Yes($v) {
-            "$v" -match `
-              '^(?i:true|1|yes|on)$'
+            "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          if (
-            Yes("${{ inputs.do_purge }}")
-          ) {
+          if (Yes("${{ inputs.do_purge }}")) {
 
             try {
 
@@ -712,10 +612,7 @@ jobs:
 
               foreach ($d in $list.devices) {
 
-                if (
-                  $d.hostname -match `
-                    '^bullet[0-9]*$'
-                ) {
+                if ($d.hostname -match '^bullet[0-9]*$') {
 
                   Invoke-RestMethod `
                     -Method Delete `
@@ -746,10 +643,6 @@ jobs:
               "Purge disabled."
           }
 
-
-      # ========================================================
-      # TAILSCALE
-      # ========================================================
 
       - name: Install + Up Tailscale (fast)
         run: |
@@ -800,10 +693,6 @@ jobs:
           }
 
 
-      # ========================================================
-      # RDP USER
-      # ========================================================
-
       - name: Enable RDP user + firewall
         run: |
 
@@ -823,7 +712,7 @@ jobs:
             -not (
               Get-LocalUser `
                 -Name $u `
-                -EA SilentlyContinue
+                -ErrorAction SilentlyContinue
             )
           ) {
 
@@ -854,12 +743,12 @@ jobs:
             Add-LocalGroupMember `
               -Group "Administrators" `
               -Member $u `
-              -EA SilentlyContinue
+              -ErrorAction SilentlyContinue
 
             Add-LocalGroupMember `
               -Group "Remote Desktop Users" `
               -Member $u `
-              -EA SilentlyContinue
+              -ErrorAction SilentlyContinue
           }
 
           Set-ItemProperty `
@@ -874,10 +763,6 @@ jobs:
           Write-Host `
             "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-
-      # ========================================================
-      # PYTHON
-      # ========================================================
 
       - name: Install Python libs (pyautogui/pynput/pillow)
         run: |
@@ -896,63 +781,109 @@ jobs:
             "import pyautogui, pynput, PIL; print('Python libs OK')"
 
 
-      # ========================================================
-      # RUSTDESK
-      # ========================================================
+      # ==========================================================
+      # RUSTDESK — DIRECT MSI, NO WINGET
+      # ==========================================================
 
-      - name: Install RustDesk (fast)
+      - name: Install RustDesk (direct MSI)
         run: |
 
-          winget install `
-            --id RustDesk.RustDesk `
-            -e `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
-
-          Start-Sleep `
-            -Seconds 5
+          $paths = @(
+            "C:\Program Files\RustDesk\rustdesk.exe",
+            "C:\Program Files (x86)\RustDesk\rustdesk.exe"
+          )
 
           $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
+            $paths |
+            Where-Object {
+              Test-Path $_
+            } |
+            Select-Object -First 1
 
-          if (Test-Path $rdExe) {
+          if (-not $rdExe) {
 
-            Start-Process `
-              -FilePath $rdExe `
-              -ErrorAction SilentlyContinue
+            $rdUrl =
+              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
+            $msi =
+              "$env:TEMP\rustdesk.msi"
 
             Write-Host `
-              "RustDesk installed and launched."
+              "Downloading RustDesk MSI..."
 
+            Invoke-WebRequest `
+              -Uri $rdUrl `
+              -OutFile $msi `
+              -UseBasicParsing `
+              -ErrorAction Stop
+
+            if (
+              -not (Test-Path $msi) -or
+              (Get-Item $msi).Length -lt 100000
+            ) {
+
+              throw `
+                "RustDesk MSI download failed or is incomplete."
+            }
+
+            Write-Host `
+              "Installing RustDesk MSI..."
+
+            $process =
+              Start-Process `
+                msiexec.exe `
+                -ArgumentList `
+                  "/i",
+                  "`"$msi`"",
+                  "/quiet",
+                  "/norestart" `
+                -Wait `
+                -PassThru
+
+            Write-Host `
+              "MSI exit code: $($process.ExitCode)"
+
+            Remove-Item `
+              $msi `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+            Start-Sleep `
+              -Seconds 5
           }
-          else {
 
-            Write-Error `
-              "RustDesk not found after winget install"
+          $rdExe =
+            $paths |
+            Where-Object {
+              Test-Path $_
+            } |
+            Select-Object -First 1
 
-            exit 1
+          if (-not $rdExe) {
+
+            throw `
+              "RustDesk installation failed. rustdesk.exe was not found."
           }
 
+          Start-Process `
+            -FilePath $rdExe `
+            -ErrorAction SilentlyContinue
 
-      # ========================================================
-      # RUSTDESK FIREWALL
-      # ========================================================
+          Write-Host `
+            "RustDesk installed and launched: $rdExe"
+
 
       - name: Open RustDesk ports (TCP 21115-21119, UDP 21116)
         run: |
 
-          for (
-            $p = 21115;
-            $p -le 21119;
-            $p++
-          ) {
+          for ($p = 21115; $p -le 21119; $p++) {
 
             $name =
               "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
-              name=$name 2>$null
+              name=$name `
+              2>$null
 
             netsh advfirewall firewall add rule `
               name=$name `
@@ -966,7 +897,8 @@ jobs:
             "APP-PORT-UDP-21116"
 
           netsh advfirewall firewall delete rule `
-            name=$udpName 2>$null
+            name=$udpName `
+            2>$null
 
           netsh advfirewall firewall add rule `
             name=$udpName `
@@ -976,15 +908,24 @@ jobs:
             localport=21116
 
 
-      # ========================================================
-      # RUSTDESK + SCREENSHOT
-      # ========================================================
-
       - name: Launch RustDesk (foreground) + Screenshot to Gofile
         run: |
 
+          $paths = @(
+            "C:\Program Files\RustDesk\rustdesk.exe",
+            "C:\Program Files (x86)\RustDesk\rustdesk.exe"
+          )
+
           $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
+            $paths |
+            Where-Object {
+              Test-Path $_
+            } |
+            Select-Object -First 1
+
+          if (-not $rdExe) {
+            throw "RustDesk executable not found."
+          }
 
           Start-Process `
             -FilePath $rdExe `
@@ -1039,9 +980,7 @@ jobs:
             $curlResult |
             ConvertFrom-Json
 
-          if (
-            $json.status -eq "ok"
-          ) {
+          if ($json.status -eq "ok") {
 
             "SCREENSHOT_URL=$($json.data.downloadPage)" |
               Out-File `
@@ -1049,10 +988,6 @@ jobs:
                 $env:GITHUB_ENV
           }
 
-
-      # ========================================================
-      # KEEP ALIVE
-      # ========================================================
 
       - name: Keep alive (to ${{ env.RUNTIME_MINUTES }} mins)
         run: |
@@ -1068,9 +1003,7 @@ jobs:
           ) {
 
             $mode =
-              if (
-                "$env:CRD_ENABLED" -eq '1'
-              ) {
+              if ("$env:CRD_ENABLED" -eq '1') {
                 '[CRD+RustDesk/RDP]'
               }
               else {
@@ -1090,10 +1023,6 @@ jobs:
               -Seconds 60
           }
 
-
-      # ========================================================
-      # BACKUP
-      # ========================================================
 
       - name: Backup all user data (upload to release)
         if: always()
@@ -1130,26 +1059,13 @@ jobs:
                 $target `
                 /E `
                 /COPY:DAT `
-                /DCOPY:DAT `
                 /R:3 `
-                /W:5 `
+                /W:10 `
                 /NFL `
                 /NDL `
                 /NJH `
-                /NJS
-
-              $rc = $LASTEXITCODE
-
-              if ($rc -le 7) {
-                Write-Host `
-                  "Backup OK: $f (robocopy code $rc)"
-              }
-              else {
-                Write-Warning `
-                  "Backup warning: $f (robocopy code $rc)"
-              }
-
-              $global:LASTEXITCODE = 0
+                /NJS |
+                Out-Null
             }
           }
 
@@ -1175,9 +1091,7 @@ jobs:
 
           foreach ($r in $releases) {
 
-            if (
-              $r.tag_name -like "backup-*"
-            ) {
+            if ($r.tag_name -like "backup-*") {
 
               Invoke-RestMethod `
                 -Method Delete `
@@ -1195,18 +1109,10 @@ jobs:
             "backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
           $body = @{
-            tag_name =
-              $tag
-
-            name =
-              $tag
-
-            draft =
-              $false
-
-            prerelease =
-              $false
-
+            tag_name = $tag
+            name = $tag
+            draft = $false
+            prerelease = $false
           } |
             ConvertTo-Json
 
@@ -1218,19 +1124,15 @@ jobs:
               -Headers @{
                 Authorization =
                   "Bearer ${{ github.token }}"
-
-                Accept =
-                  "application/vnd.github+json"
               } `
               -Body $body `
-              -ContentType `
-              "application/json"
+              -ContentType "application/json"
 
           $uploadUrl =
             $release.upload_url `
               -replace `
-                "{?name,label}",
-                "?name=$zipName"
+              "{?name,label}",
+              "?name=$zipName"
 
           curl `
             -X POST `
@@ -1242,12 +1144,6 @@ jobs:
           Write-Host `
             "Backup uploaded to $tag"
 
-          $global:LASTEXITCODE = 0
-
-
-      # ========================================================
-      # NEXT CYCLE / STOP
-      # ========================================================
 
       - name: Dispatch next or stop
         if: always()
@@ -1259,16 +1155,12 @@ jobs:
           $cycles =
             [int]"${{ inputs.cycles }}"
 
-          if (
-            $cycles -gt 0
-          ) {
+          if ($cycles -gt 0) {
 
             $next =
               $cycles - 1
 
-            if (
-              $next -le 0
-            ) {
+            if ($next -le 0) {
 
               $url =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
@@ -1296,7 +1188,6 @@ jobs:
 
                 dry_run =
                   "false"
-
               }
 
               $body = @{
