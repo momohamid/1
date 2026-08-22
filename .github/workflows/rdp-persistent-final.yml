@@ -6,6 +6,7 @@ on:
 
   workflow_dispatch:
     inputs:
+
       ts_tailnet:
         description: "Tailscale tailnet (e.g. you@gmail.com)"
         required: true
@@ -73,6 +74,7 @@ jobs:
   # ============================================================
 
   setup:
+
     runs-on: ubuntu-latest
 
     outputs:
@@ -82,6 +84,7 @@ jobs:
     steps:
 
       - id: mk
+        shell: pwsh
         run: |
 
           $crd = @'
@@ -89,9 +92,12 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
+
             $n = 1
+
           }
           else {
+
             $n = [int]"${{ inputs.rdp_count }}"
 
             if ($n -lt 1) {
@@ -101,38 +107,43 @@ jobs:
             if ($n -gt 10) {
               $n = 10
             }
+
           }
 
           $inc = @()
 
           for ($i = 1; $i -le $n; $i++) {
+
             $inc += @{
               id = $i
             }
+
           }
 
           $json = @{
             include = $inc
-          } | ConvertTo-Json -Compress
+          } |
+          ConvertTo-Json -Compress
 
           "matrix=$json" |
             Out-File `
-            $env:GITHUB_OUTPUT `
-            -Append `
-            -Encoding utf8
+              $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
 
-          $multi = if ($n -gt 1) {
-            '1'
-          }
-          else {
-            '0'
-          }
+          $multi =
+            if ($n -gt 1) {
+              '1'
+            }
+            else {
+              '0'
+            }
 
           "multi=$multi" |
             Out-File `
-            $env:GITHUB_OUTPUT `
-            -Append `
-            -Encoding utf8
+              $env:GITHUB_OUTPUT `
+              -Append `
+              -Encoding utf8
 
 
   # ============================================================
@@ -140,6 +151,7 @@ jobs:
   # ============================================================
 
   rdp:
+
     needs: setup
 
     runs-on: windows-latest
@@ -156,6 +168,7 @@ jobs:
 
     steps:
 
+
       # ========================================================
       # CRD FLAG
       # ========================================================
@@ -171,15 +184,17 @@ jobs:
 
             "CRD_ENABLED=1" |
               Out-File `
-              -Append `
-              $env:GITHUB_ENV
+                -Append `
+                $env:GITHUB_ENV
+
           }
           else {
 
             "CRD_ENABLED=0" |
               Out-File `
-              -Append `
-              $env:GITHUB_ENV
+                -Append `
+                $env:GITHUB_ENV
+
           }
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
@@ -193,8 +208,6 @@ jobs:
         if: env.CRD_ENABLED == '1'
         run: |
 
-          $ErrorActionPreference = "Stop"
-
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -207,57 +220,36 @@ jobs:
 
             $ok = $false
 
-            # ------------------------------------------------
-            # EXE DOWNLOAD
-            # ------------------------------------------------
-
             try {
 
-              Write-Host "Downloading CRD EXE..."
+              Invoke-WebRequest `
+                -Uri `
+                "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
+                -OutFile `
+                $exePath `
+                -ErrorAction Stop
 
-              & curl.exe `
-                -L `
-                --fail `
-                --retry 5 `
-                --retry-delay 3 `
-                --connect-timeout 30 `
-                --max-time 300 `
-                -o $exePath `
-                "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe"
+              Start-Process `
+                -FilePath `
+                $exePath `
+                -ArgumentList `
+                "/silent",
+                "/install" `
+                -Wait
 
-              if ($LASTEXITCODE -eq 0 -and (Test-Path $exePath)) {
+              Remove-Item `
+                $exePath `
+                -Force `
+                -ErrorAction SilentlyContinue
 
-                Write-Host "CRD EXE downloaded."
+              $ok = $true
 
-                Start-Process `
-                  -FilePath $exePath `
-                  -ArgumentList `
-                  "/silent",
-                  "/install" `
-                  -Wait
-
-                if (
-                  Test-Path $exe
-                ) {
-                  $ok = $true
-                }
-              }
             }
             catch {
 
               Write-Host `
                 "EXE installer failed: $($_.Exception.Message)"
             }
-
-            Remove-Item `
-              $exePath `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-
-            # ------------------------------------------------
-            # MSI FALLBACK
-            # ------------------------------------------------
 
             if (-not $ok) {
 
@@ -266,25 +258,12 @@ jobs:
 
               try {
 
-                Write-Host "Trying CRD MSI fallback..."
-
-                & curl.exe `
-                  -L `
-                  --fail `
-                  --retry 5 `
-                  --retry-delay 3 `
-                  --connect-timeout 30 `
-                  --max-time 300 `
-                  -o $msi `
-                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi"
-
-                if ($LASTEXITCODE -ne 0) {
-                  throw "CRD MSI download failed."
-                }
-
-                if (-not (Test-Path $msi)) {
-                  throw "CRD MSI was not created."
-                }
+                Invoke-WebRequest `
+                  -Uri `
+                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+                  -OutFile `
+                  $msi `
+                  -ErrorAction Stop
 
                 Start-Process `
                   msiexec.exe `
@@ -295,6 +274,11 @@ jobs:
                   "/norestart" `
                   -Wait
 
+                Remove-Item `
+                  $msi `
+                  -Force `
+                  -ErrorAction SilentlyContinue
+
               }
               catch {
 
@@ -303,19 +287,14 @@ jobs:
 
                 exit 1
               }
-              finally {
 
-                Remove-Item `
-                  $msi `
-                  -Force `
-                  -ErrorAction SilentlyContinue
-              }
             }
 
           }
           else {
 
             Write-Host "CRD host already installed."
+
           }
 
 
@@ -326,8 +305,6 @@ jobs:
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
-
-          $ErrorActionPreference = "Stop"
 
           $raw = @'
           ${{ inputs.crd_code }}
@@ -358,17 +335,12 @@ jobs:
           $isFull = $false
           $code = $null
 
-          if (
-            $raw -match `
-            'remoting_start_host\.exe'
-          ) {
-
+          if ($raw -match 'remoting_start_host\.exe') {
             $isFull = $true
           }
 
           if (
-            $raw -match `
-            '--code\s*=\s*"?([^"\s]+)'
+            $raw -match '--code\s*=\s*"?([^"\s]+)'
           ) {
 
             $code = (
@@ -379,11 +351,10 @@ jobs:
             ).Groups[1].Value
 
           }
-          elseif (
-            $raw -match '^4\/'
-          ) {
+          elseif ($raw -match '^4\/') {
 
             $code = $raw
+
           }
 
           if ($code) {
@@ -402,8 +373,10 @@ jobs:
             )
 
             Start-Process `
-              -FilePath $starter `
-              -ArgumentList $args
+              -FilePath `
+              $starter `
+              -ArgumentList `
+              $args
 
           }
           elseif ($isFull) {
@@ -429,8 +402,7 @@ jobs:
             exit 1
           }
 
-          Write-Host `
-            "CRD launch step completed."
+          Write-Host "CRD launch step completed."
 
 
       # ========================================================
@@ -449,9 +421,7 @@ jobs:
 
           $ok = $false
 
-          while (
-            (Get-Date) -lt $deadline
-          ) {
+          while ((Get-Date) -lt $deadline) {
 
             $svc =
               Get-Service `
@@ -469,8 +439,7 @@ jobs:
               break
             }
 
-            Start-Sleep `
-              -Seconds 3
+            Start-Sleep -Seconds 3
           }
 
           if ($ok) {
@@ -483,6 +452,7 @@ jobs:
 
             Write-Warning `
               "CRD service not running yet."
+
           }
 
 
@@ -503,23 +473,24 @@ jobs:
 
             $hn =
               "bullet"
+
           }
 
           "TS_HOSTNAME=$hn" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
           function Yes($v) {
+
             "$v" -match `
               '^(?i:true|1|yes|on)$'
+
           }
 
           function IntOr($v,$d) {
 
-            if (
-              "$v" -match '^\d+$'
-            ) {
+            if ("$v" -match '^\d+$') {
 
               [int]$v
 
@@ -527,7 +498,9 @@ jobs:
             else {
 
               [int]$d
+
             }
+
           }
 
           $runtime =
@@ -536,17 +509,12 @@ jobs:
               300
             )
 
-          if (
-            Yes("${{ inputs.quick_test }}")
-          ) {
-
+          if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
           }
 
           if (
-            -not (
-              Yes("${{ inputs.quick_test }}")
-            ) -and
+            -not (Yes("${{ inputs.quick_test }}")) -and
             $runtime -lt 6
           ) {
 
@@ -554,14 +522,13 @@ jobs:
           }
 
           if ($runtime -gt 360) {
-
             $runtime = 360
           }
 
           "RUNTIME_MINUTES=$runtime" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
           Write-Host `
             "Hostname: $hn | Runtime: $runtime"
@@ -576,13 +543,13 @@ jobs:
         run: |
 
           function Yes($v) {
+
             "$v" -match `
               '^(?i:true|1|yes|on)$'
+
           }
 
-          if (
-            Yes("${{ inputs.do_purge }}")
-          ) {
+          if (Yes("${{ inputs.do_purge }}")) {
 
             try {
 
@@ -603,13 +570,10 @@ jobs:
                   -Uri `
                   "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
                   -Headers @{
-                    Authorization =
-                      "Basic $auth"
+                    Authorization = "Basic $auth"
                   }
 
-              foreach (
-                $d in $list.devices
-              ) {
+              foreach ($d in $list.devices) {
 
                 if (
                   $d.hostname -match
@@ -621,28 +585,28 @@ jobs:
                     -Uri `
                     "https://api.tailscale.com/api/v2/device/$($d.id)" `
                     -Headers @{
-                      Authorization =
-                        "Basic $auth"
+                      Authorization = "Basic $auth"
                     } `
                     -ErrorAction SilentlyContinue
                 }
+
               }
 
-              Write-Host `
-                "Purged bullet devices."
+              Write-Host "Purged bullet devices."
 
             }
             catch {
 
               Write-Host `
                 "Purge warning: $($_.Exception.Message)"
+
             }
 
           }
           else {
 
-            Write-Host `
-              "Purge disabled."
+            Write-Host "Purge disabled."
+
           }
 
 
@@ -660,8 +624,7 @@ jobs:
             --accept-package-agreements `
             --accept-source-agreements
 
-          Start-Sleep `
-            -Seconds 5
+          Start-Sleep -Seconds 5
 
           $ts =
             "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -683,8 +646,8 @@ jobs:
 
             "TAILSCALE_IP=$ip4" |
               Out-File `
-              -Append `
-              $env:GITHUB_ENV
+                -Append `
+                $env:GITHUB_ENV
 
             Write-Host `
               "Tailscale IPv4: $ip4"
@@ -741,6 +704,7 @@ jobs:
 
             Enable-LocalUser `
               -Name $u
+
           }
 
           Add-LocalGroupMember `
@@ -762,17 +726,11 @@ jobs:
             -DisplayGroup "Remote Desktop" |
             Out-Null
 
-          Write-Host `
-            "RDP ready."
+          Write-Host "RDP ready."
 
-          Write-Host `
-            "User: $u"
-
-          Write-Host `
-            "Host: $env:TS_HOSTNAME"
-
-          Write-Host `
-            "IP: $env:TAILSCALE_IP"
+          Write-Host "User: $u"
+          Write-Host "Host: $env:TS_HOSTNAME"
+          Write-Host "IP: $env:TAILSCALE_IP"
 
 
       # ========================================================
@@ -806,6 +764,10 @@ jobs:
 
           $ErrorActionPreference = "Stop"
 
+          # ----------------------------------------------------
+          # RCLONE
+          # ----------------------------------------------------
+
           $rcloneDir =
             "C:\Tools\rclone"
 
@@ -818,12 +780,9 @@ jobs:
             -Force |
             Out-Null
 
-
-          # ----------------------------------------------------
-          # RCLONE
-          # ----------------------------------------------------
-
           if (-not (Test-Path $rcloneExe)) {
+
+            Write-Host "Downloading rclone..."
 
             $zip =
               "$env:TEMP\rclone.zip"
@@ -831,45 +790,23 @@ jobs:
             $extract =
               "$env:TEMP\rclone_extract"
 
-            Remove-Item `
+            Invoke-WebRequest `
+              -Uri `
+              "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+              -OutFile `
               $zip `
-              -Force `
-              -ErrorAction SilentlyContinue
+              -UseBasicParsing `
+              -ErrorAction Stop
+
+            if (-not (Test-Path $zip)) {
+              throw "rclone download failed."
+            }
 
             Remove-Item `
               $extract `
               -Recurse `
               -Force `
               -ErrorAction SilentlyContinue
-
-            Write-Host "Downloading rclone..."
-
-            & curl.exe `
-              -L `
-              --fail `
-              --retry 5 `
-              --retry-delay 3 `
-              --connect-timeout 30 `
-              --max-time 300 `
-              -o $zip `
-              "https://downloads.rclone.org/rclone-current-windows-amd64.zip"
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "rclone download failed. curl exit code: $LASTEXITCODE"
-            }
-
-            if (-not (Test-Path $zip)) {
-              throw "rclone ZIP was not created."
-            }
-
-            $size =
-              (Get-Item $zip).Length
-
-            Write-Host "rclone ZIP size: $size bytes"
-
-            if ($size -lt 1000000) {
-              throw "Downloaded rclone ZIP is unexpectedly small."
-            }
 
             Expand-Archive `
               -Path $zip `
@@ -902,13 +839,17 @@ jobs:
               -Recurse `
               -Force `
               -ErrorAction SilentlyContinue
+
+          }
+          else {
+
+            Write-Host "rclone already exists."
+
           }
 
           if (-not (Test-Path $rcloneExe)) {
             throw "rclone installation failed."
           }
-
-          Write-Host "rclone installed successfully."
 
           & $rcloneExe version
 
@@ -919,51 +860,52 @@ jobs:
 
           # ----------------------------------------------------
           # WINFSP
+          #
+          # IMPORTANT:
+          # Do NOT use:
+          # latest/download/winfsp.msi
+          #
+          # That URL can return 404 because the asset has a
+          # versioned filename.
+          #
+          # We use the stable WinFsp 2.1 installer directly.
           # ----------------------------------------------------
 
           $winfspPath =
             "C:\Program Files (x86)\WinFsp"
 
           $winfspMsi =
-            "$env:TEMP\winfsp.msi"
+            "$env:TEMP\winfsp-2.1.25156.msi"
 
           if (-not (Test-Path $winfspPath)) {
 
-            Remove-Item `
+            Write-Host "WinFsp not found."
+            Write-Host "Downloading WinFsp 2.1.25156..."
+
+            $winfspUrl =
+              "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
+
+            Invoke-WebRequest `
+              -Uri `
+              $winfspUrl `
+              -OutFile `
               $winfspMsi `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-            Write-Host "Downloading WinFsp..."
-
-            & curl.exe `
-              -L `
-              --fail `
-              --retry 5 `
-              --retry-delay 3 `
-              --connect-timeout 30 `
-              --max-time 300 `
-              -o $winfspMsi `
-              "https://github.com/winfsp/winfsp/releases/latest/download/winfsp.msi"
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "WinFsp download failed. curl exit code: $LASTEXITCODE"
-            }
+              -UseBasicParsing `
+              -ErrorAction Stop
 
             if (-not (Test-Path $winfspMsi)) {
-              throw "WinFsp MSI was not created."
+              throw "WinFsp MSI was not downloaded."
             }
 
-            $msiSize =
+            $size =
               (Get-Item $winfspMsi).Length
 
-            Write-Host "WinFsp MSI size: $msiSize bytes"
-
-            if ($msiSize -lt 1000000) {
-              throw "Downloaded WinFsp MSI is unexpectedly small."
+            if ($size -lt 1000000) {
+              throw "WinFsp MSI appears invalid or incomplete. Size: $size bytes"
             }
 
-            Write-Host "Installing WinFsp..."
+            Write-Host `
+              "WinFsp MSI downloaded successfully: $size bytes"
 
             $proc =
               Start-Process `
@@ -977,21 +919,35 @@ jobs:
                 -PassThru
 
             if ($proc.ExitCode -ne 0) {
-              throw "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
+
+              throw `
+                "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
+
             }
 
             Remove-Item `
               $winfspMsi `
               -Force `
               -ErrorAction SilentlyContinue
+
+          }
+          else {
+
+            Write-Host "WinFsp already installed."
+
           }
 
           if (-not (Test-Path $winfspPath)) {
-            throw "WinFsp installation failed: installation directory not found."
+
+            throw `
+              "WinFsp installation verification failed."
+
           }
 
-          Write-Host "WinFsp installed successfully."
-          Write-Host "rclone + WinFsp ready."
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "rclone + WinFsp READY"
+          Write-Host "=========================================="
 
 
       # ========================================================
@@ -1070,6 +1026,8 @@ jobs:
             /C |
             Out-Null
 
+          Write-Host "Testing Google Drive..."
+
           & $rclone `
             --config $config `
             lsd `
@@ -1092,21 +1050,20 @@ jobs:
 
           "RCLONE_EXE=$rclone" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
           "RCLONE_CONFIG=$config" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
           "RDP_PROFILE=$profile" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
-          Write-Host `
-            "Google Drive configuration prepared for $user."
+          Write-Host "Google Drive configuration prepared."
 
 
       # ========================================================
@@ -1145,16 +1102,13 @@ jobs:
             -Force |
             Out-Null
 
+
+          # ----------------------------------------------------
+          # DRIVE MOUNT SCRIPT
+          # ----------------------------------------------------
+
           $mountScript =
             "$persistDir\Start-PersistentDrive.ps1"
-
-          $monitorScript =
-            "$persistDir\Start-PersistentMonitor.ps1"
-
-
-          # ----------------------------------------------------
-          # DRIVE MOUNT
-          # ----------------------------------------------------
 
           @"
           `$ErrorActionPreference = "Continue"
@@ -1223,8 +1177,11 @@ jobs:
 
 
           # ----------------------------------------------------
-          # MONITOR
+          # MONITOR SCRIPT
           # ----------------------------------------------------
+
+          $monitorScript =
+            "$persistDir\Start-PersistentMonitor.ps1"
 
           @"
           `$ErrorActionPreference = "Continue"
@@ -1243,12 +1200,6 @@ jobs:
 
           `$stateDir =
               "C:\ProgramData\Persistent-RDP"
-
-          `$manifest =
-              "`$stateDir\manifest.json"
-
-          `$lock =
-              "`$stateDir\manifest.lock"
 
           New-Item `
               -ItemType Directory `
@@ -1272,6 +1223,7 @@ jobs:
                   ) {
                       return `$true
                   }
+
               }
 
               return `$false
@@ -1341,6 +1293,7 @@ jobs:
                   ) {
 
                       Write-Host "SAVED: `$relative"
+
                   }
 
               }
@@ -1348,6 +1301,7 @@ jobs:
 
                   Write-Warning `
                       "Upload error: `$(`$_.Exception.Message)"
+
               }
           }
 
@@ -1378,6 +1332,7 @@ jobs:
 
               }
               catch {}
+
           }
 
           `$watcher =
@@ -1453,6 +1408,7 @@ jobs:
 
               Start-Sleep `
                   -Seconds 10
+
           }
           "@ |
             Set-Content `
@@ -1461,7 +1417,7 @@ jobs:
 
 
           # ----------------------------------------------------
-          # RESTORE
+          # RESTORE SCRIPT
           # ----------------------------------------------------
 
           $restoreScript =
@@ -1482,6 +1438,12 @@ jobs:
           `$remoteRoot =
               "gdrive:.persistent-rdp/files"
 
+          `$mountScript =
+              "$mountScript"
+
+          `$monitorScript =
+              "$monitorScript"
+
           if (
               Test-Path `$rclone
           ) {
@@ -1496,6 +1458,7 @@ jobs:
                   --retries 3 `
                   --low-level-retries 10 `
                   --exclude "AppData/**"
+
           }
 
           Start-Process `
@@ -1505,7 +1468,7 @@ jobs:
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "`"$mountScript`"" `
+              "`"`$mountScript`"" `
               -WindowStyle Hidden
 
           Start-Sleep `
@@ -1518,11 +1481,11 @@ jobs:
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "`"$monitorScript`"" `
+              "`"`$monitorScript`"" `
               -WindowStyle Hidden
 
           Write-Host `
-            "Persistent-RDP logon initialization completed."
+              "Persistent-RDP logon initialization completed."
           "@ |
             Set-Content `
               -Path $restoreScript `
@@ -1584,7 +1547,7 @@ jobs:
 
 
       # ========================================================
-      # VERIFY PERSISTENCE SETUP
+      # VERIFY PERSISTENCE
       # ========================================================
 
       - name: Verify persistence setup
@@ -1610,6 +1573,7 @@ jobs:
               "Persistent-RDP logon task was not created."
 
             exit 1
+
           }
 
           if (
@@ -1617,16 +1581,14 @@ jobs:
               "C:\Tools\rclone\rclone.exe"
           ) {
 
-            Write-Host `
-              "rclone OK."
+            Write-Host "rclone OK."
 
           }
           else {
 
-            Write-Error `
-              "rclone missing."
-
+            Write-Error "rclone missing."
             exit 1
+
           }
 
           if (
@@ -1634,16 +1596,14 @@ jobs:
               "C:\Program Files (x86)\WinFsp"
           ) {
 
-            Write-Host `
-              "WinFsp OK."
+            Write-Host "WinFsp OK."
 
           }
           else {
 
-            Write-Error `
-              "WinFsp missing."
-
+            Write-Error "WinFsp missing."
             exit 1
+
           }
 
 
@@ -1653,8 +1613,6 @@ jobs:
 
       - name: Install RustDesk
         run: |
-
-          $ErrorActionPreference = "Stop"
 
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
@@ -1667,34 +1625,13 @@ jobs:
             $installerPath =
               "$env:TEMP\rustdesk.msi"
 
-            Write-Host "Downloading RustDesk..."
-
-            & curl.exe `
-              -L `
-              --fail `
-              --retry 5 `
-              --retry-delay 3 `
-              --connect-timeout 30 `
-              --max-time 300 `
-              -o $installerPath `
-              $rdUrl
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "RustDesk download failed. curl exit code: $LASTEXITCODE"
-            }
-
-            if (-not (Test-Path $installerPath)) {
-              throw "RustDesk MSI was not created."
-            }
-
-            $size =
-              (Get-Item $installerPath).Length
-
-            Write-Host "RustDesk MSI size: $size bytes"
-
-            if ($size -lt 1000000) {
-              throw "Downloaded RustDesk MSI is unexpectedly small."
-            }
+            Invoke-WebRequest `
+              -Uri `
+              $rdUrl `
+              -OutFile `
+              $installerPath `
+              -UseBasicParsing `
+              -ErrorAction Stop
 
             Start-Process `
               msiexec.exe `
@@ -1715,6 +1652,7 @@ jobs:
 
             throw `
               "RustDesk installation failed."
+
           }
 
 
@@ -1775,8 +1713,7 @@ jobs:
             -FilePath $rdExe `
             -ErrorAction SilentlyContinue
 
-          Start-Sleep `
-            -Seconds 5
+          Start-Sleep -Seconds 5
 
           $screenshotPath =
             "$env:TEMP\rustdesk_${{ matrix.id }}.png"
@@ -1834,8 +1771,8 @@ jobs:
 
               "SCREENSHOT_URL=$($json.data.downloadPage)" |
                 Out-File `
-                -Append `
-                $env:GITHUB_ENV
+                  -Append `
+                  $env:GITHUB_ENV
             }
 
           }
@@ -1843,6 +1780,7 @@ jobs:
 
             Write-Warning `
               "Screenshot upload failed."
+
           }
 
 
@@ -1899,10 +1837,14 @@ jobs:
               if (
                 "$env:CRD_ENABLED" -eq '1'
               ) {
+
                 '[CRD+RustDesk/RDP+Persistence]'
+
               }
               else {
+
                 '[RustDesk/RDP+Persistence]'
+
               }
 
             Write-Host (
@@ -1947,8 +1889,10 @@ jobs:
             if (
               -not $userRoot
             ) {
+
               $userRoot =
                 "$env:USERPROFILE"
+
             }
 
             & $rclone `
@@ -1972,6 +1916,7 @@ jobs:
 
               Write-Warning `
                 "Final persistence sync returned exit code $LASTEXITCODE."
+
             }
 
           }
@@ -1979,11 +1924,17 @@ jobs:
 
             Write-Host `
               "rclone/config unavailable; skipping final sync."
+
           }
 
 
       # ========================================================
       # DISPATCH NEXT OR STOP
+      #
+      # FIXED:
+      # Invoke-RestMethod instead of Invoke-WebRequest
+      # Explicit JSON content type
+      # GitHub API version
       # ========================================================
 
       - name: Dispatch next or stop
@@ -2002,21 +1953,6 @@ jobs:
             $next =
               $cycles - 1
 
-            $headers = @{
-              Authorization =
-                "Bearer $env:GH_TOKEN"
-
-              Accept =
-                "application/vnd.github+json"
-
-              "X-GitHub-Api-Version" =
-                "2022-11-28"
-
-              "Content-Type" =
-                "application/json"
-            }
-
-
             # --------------------------------------------------
             # STOP
             # --------------------------------------------------
@@ -2025,6 +1961,17 @@ jobs:
 
               $url =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
+
+              $hdr = @{
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
+              }
 
               $payload = @{
                 ts_tailnet =
@@ -2050,29 +1997,30 @@ jobs:
 
                   inputs =
                     $payload
+
                 } |
                 ConvertTo-Json `
                   -Depth 20
 
-              Write-Host `
-                "Dispatching STOP workflow..."
+              Write-Host "Dispatching STOP workflow..."
 
               Invoke-RestMethod `
                 -Method POST `
                 -Uri $url `
-                -Headers $headers `
+                -Headers $hdr `
+                -ContentType "application/json" `
                 -Body $body `
                 -ErrorAction Stop
 
               Write-Host `
-                "Dispatched STOP."
-
-
-            # --------------------------------------------------
-            # NEXT WORKFLOW A
-            # --------------------------------------------------
+                "Dispatched STOP successfully."
 
             }
+
+            # --------------------------------------------------
+            # SELF RENEW
+            # --------------------------------------------------
+
             else {
 
               $payload = @{
@@ -2107,32 +2055,46 @@ jobs:
                   "${{ inputs.crd_pin }}"
               }
 
-              $url =
+              $url2 =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
 
-              $body =
+              $hdr2 = @{
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
+              }
+
+              $body2 =
                 @{
                   ref =
                     "${{ github.ref_name }}"
 
                   inputs =
                     $payload
+
                 } |
                 ConvertTo-Json `
                   -Depth 20
 
               Write-Host `
-                "Dispatching next Workflow A..."
+                "Dispatching Workflow A self-renew..."
 
               Invoke-RestMethod `
                 -Method POST `
-                -Uri $url `
-                -Headers $headers `
-                -Body $body `
+                -Uri $url2 `
+                -Headers $hdr2 `
+                -ContentType "application/json" `
+                -Body $body2 `
                 -ErrorAction Stop
 
               Write-Host `
-                "Dispatched Workflow A self-renew."
+                "Dispatched Workflow A self-renew successfully."
+
             }
 
           }
@@ -2140,4 +2102,5 @@ jobs:
 
             Write-Host `
               "No cycles configured. Done."
+
           }
