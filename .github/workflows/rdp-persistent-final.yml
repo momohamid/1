@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + (Optional) CRD (A) - Auto-Renew
+name: RDP + Tailscale + RustDesk + (Optional) CRD (A) - Auto-Renew + Google Drive Persistence
 
 on:
   schedule:
@@ -60,7 +60,7 @@ jobs:
 
     outputs:
       matrix: ${{ steps.mk.outputs.matrix }}
-      multi:  ${{ steps.mk.outputs.multi }}
+      multi: ${{ steps.mk.outputs.multi }}
 
     steps:
 
@@ -134,125 +134,46 @@ jobs:
 
     steps:
 
-      - name: Restore backup from latest release
-        run: |
-          $repo = "${{ github.repository }}"
-          $url = "https://api.github.com/repos/$repo/releases/latest"
+      # ========================================================
+      # CRD FLAG
+      # ========================================================
 
-          $release = Invoke-RestMethod `
-            -Uri $url `
-            -Headers @{
-              Authorization = "Bearer ${{ github.token }}"
-            } `
-            -ErrorAction SilentlyContinue
-
-          if ($release -and $release.assets) {
-
-            $asset =
-              $release.assets |
-              Where-Object {
-                $_.name -like "backup-*.zip"
-              } |
-              Select-Object -First 1
-
-            if ($asset) {
-
-              $zip = "$env:TEMP\backup.zip"
-
-              Invoke-WebRequest `
-                -Uri $asset.browser_download_url `
-                -OutFile $zip `
-                -UseBasicParsing
-
-              Expand-Archive `
-                -Path $zip `
-                -DestinationPath "C:\Restore" `
-                -Force
-
-              $map = @{
-                "Desktop"   = "$env:USERPROFILE\Desktop"
-                "Documents" = "$env:USERPROFILE\Documents"
-                "Downloads" = "$env:USERPROFILE\Downloads"
-                "AppData"   = "$env:APPDATA"
-                "ProgramData" = "C:\ProgramData"
-              }
-
-              foreach ($f in $map.Keys) {
-
-                $src = "C:\Restore\$f"
-
-                if (Test-Path $src) {
-
-                  robocopy `
-                    $src `
-                    $map[$f] `
-                    /E `
-                    /COPY:DAT `
-                    /R:3 `
-                    /W:10 `
-                    /NFL `
-                    /NDL `
-                    /NJH `
-                    /NJS |
-                    Out-Null
-                }
-              }
-
-              Write-Host `
-                "Backup restored from $($release.tag_name)"
-
-            }
-            else {
-
-              Write-Host `
-                "No backup asset found."
-            }
-
-          }
-          else {
-
-            Write-Host `
-              "No previous release found; starting fresh."
-          }
-
-
-      - name: Set CRD flag early (safe read)
+      - name: Set CRD flag early
         run: |
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
               Out-File `
-                -Append `
-                $env:GITHUB_ENV
-
+              -Append `
+              $env:GITHUB_ENV
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
-                -Append `
-                $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
           }
 
-          Write-Host `
-            "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
+
+      # ========================================================
+      # CRD INSTALL
+      # ========================================================
 
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
-
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
 
             Write-Host `
-              "CRD host not found, attempting install (EXE -> MSI fallback)..."
+              "CRD host not found, attempting install..."
 
             $exePath =
               "$env:TEMP\chromeremotedesktophost.exe"
@@ -266,15 +187,14 @@ jobs:
                 "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile `
                 $exePath `
-                -UseBasicParsing `
                 -ErrorAction Stop
 
               Start-Process `
                 -FilePath `
                 $exePath `
                 -ArgumentList `
-                  "/silent",
-                  "/install" `
+                "/silent",
+                "/install" `
                 -Wait
 
               Remove-Item `
@@ -287,7 +207,7 @@ jobs:
             catch {
 
               Write-Host `
-                "EXE installer failed or missing: $($_.Exception.Message)"
+                "EXE installer failed: $($_.Exception.Message)"
             }
 
             if (-not $ok) {
@@ -302,16 +222,15 @@ jobs:
                   "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
                   -OutFile `
                   $msi `
-                  -UseBasicParsing `
                   -ErrorAction Stop
 
                 Start-Process `
                   msiexec.exe `
                   -ArgumentList `
-                    "/i",
-                    "`"$msi`"",
-                    "/quiet",
-                    "/norestart" `
+                  "/i",
+                  "`"$msi`"",
+                  "/quiet",
+                  "/norestart" `
                   -Wait
 
                 Remove-Item `
@@ -336,7 +255,11 @@ jobs:
           }
 
 
-      - name: Run Chrome Remote Desktop (accept raw code / full cmd / url) with PIN
+      # ========================================================
+      # CRD START
+      # ========================================================
+
+      - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
 
@@ -369,11 +292,17 @@ jobs:
           $isFull = $false
           $code = $null
 
-          if ($raw -match 'remoting_start_host\.exe') {
+          if (
+            $raw -match `
+            'remoting_start_host\.exe'
+          ) {
             $isFull = $true
           }
 
-          if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
+          if (
+            $raw -match `
+            '--code\s*=\s*"?([^"\s]+)'
+          ) {
 
             $code = (
               [regex]::Match(
@@ -383,7 +312,9 @@ jobs:
             ).Groups[1].Value
 
           }
-          elseif ($raw -match '^4\/') {
+          elseif (
+            $raw -match '^4\/'
+          ) {
 
             $code = $raw
           }
@@ -428,16 +359,20 @@ jobs:
           else {
 
             Write-Error `
-              "Could not detect CRD code. Provide raw code (4/...), full command, or string containing --code=""4/..."""
+              "Could not detect CRD code."
 
             exit 1
           }
 
           Write-Host `
-            "CRD launch step completed with PIN."
+            "CRD launch step completed."
 
 
-      - name: Verify CRD registration (service + recent logs)
+      # ========================================================
+      # CRD VERIFY
+      # ========================================================
+
+      - name: Verify CRD registration
         if: env.CRD_ENABLED == '1'
         run: |
 
@@ -449,7 +384,9 @@ jobs:
 
           $ok = $false
 
-          while ((Get-Date) -lt $deadline) {
+          while (
+            (Get-Date) -lt $deadline
+          ) {
 
             $svc =
               Get-Service `
@@ -458,7 +395,9 @@ jobs:
 
             if (
               $svc -and
-              $svc.Status -in 'Running','StartPending'
+              $svc.Status -in
+              'Running',
+              'StartPending'
             ) {
 
               $ok = $true
@@ -472,42 +411,19 @@ jobs:
           if ($ok) {
 
             Write-Host `
-              "[$svcName] status: Running or starting."
+              "CRD service is running or starting."
 
           }
           else {
 
             Write-Warning `
-              "[$svcName] not running yet."
+              "CRD service not running yet."
           }
 
-          $logDir =
-            "$env:ProgramData\Google\Chrome Remote Desktop"
 
-          if (Test-Path $logDir) {
-
-            Get-ChildItem `
-              $logDir `
-              -Filter "host*.log" |
-              Sort-Object LastWriteTime -Descending |
-              Select-Object -First 2 |
-              ForEach-Object {
-
-                Write-Host `
-                  "----- LOG: $($_.FullName) -----"
-
-                Get-Content `
-                  $_.FullName `
-                  -Tail 200
-              }
-
-          }
-          else {
-
-            Write-Host `
-              "CRD log directory not found: $logDir"
-          }
-
+      # ========================================================
+      # HOSTNAME / RUNTIME
+      # ========================================================
 
       - name: Decide hostname + runtime
         run: |
@@ -526,19 +442,25 @@ jobs:
 
           "TS_HOSTNAME=$hn" |
             Out-File `
-              -Append `
-              $env:GITHUB_ENV
+            -Append `
+            $env:GITHUB_ENV
 
           function Yes($v) {
-            "$v" -match '^(?i:true|1|yes|on)$'
+            "$v" -match `
+              '^(?i:true|1|yes|on)$'
           }
 
           function IntOr($v,$d) {
 
-            if ("$v" -match '^\d+$') {
+            if (
+              "$v" -match '^\d+$'
+            ) {
+
               [int]$v
+
             }
             else {
+
               [int]$d
             }
           }
@@ -557,7 +479,9 @@ jobs:
           }
 
           if (
-            -not (Yes("${{ inputs.quick_test }}")) -and
+            -not (
+              Yes("${{ inputs.quick_test }}")
+            ) -and
             $runtime -lt 6
           ) {
 
@@ -565,27 +489,35 @@ jobs:
           }
 
           if ($runtime -gt 360) {
+
             $runtime = 300
           }
 
           "RUNTIME_MINUTES=$runtime" |
             Out-File `
-              -Append `
-              $env:GITHUB_ENV
+            -Append `
+            $env:GITHUB_ENV
 
           Write-Host `
             "Hostname: $hn | Runtime: $runtime"
 
 
-      - name: Purge bullet* devices (single-instance only)
+      # ========================================================
+      # PURGE
+      # ========================================================
+
+      - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
 
           function Yes($v) {
-            "$v" -match '^(?i:true|1|yes|on)$'
+            "$v" -match `
+              '^(?i:true|1|yes|on)$'
           }
 
-          if (Yes("${{ inputs.do_purge }}")) {
+          if (
+            Yes("${{ inputs.do_purge }}")
+          ) {
 
             try {
 
@@ -610,9 +542,14 @@ jobs:
                       "Basic $auth"
                   }
 
-              foreach ($d in $list.devices) {
+              foreach (
+                $d in $list.devices
+              ) {
 
-                if ($d.hostname -match '^bullet[0-9]*$') {
+                if (
+                  $d.hostname -match
+                  '^bullet[0-9]*$'
+                ) {
 
                   Invoke-RestMethod `
                     -Method Delete `
@@ -627,7 +564,7 @@ jobs:
               }
 
               Write-Host `
-                "Purged bullet* devices (if any)."
+                "Purged bullet devices."
 
             }
             catch {
@@ -644,7 +581,11 @@ jobs:
           }
 
 
-      - name: Install + Up Tailscale (fast)
+      # ========================================================
+      # TAILSCALE
+      # ========================================================
+
+      - name: Install + Up Tailscale
         run: |
 
           winget install `
@@ -677,8 +618,8 @@ jobs:
 
             "TAILSCALE_IP=$ip4" |
               Out-File `
-                -Append `
-                $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
             Write-Host `
               "Tailscale IPv4: $ip4"
@@ -687,11 +628,15 @@ jobs:
           else {
 
             Write-Error `
-              "Tailscale not found after winget install"
+              "Tailscale not found."
 
             exit 1
           }
 
+
+      # ========================================================
+      # RDP USER
+      # ========================================================
 
       - name: Enable RDP user + firewall
         run: |
@@ -761,10 +706,23 @@ jobs:
             Out-Null
 
           Write-Host `
-            "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
+            "RDP ready."
+
+          Write-Host `
+            "User: $u"
+
+          Write-Host `
+            "Host: $env:TS_HOSTNAME"
+
+          Write-Host `
+            "IP: $env:TAILSCALE_IP"
 
 
-      - name: Install Python libs (pyautogui/pynput/pillow)
+      # ========================================================
+      # PYTHON
+      # ========================================================
+
+      - name: Install Python libs
         run: |
 
           python -m pip install `
@@ -781,102 +739,1059 @@ jobs:
             "import pyautogui, pynput, PIL; print('Python libs OK')"
 
 
-      # ==========================================================
-      # RUSTDESK — DIRECT MSI, NO WINGET
-      # ==========================================================
+      # ========================================================
+      # RCLONE + WINFSP
+      # ========================================================
 
-      - name: Install RustDesk (direct MSI)
+      - name: Install rclone + WinFsp
+        shell: pwsh
         run: |
 
-          $paths = @(
-            "C:\Program Files\RustDesk\rustdesk.exe",
-            "C:\Program Files (x86)\RustDesk\rustdesk.exe"
-          )
+          $rcloneDir =
+            "C:\Tools\rclone"
 
-          $rdExe =
-            $paths |
-            Where-Object {
-              Test-Path $_
-            } |
-            Select-Object -First 1
+          $rcloneExe =
+            "$rcloneDir\rclone.exe"
 
-          if (-not $rdExe) {
+          New-Item `
+            -ItemType Directory `
+            -Path $rcloneDir `
+            -Force |
+            Out-Null
 
-            $rdUrl =
-              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+          if (-not (Test-Path $rcloneExe)) {
 
-            $msi =
-              "$env:TEMP\rustdesk.msi"
-
-            Write-Host `
-              "Downloading RustDesk MSI..."
+            $zip =
+              "$env:TEMP\rclone.zip"
 
             Invoke-WebRequest `
-              -Uri $rdUrl `
-              -OutFile $msi `
-              -UseBasicParsing `
-              -ErrorAction Stop
+              -Uri `
+              "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+              -OutFile `
+              $zip `
+              -UseBasicParsing
 
-            if (
-              -not (Test-Path $msi) -or
-              (Get-Item $msi).Length -lt 100000
-            ) {
+            $extract =
+              "$env:TEMP\rclone_extract"
+
+            Remove-Item `
+              $extract `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+            Expand-Archive `
+              -Path $zip `
+              -DestinationPath $extract `
+              -Force
+
+            $found =
+              Get-ChildItem `
+                $extract `
+                -Recurse `
+                -Filter "rclone.exe" |
+              Select-Object -First 1
+
+            if (-not $found) {
 
               throw `
-                "RustDesk MSI download failed or is incomplete."
+                "rclone.exe was not found after download."
             }
 
-            Write-Host `
-              "Installing RustDesk MSI..."
+            Copy-Item `
+              $found.FullName `
+              $rcloneExe `
+              -Force
 
-            $process =
-              Start-Process `
-                msiexec.exe `
-                -ArgumentList `
-                  "/i",
-                  "`"$msi`"",
-                  "/quiet",
-                  "/norestart" `
-                -Wait `
-                -PassThru
+            Remove-Item `
+              $zip `
+              -Force `
+              -ErrorAction SilentlyContinue
 
-            Write-Host `
-              "MSI exit code: $($process.ExitCode)"
+            Remove-Item `
+              $extract `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+          if (-not (Test-Path $rcloneExe)) {
+
+            throw `
+              "rclone installation failed."
+          }
+
+          Write-Host `
+            "rclone installed."
+
+          $winfsp =
+            Get-ChildItem `
+              "C:\Program Files (x86)\WinFsp" `
+              -ErrorAction SilentlyContinue
+
+          if (-not $winfsp) {
+
+            $msi =
+              "$env:TEMP\winfsp.msi"
+
+            Invoke-WebRequest `
+              -Uri `
+              "https://github.com/winfsp/winfsp/releases/latest/download/winfsp.msi" `
+              -OutFile `
+              $msi `
+              -UseBasicParsing
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList `
+              "/i",
+              "`"$msi`"",
+              "/quiet",
+              "/norestart" `
+              -Wait
 
             Remove-Item `
               $msi `
               -Force `
               -ErrorAction SilentlyContinue
-
-            Start-Sleep `
-              -Seconds 5
           }
-
-          $rdExe =
-            $paths |
-            Where-Object {
-              Test-Path $_
-            } |
-            Select-Object -First 1
-
-          if (-not $rdExe) {
-
-            throw `
-              "RustDesk installation failed. rustdesk.exe was not found."
-          }
-
-          Start-Process `
-            -FilePath $rdExe `
-            -ErrorAction SilentlyContinue
 
           Write-Host `
-            "RustDesk installed and launched: $rdExe"
+            "WinFsp installation checked."
 
 
-      - name: Open RustDesk ports (TCP 21115-21119, UDP 21116)
+      # ========================================================
+      # GOOGLE DRIVE CONFIG + MOUNT
+      # ========================================================
+
+      - name: Connect Google Drive and restore persistent files
+        shell: pwsh
+        env:
+          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
         run: |
 
-          for ($p = 21115; $p -le 21119; $p++) {
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          if (-not (Test-Path $rclone)) {
+
+            throw `
+              "rclone.exe missing."
+          }
+
+          if (
+            [string]::IsNullOrWhiteSpace(
+              $env:DRIVE_TOKEN
+            )
+          ) {
+
+            throw `
+              "DRIVE_TOKEN secret is missing."
+          }
+
+          $configDir =
+            "$env:APPDATA\rclone"
+
+          $config =
+            "$configDir\rclone.conf"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $configDir `
+            -Force |
+            Out-Null
+
+          $token =
+            $env:DRIVE_TOKEN.Trim()
+
+          try {
+
+            $tokenObject =
+              $token |
+              ConvertFrom-Json
+
+            if (
+              -not $tokenObject.access_token
+            ) {
+
+              throw `
+                "JSON does not contain access_token."
+            }
+
+            $tokenJson =
+              $tokenObject |
+              ConvertTo-Json `
+                -Compress
+          }
+          catch {
+
+            throw `
+              "DRIVE_TOKEN is not valid OAuth JSON: $($_.Exception.Message)"
+          }
+
+          @"
+          [gdrive]
+          type = drive
+          scope = drive
+          token = $tokenJson
+          "@ |
+            Set-Content `
+              -Path $config `
+              -Encoding UTF8
+
+          & $rclone `
+            --config $config `
+            config show gdrive
+
+          & $rclone `
+            --config $config `
+            lsd `
+            gdrive: `
+            --timeout 60s
+
+          if ($LASTEXITCODE -ne 0) {
+
+            throw `
+              "Google Drive authentication failed."
+          }
+
+          $persistRoot =
+            "gdrive:.persistent-rdp"
+
+          & $rclone `
+            --config $config `
+            mkdir `
+            $persistRoot
+
+          $manifestRemote =
+            "gdrive:.persistent-rdp/manifest.json"
+
+          $manifestLocal =
+            "$env:TEMP\persistent-rdp-manifest.json"
+
+          $userRoot =
+            $env:USERPROFILE
+
+          if (
+            -not (
+              Test-Path $manifestLocal
+            )
+          ) {
+
+            & $rclone `
+              --config $config `
+              copyto `
+              $manifestRemote `
+              $manifestLocal `
+              --timeout 120s `
+              --retries 3
+
+            if ($LASTEXITCODE -ne 0) {
+
+              Write-Host `
+                "No previous manifest found. Starting fresh."
+
+              @{
+                version = 1
+                files = @()
+              } |
+                ConvertTo-Json `
+                  -Depth 10 |
+                Set-Content `
+                  $manifestLocal `
+                  -Encoding UTF8
+            }
+          }
+
+          try {
+
+            $manifest =
+              Get-Content `
+                $manifestLocal `
+                -Raw |
+              ConvertFrom-Json
+
+          }
+          catch {
+
+            $manifest = @{
+              version = 1
+              files = @()
+            }
+          }
+
+          if (
+            -not $manifest.files
+          ) {
+
+            $manifest = @{
+              version = 1
+              files = @()
+            }
+          }
+
+          foreach (
+            $record in @($manifest.files)
+          ) {
+
+            $relative =
+              [string]$record.path
+
+            if (
+              [string]::IsNullOrWhiteSpace(
+                $relative
+              )
+            ) {
+              continue
+            }
+
+            $target =
+              Join-Path `
+                $userRoot `
+                $relative
+
+            $remote =
+              "gdrive:.persistent-rdp/files/$relative"
+
+            $parent =
+              Split-Path `
+                $target `
+                -Parent
+
+            New-Item `
+              -ItemType Directory `
+              -Path $parent `
+              -Force |
+              Out-Null
+
+            Write-Host `
+              "RESTORE: $relative"
+
+            & $rclone `
+              --config $config `
+              copyto `
+              $remote `
+              $target `
+              --timeout 300s `
+              --retries 3 `
+              --low-level-retries 10
+
+            if ($LASTEXITCODE -ne 0) {
+
+              Write-Warning `
+                "Restore failed: $relative"
+            }
+          }
+
+          # ====================================================
+          # CREATE A REAL FILE-EXPLORER DRIVE
+          # ====================================================
+
+          $driveLetter =
+            "G:"
+
+          Get-Process `
+            rclone `
+            -ErrorAction SilentlyContinue |
+            Stop-Process `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+          Start-Sleep `
+            -Seconds 2
+
+          if (
+            Get-PSDrive `
+              -Name G `
+              -ErrorAction SilentlyContinue
+          ) {
+
+            Remove-PSDrive `
+              -Name G `
+              -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+          $mountLog =
+            "$env:TEMP\rclone-mount.log"
+
+          $mountArgs = @(
+            "--config",
+            $config,
+            "mount",
+            "gdrive:",
+            $driveLetter,
+            "--network-mode",
+            "--volname",
+            "Google Drive",
+            "--vfs-cache-mode",
+            "full",
+            "--vfs-cache-max-size",
+            "20G",
+            "--dir-cache-time",
+            "30s",
+            "--poll-interval",
+            "30s",
+            "--transfers",
+            "4",
+            "--checkers",
+            "8",
+            "--timeout",
+            "1m",
+            "--contimeout",
+            "10s",
+            "--log-file",
+            $mountLog,
+            "--log-level",
+            "INFO"
+          )
+
+          Start-Process `
+            -FilePath $rclone `
+            -ArgumentList $mountArgs `
+            -WindowStyle Hidden
+
+          $deadline =
+            (Get-Date).AddSeconds(45)
+
+          $mounted = $false
+
+          while (
+            (Get-Date) -lt $deadline
+          ) {
+
+            if (
+              Test-Path `
+                "G:\"
+            ) {
+
+              $mounted = $true
+              break
+            }
+
+            Start-Sleep `
+              -Seconds 2
+          }
+
+          if (-not $mounted) {
+
+            Write-Warning `
+              "Google Drive mount was not detected yet."
+
+            if (
+              Test-Path $mountLog
+            ) {
+
+              Get-Content `
+                $mountLog `
+                -Tail 100
+            }
+          }
+          else {
+
+            Write-Host `
+              "=========================================="
+
+            Write-Host `
+              "GOOGLE DRIVE MOUNTED AS G:"
+
+            Write-Host `
+              "=========================================="
+          }
+
+          # Save values for later steps.
+          "RCLONE_EXE=$rclone" |
+            Out-File `
+            -Append `
+            $env:GITHUB_ENV
+
+          "RCLONE_CONFIG=$config" |
+            Out-File `
+            -Append `
+            $env:GITHUB_ENV
+
+          "DRIVE_MOUNT=G:" |
+            Out-File `
+            -Append `
+            $env:GITHUB_ENV
+
+          Write-Host `
+            "Google Drive persistence initialized."
+
+
+      # ========================================================
+      # START FILE MONITOR
+      # ========================================================
+
+      - name: Start user-file persistence monitor
+        shell: pwsh
+        env:
+          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
+        run: |
+
+          $monitor =
+            "$env:TEMP\persistent-rdp-monitor.ps1"
+
+          $rclone =
+            "$env:RCLONE_EXE"
+
+          $config =
+            "$env:RCLONE_CONFIG"
+
+          if (
+            -not (Test-Path $rclone)
+          ) {
+
+            throw `
+              "rclone not available."
+          }
+
+          $userRoot =
+            $env:USERPROFILE
+
+          $marker =
+            "$env:TEMP\persistent-rdp-session-start.txt"
+
+          Get-Date |
+            Set-Content `
+              $marker `
+              -Encoding UTF8
+
+          @'
+          param(
+              [string]$Rclone,
+              [string]$Config,
+              [string]$UserRoot,
+              [string]$Marker
+          )
+
+          $ErrorActionPreference = "Continue"
+
+          $remoteRoot =
+              "gdrive:.persistent-rdp/files"
+
+          $manifestRemote =
+              "gdrive:.persistent-rdp/manifest.json"
+
+          $manifestLocal =
+              "$env:TEMP\persistent-rdp-live-manifest.json"
+
+          $stateLock =
+              "$env:TEMP\persistent-rdp-manifest.lock"
+
+          $watchRoots = @(
+              "$UserRoot\Desktop",
+              "$UserRoot\Documents",
+              "$UserRoot\Downloads",
+              "$UserRoot\Pictures",
+              "$UserRoot\Videos",
+              "$UserRoot\Music"
+          )
+
+          $excludedParts = @(
+              "\AppData\Local\Temp\",
+              "\AppData\Local\Microsoft\Edge\User Data\",
+              "\AppData\Local\Google\Chrome\User Data\",
+              "\AppData\Local\Packages\"
+          )
+
+          function Is-Excluded(
+              [string]$Path
+          ) {
+
+              $full =
+                  [System.IO.Path]::GetFullPath(
+                      $Path
+                  )
+
+              foreach (
+                  $part in $excludedParts
+              ) {
+
+                  if (
+                      $full.IndexOf(
+                          $part,
+                          [System.StringComparison]::OrdinalIgnoreCase
+                      ) -ge 0
+                  ) {
+
+                      return $true
+                  }
+              }
+
+              return $false
+          }
+
+          function Relative-Path(
+              [string]$Path
+          ) {
+
+              return (
+                  $Path.Substring(
+                      $UserRoot.Length
+                  ).TrimStart(
+                      "\"
+                  ).Replace(
+                      "\",
+                      "/"
+                  )
+              )
+          }
+
+          function Load-Manifest {
+
+              if (
+                  Test-Path $manifestLocal
+              ) {
+
+                  try {
+
+                      return (
+                          Get-Content `
+                              $manifestLocal `
+                              -Raw |
+                          ConvertFrom-Json
+                      )
+
+                  }
+                  catch {}
+              }
+
+              return @{
+                  version = 1
+                  files = @()
+              }
+          }
+
+          function Save-Manifest(
+              $Manifest
+          ) {
+
+              $json =
+                  $Manifest |
+                  ConvertTo-Json `
+                    -Depth 20
+
+              $json |
+                  Set-Content `
+                    $manifestLocal `
+                    -Encoding UTF8
+
+              & $Rclone `
+                  --config $Config `
+                  copyto `
+                  $manifestLocal `
+                  $manifestRemote `
+                  --timeout 120s `
+                  --retries 3 `
+                  --low-level-retries 10 |
+                  Out-Null
+          }
+
+          function Add-Or-Update-Manifest(
+              [string]$Relative,
+              [long]$Size
+          ) {
+
+              while (
+                  Test-Path $stateLock
+              ) {
+
+                  Start-Sleep `
+                      -Milliseconds 100
+              }
+
+              New-Item `
+                  -ItemType File `
+                  -Path $stateLock `
+                  -Force |
+                  Out-Null
+
+              try {
+
+                  $manifest =
+                      Load-Manifest
+
+                  $arr =
+                      @(
+                          $manifest.files
+                      )
+
+                  $existing =
+                      $arr |
+                      Where-Object {
+                          $_.path -eq $Relative
+                      } |
+                      Select-Object -First 1
+
+                  if ($existing) {
+
+                      $existing.size =
+                          $Size
+
+                      $existing.updated_at =
+                          (Get-Date).ToUniversalTime().ToString(
+                              "o"
+                          )
+
+                  }
+                  else {
+
+                      $arr += [PSCustomObject]@{
+                          path =
+                              $Relative
+
+                          size =
+                              $Size
+
+                          created_at =
+                              (Get-Date).ToUniversalTime().ToString(
+                                  "o"
+                              )
+
+                          updated_at =
+                              (Get-Date).ToUniversalTime().ToString(
+                                  "o"
+                              )
+                      }
+                  }
+
+                  $manifest.files =
+                      @($arr)
+
+                  Save-Manifest `
+                      $manifest
+
+              }
+              finally {
+
+                  Remove-Item `
+                      $stateLock `
+                      -Force `
+                      -ErrorAction SilentlyContinue
+              }
+          }
+
+          function Upload-File(
+              [string]$Path
+          ) {
+
+              if (
+                  -not (Test-Path -LiteralPath $Path -PathType Leaf)
+              ) {
+                  return
+              }
+
+              if (
+                  Is-Excluded $Path
+              ) {
+                  return
+              }
+
+              try {
+
+                  $item =
+                      Get-Item `
+                          -LiteralPath $Path `
+                          -ErrorAction Stop
+
+                  $relative =
+                      Relative-Path `
+                          $Path
+
+                  if (
+                      [string]::IsNullOrWhiteSpace(
+                          $relative
+                      )
+                  ) {
+                      return
+                  }
+
+                  $remote =
+                      "$remoteRoot/$relative"
+
+                  Write-Host `
+                      "UPLOAD: $relative"
+
+                  & $Rclone `
+                      --config $Config `
+                      copyto `
+                      $Path `
+                      $remote `
+                      --timeout 300s `
+                      --retries 3 `
+                      --low-level-retries 10
+
+                  if (
+                      $LASTEXITCODE -eq 0
+                  ) {
+
+                      Add-Or-Update-Manifest `
+                          $relative `
+                          $item.Length
+
+                      Write-Host `
+                          "SAVED: $relative"
+                  }
+                  else {
+
+                      Write-Warning `
+                          "Upload failed: $relative"
+                  }
+
+              }
+              catch {
+
+                  Write-Warning `
+                      "Monitor error: $($_.Exception.Message)"
+              }
+          }
+
+          function Remove-File(
+              [string]$Path
+          ) {
+
+              if (
+                  Is-Excluded $Path
+              ) {
+                  return
+              }
+
+              try {
+
+                  $relative =
+                      Relative-Path `
+                          $Path
+
+                  $remote =
+                      "$remoteRoot/$relative"
+
+                  Write-Host `
+                      "DELETE: $relative"
+
+                  & $Rclone `
+                      --config $Config `
+                      deletefile `
+                      $remote `
+                      --timeout 120s `
+                      --retries 3 `
+                      --low-level-retries 10 |
+                      Out-Null
+
+                  $manifest =
+                      Load-Manifest
+
+                  $manifest.files =
+                      @(
+                          @(
+                              $manifest.files
+                          ) |
+                          Where-Object {
+                              $_.path -ne $relative
+                          }
+                      )
+
+                  Save-Manifest `
+                      $manifest
+              }
+              catch {
+
+                  Write-Warning `
+                      "Delete sync failed: $($_.Exception.Message)"
+              }
+          }
+
+          $watchers = @()
+
+          foreach (
+              $root in $watchRoots
+          ) {
+
+              if (
+                  -not (Test-Path $root)
+              ) {
+                  continue
+              }
+
+              $watcher =
+                  New-Object `
+                      System.IO.FileSystemWatcher
+
+              $watcher.Path =
+                  $root
+
+              $watcher.IncludeSubdirectories =
+                  $true
+
+              $watcher.NotifyFilter =
+                  [System.IO.NotifyFilters]::FileName `
+                  -bor
+                  [System.IO.NotifyFilters]::DirectoryName `
+                  -bor
+                  [System.IO.NotifyFilters]::LastWrite `
+                  -bor
+                  [System.IO.NotifyFilters]::Size
+
+              $watcher.EnableRaisingEvents =
+                  $true
+
+              $createdAction = {
+
+                  Upload-File `
+                      $Event.SourceEventArgs.FullPath
+              }
+
+              $changedAction = {
+
+                  Start-Sleep `
+                      -Milliseconds 500
+
+                  Upload-File `
+                      $Event.SourceEventArgs.FullPath
+              }
+
+              $renamedAction = {
+
+                  Upload-File `
+                      $Event.SourceEventArgs.FullPath
+              }
+
+              $deletedAction = {
+
+                  Remove-File `
+                      $Event.SourceEventArgs.FullPath
+              }
+
+              Register-ObjectEvent `
+                  $watcher `
+                  Created `
+                  -Action $createdAction |
+                  Out-Null
+
+              Register-ObjectEvent `
+                  $watcher `
+                  Changed `
+                  -Action $changedAction |
+                  Out-Null
+
+              Register-ObjectEvent `
+                  $watcher `
+                  Renamed `
+                  -Action $renamedAction |
+                  Out-Null
+
+              Register-ObjectEvent `
+                  $watcher `
+                  Deleted `
+                  -Action $deletedAction |
+                  Out-Null
+
+              $watchers +=
+                  $watcher
+
+              Write-Host `
+                  "Monitoring: $root"
+          }
+
+          Write-Host `
+              "========================================"
+
+          Write-Host `
+              "PERSISTENT-RDP FILE MONITOR ACTIVE"
+
+          Write-Host `
+              "New/changed files are synced to Google Drive."
+
+          Write-Host `
+              "========================================"
+
+          while ($true) {
+
+              Start-Sleep `
+                  -Seconds 5
+          }
+          '@ |
+            Set-Content `
+              -Path $monitor `
+              -Encoding UTF8
+
+          Start-Process `
+            powershell.exe `
+            -ArgumentList `
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "`"$monitor`"",
+              "-Rclone",
+              "`"$rclone`"",
+              "-Config",
+              "`"$config`"",
+              "-UserRoot",
+              "`"$userRoot`"",
+              "-Marker",
+              "`"$marker`"" `
+            -WindowStyle Hidden
+
+          Write-Host `
+            "FILE MONITOR STARTED."
+
+
+      # ========================================================
+      # RUSTDESK
+      # ========================================================
+
+      - name: Install RustDesk
+        run: |
+
+          $rdExe =
+            "C:\Program Files\RustDesk\rustdesk.exe"
+
+          if (-not (Test-Path $rdExe)) {
+
+            $rdUrl =
+              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
+            $installerPath =
+              "$env:TEMP\rustdesk.msi"
+
+            Invoke-WebRequest `
+              -Uri $rdUrl `
+              -OutFile $installerPath
+
+            Start-Process `
+              msiexec.exe `
+              -ArgumentList `
+              "/i",
+              "`"$installerPath`"",
+              "/quiet",
+              "/norestart" `
+              -Wait
+
+            Remove-Item `
+              $installerPath `
+              -Force
+          }
+
+          if (-not (Test-Path $rdExe)) {
+
+            throw `
+              "RustDesk installation failed."
+          }
+
+
+      # ========================================================
+      # RUSTDESK PORTS
+      # ========================================================
+
+      - name: Open RustDesk ports
+        run: |
+
+          for (
+            $p = 21115;
+            $p -le 21119;
+            $p++
+          ) {
 
             $name =
               "APP-PORT-TCP-$p"
@@ -908,24 +1823,15 @@ jobs:
             localport=21116
 
 
-      - name: Launch RustDesk (foreground) + Screenshot to Gofile
+      # ========================================================
+      # RUSTDESK + SCREENSHOT
+      # ========================================================
+
+      - name: Launch RustDesk + Screenshot
         run: |
 
-          $paths = @(
-            "C:\Program Files\RustDesk\rustdesk.exe",
-            "C:\Program Files (x86)\RustDesk\rustdesk.exe"
-          )
-
           $rdExe =
-            $paths |
-            Where-Object {
-              Test-Path $_
-            } |
-            Select-Object -First 1
-
-          if (-not $rdExe) {
-            throw "RustDesk executable not found."
-          }
+            "C:\Program Files\RustDesk\rustdesk.exe"
 
           Start-Process `
             -FilePath $rdExe `
@@ -938,10 +1844,12 @@ jobs:
             "$env:TEMP\rustdesk_${{ matrix.id }}.png"
 
           Add-Type `
-            -AssemblyName System.Windows.Forms
+            -AssemblyName `
+            System.Windows.Forms
 
           Add-Type `
-            -AssemblyName System.Drawing
+            -AssemblyName `
+            System.Drawing
 
           $bounds =
             [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -976,38 +1884,100 @@ jobs:
               -F "file=@$screenshotPath" `
               https://store1.gofile.io/uploadFile
 
-          $json =
-            $curlResult |
-            ConvertFrom-Json
+          try {
 
-          if ($json.status -eq "ok") {
+            $json =
+              $curlResult |
+              ConvertFrom-Json
 
-            "SCREENSHOT_URL=$($json.data.downloadPage)" |
-              Out-File `
+            if (
+              $json.status -eq "ok"
+            ) {
+
+              "SCREENSHOT_URL=$($json.data.downloadPage)" |
+                Out-File `
                 -Append `
                 $env:GITHUB_ENV
+            }
+
+          }
+          catch {
+
+            Write-Warning `
+              "Screenshot upload failed."
           }
 
 
-      - name: Keep alive (to ${{ env.RUNTIME_MINUTES }} mins)
+      # ========================================================
+      # STORAGE STATUS
+      # ========================================================
+
+      - name: Display Google Drive status
+        run: |
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "GOOGLE DRIVE PERSISTENCE"
+          Write-Host "=========================================="
+
+          Write-Host `
+            "Drive mount: G:"
+
+          Write-Host `
+            "Remote: gdrive:"
+
+          Write-Host `
+            "Persistent files: gdrive:.persistent-rdp/files"
+
+          if (
+            Test-Path "G:\"
+          ) {
+
+            Write-Host `
+              "G: IS VISIBLE IN FILE EXPLORER"
+
+            Get-ChildItem `
+              "G:\" `
+              -Force `
+              -ErrorAction SilentlyContinue |
+              Select-Object `
+                -First 20 `
+                Name
+          }
+          else {
+
+            Write-Warning `
+              "G: mount is not visible yet."
+          }
+
+
+      # ========================================================
+      # KEEP ALIVE
+      # ========================================================
+
+      - name: Keep alive
         run: |
 
           $mins =
             [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end =
-            (Get-Date).AddMinutes($mins)
+            (Get-Date).AddMinutes(
+              $mins
+            )
 
           while (
             (Get-Date) -lt $end
           ) {
 
             $mode =
-              if ("$env:CRD_ENABLED" -eq '1') {
-                '[CRD+RustDesk/RDP]'
+              if (
+                "$env:CRD_ENABLED" -eq '1'
+              ) {
+                '[CRD+RustDesk/RDP+Drive]'
               }
               else {
-                '[RustDesk/RDP]'
+                '[RustDesk/RDP+Drive]'
               }
 
             Write-Host (
@@ -1015,7 +1985,7 @@ jobs:
               (Get-Date).ToString("HH:mm:ss") +
               " ends at " +
               $end.ToString("HH:mm:ss") +
-              " | RS URL: " +
+              " | Google Drive: G: | RS URL: " +
               $env:SCREENSHOT_URL
             )
 
@@ -1024,132 +1994,101 @@ jobs:
           }
 
 
-      - name: Backup all user data (upload to release)
+      # ========================================================
+      # FINAL DRIVE SYNC
+      # ========================================================
+
+      - name: Final Google Drive sync
         if: always()
+        shell: pwsh
+        env:
+          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
         run: |
 
-          $backupDir =
-            "$env:TEMP\backup_full"
+          $rclone =
+            "$env:RCLONE_EXE"
 
-          New-Item `
-            -ItemType Directory `
-            -Path $backupDir `
-            -Force |
-            Out-Null
+          $config =
+            "$env:RCLONE_CONFIG"
 
-          $folders = @(
-            "$env:USERPROFILE\Desktop",
-            "$env:USERPROFILE\Documents",
-            "$env:USERPROFILE\Downloads",
-            "$env:APPDATA",
-            "C:\ProgramData\RustDesk"
-          )
+          if (
+            (Test-Path $rclone) -and
+            (Test-Path $config)
+          ) {
 
-          foreach ($f in $folders) {
+            Write-Host `
+              "Final Google Drive sync starting..."
 
-            if (Test-Path $f) {
+            $userRoot =
+              $env:USERPROFILE
 
-              $target =
-                "$backupDir\$(
-                  [System.IO.Path]::GetFileName($f)
-                )"
+            $folders = @(
+              "$userRoot\Desktop",
+              "$userRoot\Documents",
+              "$userRoot\Downloads",
+              "$userRoot\Pictures",
+              "$userRoot\Videos",
+              "$userRoot\Music"
+            )
 
-              robocopy `
-                $f `
-                $target `
-                /E `
-                /COPY:DAT `
-                /R:3 `
-                /W:10 `
-                /NFL `
-                /NDL `
-                /NJH `
-                /NJS |
-                Out-Null
-            }
-          }
+            foreach (
+              $folder in $folders
+            ) {
 
-          $zipName =
-            "backup-$(Get-Date -Format 'yyyyMMdd-HHmmss').zip"
+              if (
+                Test-Path $folder
+              ) {
 
-          $zipPath =
-            "$env:TEMP\$zipName"
+                $relative =
+                  $folder.Substring(
+                    $userRoot.Length
+                  ).TrimStart(
+                    "\"
+                  ).Replace(
+                    "\",
+                    "/"
+                  )
 
-          Compress-Archive `
-            -Path "$backupDir\*" `
-            -DestinationPath $zipPath `
-            -Force
+                $remote =
+                  "gdrive:.persistent-rdp/files/$relative"
 
-          $releases =
-            Invoke-RestMethod `
-              -Uri `
-              "https://api.github.com/repos/${{ github.repository }}/releases" `
-              -Headers @{
-                Authorization =
-                  "Bearer ${{ github.token }}"
+                Write-Host `
+                  "Final sync: $relative"
+
+                & $rclone `
+                  --config $config `
+                  copy `
+                  $folder `
+                  $remote `
+                  --timeout 300s `
+                  --retries 3 `
+                  --low-level-retries 10 `
+                  --exclude "AppData/Local/Temp/**" `
+                  --exclude "AppData/Local/Microsoft/Edge/User Data/**" `
+                  --exclude "AppData/Local/Google/Chrome/User Data/**" `
+                  --exclude "AppData/Local/Packages/**"
               }
-
-          foreach ($r in $releases) {
-
-            if ($r.tag_name -like "backup-*") {
-
-              Invoke-RestMethod `
-                -Method Delete `
-                -Uri `
-                "https://api.github.com/repos/${{ github.repository }}/releases/$($r.id)" `
-                -Headers @{
-                  Authorization =
-                    "Bearer ${{ github.token }}"
-                } `
-                -ErrorAction SilentlyContinue
             }
+
+            Write-Host `
+              "Final Google Drive sync completed."
+
+          }
+          else {
+
+            Write-Host `
+              "rclone/config unavailable; skipping final sync."
           }
 
-          $tag =
-            "backup-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
 
-          $body = @{
-            tag_name = $tag
-            name = $tag
-            draft = $false
-            prerelease = $false
-          } |
-            ConvertTo-Json
-
-          $release =
-            Invoke-RestMethod `
-              -Method Post `
-              -Uri `
-              "https://api.github.com/repos/${{ github.repository }}/releases" `
-              -Headers @{
-                Authorization =
-                  "Bearer ${{ github.token }}"
-              } `
-              -Body $body `
-              -ContentType "application/json"
-
-          $uploadUrl =
-            $release.upload_url `
-              -replace `
-              "{?name,label}",
-              "?name=$zipName"
-
-          curl `
-            -X POST `
-            -H "Authorization: Bearer ${{ github.token }}" `
-            -H "Content-Type: application/zip" `
-            --data-binary "@$zipPath" `
-            "$uploadUrl"
-
-          Write-Host `
-            "Backup uploaded to $tag"
-
+      # ========================================================
+      # DISPATCH NEXT OR STOP
+      # ========================================================
 
       - name: Dispatch next or stop
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-
         run: |
 
           $cycles =
@@ -1190,14 +2129,14 @@ jobs:
                   "false"
               }
 
-              $body = @{
-                ref =
-                  "${{ github.ref_name }}"
+              $body =
+                @{
+                  ref =
+                    "${{ github.ref_name }}"
 
-                inputs =
-                  $payload
-
-              } |
+                  inputs =
+                    $payload
+                } |
                 ConvertTo-Json `
                   -Depth 20
 
@@ -1257,14 +2196,14 @@ jobs:
                   "application/vnd.github+json"
               }
 
-              $body2 = @{
-                ref =
-                  "${{ github.ref_name }}"
+              $body2 =
+                @{
+                  ref =
+                    "${{ github.ref_name }}"
 
-                inputs =
-                  $payload
-
-              } |
+                  inputs =
+                    $payload
+                } |
                 ConvertTo-Json `
                   -Depth 20
 
@@ -1276,7 +2215,7 @@ jobs:
                 Out-Null
 
               Write-Host `
-                "Dispatched Workflow A (self-renew) with cycles=$next"
+                "Dispatched Workflow A self-renew."
             }
 
           }
