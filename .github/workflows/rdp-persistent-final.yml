@@ -8,19 +8,16 @@ on:
     inputs:
 
       ts_tailnet:
-        description: "Tailscale tailnet (e.g. user@gmail.com)"
+        description: "Tailscale tailnet (e.g. you@gmail.com)"
         required: true
-        type: string
 
       ts_api_key:
         description: "Tailscale API key (device admin, no Bearer)"
         required: true
-        type: string
 
       ts_authkey:
         description: "Tailscale Auth key (reusable or ephemeral)"
         required: true
-        type: string
 
       quick_test:
         description: "Run 5-minute test"
@@ -31,40 +28,33 @@ on:
         description: "Runtime (max 360; default 300 when not test)"
         required: false
         default: "300"
-        type: string
 
       do_purge:
         description: "Purge bullet* devices at start (single instance only)"
         required: false
         default: "true"
-        type: string
 
       cycles:
         description: "0=stop after A; N=handoffs left incl this run"
         required: false
         default: "9999"
-        type: string
 
       rdp_count:
         description: "How many RDP instances (1-10) [ignored if CRD provided]"
         required: false
         default: "1"
-        type: string
 
       crd_code:
         description: >-
-          Paste raw CRD code (4/0AV...), full PowerShell command,
-          or text/URL containing --code="4/...".
+          Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
           If provided -> single instance; CRD launches first.
         required: false
         default: ""
-        type: string
 
       crd_pin:
-        description: "CRD PIN (6–12 digits)."
+        description: "CRD PIN (6–12 digits). Used when launching CRD to avoid interactive prompt."
         required: false
         default: "123456"
-        type: string
 
 
 permissions:
@@ -93,8 +83,7 @@ jobs:
 
     steps:
 
-      - name: Build matrix
-        id: mk
+      - id: mk
         shell: pwsh
         run: |
 
@@ -103,17 +92,10 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             $n = 1
-
           }
           else {
-
-            $n = 1
-
-            if ("${{ inputs.rdp_count }}" -match '^\d+$') {
-              $n = [int]"${{ inputs.rdp_count }}"
-            }
+            $n = [int]"${{ inputs.rdp_count }}"
 
             if ($n -lt 1) {
               $n = 1
@@ -122,39 +104,38 @@ jobs:
             if ($n -gt 10) {
               $n = 10
             }
-
           }
 
           $inc = @()
 
           for ($i = 1; $i -le $n; $i++) {
-
             $inc += @{
               id = $i
             }
-
           }
 
           $json = @{
             include = $inc
-          } | ConvertTo-Json -Compress
+          } |
+          ConvertTo-Json -Compress
 
           "matrix=$json" |
             Out-File `
-              -FilePath $env:GITHUB_OUTPUT `
+              $env:GITHUB_OUTPUT `
               -Append `
               -Encoding utf8
 
-          if ($n -gt 1) {
-            $multi = '1'
-          }
-          else {
-            $multi = '0'
-          }
+          $multi =
+            if ($n -gt 1) {
+              '1'
+            }
+            else {
+              '0'
+            }
 
           "multi=$multi" |
             Out-File `
-              -FilePath $env:GITHUB_OUTPUT `
+              $env:GITHUB_OUTPUT `
               -Append `
               -Encoding utf8
 
@@ -181,7 +162,6 @@ jobs:
 
     steps:
 
-
       # ========================================================
       # CRD FLAG
       # ========================================================
@@ -194,20 +174,16 @@ jobs:
           '@.Trim()
 
           if ($crd.Length -gt 0) {
-
             "CRD_ENABLED=1" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
           else {
-
             "CRD_ENABLED=0" |
               Out-File `
                 -Append `
                 $env:GITHUB_ENV
-
           }
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
@@ -240,7 +216,6 @@ jobs:
                 "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile `
                 $exePath `
-                -UseBasicParsing `
                 -ErrorAction Stop
 
               Start-Process `
@@ -263,7 +238,6 @@ jobs:
 
               Write-Host `
                 "EXE installer failed: $($_.Exception.Message)"
-
             }
 
             if (-not $ok) {
@@ -278,7 +252,6 @@ jobs:
                   "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
                   -OutFile `
                   $msi `
-                  -UseBasicParsing `
                   -ErrorAction Stop
 
                 Start-Process `
@@ -302,11 +275,8 @@ jobs:
                   "CRD MSI fallback failed: $($_.Exception.Message)"
 
                 exit 1
-
               }
-
             }
-
           }
           else {
 
@@ -356,16 +326,16 @@ jobs:
             $isFull = $true
           }
 
-          $codeMatch =
-            [regex]::Match(
-              $raw,
-              '--code\s*=\s*"?([^"\s]+)'
-            )
+          if (
+            $raw -match '--code\s*=\s*"?([^"\s]+)'
+          ) {
 
-          if ($codeMatch.Success) {
-
-            $code =
-              $codeMatch.Groups[1].Value
+            $code = (
+              [regex]::Match(
+                $raw,
+                '--code\s*=\s*"?([^"\s]+)'
+              )
+            ).Groups[1].Value
 
           }
           elseif ($raw -match '^4\/') {
@@ -383,10 +353,10 @@ jobs:
               $Env:COMPUTERNAME
 
             $args = @(
-              "--code=`"$code`"",
-              "--redirect-url=`"$redir`"",
-              "--name=`"$name`"",
-              "--pin=`"$pin`""
+              "--code=""$code""",
+              "--redirect-url=""$redir""",
+              "--name=""$name""",
+              "--pin=""$pin"""
             )
 
             Start-Process `
@@ -406,7 +376,7 @@ jobs:
               -Value $raw `
               -Encoding UTF8
 
-            powershell.exe `
+            powershell `
               -ExecutionPolicy Bypass `
               -File $tmp
 
@@ -447,19 +417,16 @@ jobs:
 
             if (
               $svc -and
-              $svc.Status -in @(
-                'Running',
-                'StartPending'
-              )
+              $svc.Status -in
+              'Running',
+              'StartPending'
             ) {
 
               $ok = $true
               break
-
             }
 
             Start-Sleep -Seconds 3
-
           }
 
           if ($ok) {
@@ -483,13 +450,7 @@ jobs:
       - name: Decide hostname + runtime
         run: |
 
-          $count = 1
-
-          if ("${{ inputs.rdp_count }}" -match '^\d+$') {
-            $count = [int]"${{ inputs.rdp_count }}"
-          }
-
-          if ($count -gt 1) {
+          if ("${{ inputs.rdp_count }}" -gt 1) {
 
             $hn =
               "bullet${{ matrix.id }}"
@@ -514,48 +475,41 @@ jobs:
 
           }
 
-          function IntOr($v, $d) {
+          function IntOr($v,$d) {
 
             if ("$v" -match '^\d+$') {
 
-              return [int]$v
+              [int]$v
 
             }
+            else {
 
-            return [int]$d
+              [int]$d
+
+            }
 
           }
 
           $runtime =
-            IntOr `
-              "${{ inputs.runtime_minutes }}" `
+            IntOr(
+              "${{ inputs.runtime_minutes }}",
               300
+            )
 
-          if (Yes "${{ inputs.quick_test }}") {
-
+          if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
-
           }
 
           if (
-            -not (Yes "${{ inputs.quick_test }}") -and
+            -not (Yes("${{ inputs.quick_test }}")) -and
             $runtime -lt 6
           ) {
 
             $runtime = 300
-
           }
 
           if ($runtime -gt 360) {
-
             $runtime = 360
-
-          }
-
-          if ($runtime -lt 1) {
-
-            $runtime = 1
-
           }
 
           "RUNTIME_MINUTES=$runtime" |
@@ -582,7 +536,7 @@ jobs:
 
           }
 
-          if (Yes "${{ inputs.do_purge }}") {
+          if (Yes("${{ inputs.do_purge }}")) {
 
             try {
 
@@ -604,8 +558,7 @@ jobs:
                   "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
                   -Headers @{
                     Authorization = "Basic $auth"
-                  } `
-                  -ErrorAction Stop
+                  }
 
               foreach ($d in $list.devices) {
 
@@ -622,7 +575,6 @@ jobs:
                       Authorization = "Basic $auth"
                     } `
                     -ErrorAction SilentlyContinue
-
                 }
 
               }
@@ -652,8 +604,6 @@ jobs:
       - name: Install + Up Tailscale
         run: |
 
-          $ErrorActionPreference = "Stop"
-
           winget install `
             --id Tailscale.Tailscale `
             -e `
@@ -666,44 +616,37 @@ jobs:
           $ts =
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
-          if (-not (Test-Path $ts)) {
+          if (Test-Path $ts) {
 
-            throw "Tailscale not found."
+            & $ts logout |
+              Out-Null
 
-          }
+            & $ts up `
+              --authkey "${{ inputs.ts_authkey }}" `
+              --hostname "$env:TS_HOSTNAME" `
+              --accept-dns=true `
+              --accept-routes=true
 
-          & $ts logout |
-            Out-Null
+            $ip4 =
+              & $ts ip -4 |
+              Select-Object -First 1
 
-          & $ts up `
-            --authkey "${{ inputs.ts_authkey }}" `
-            --hostname "$env:TS_HOSTNAME" `
-            --accept-dns=true `
-            --accept-routes=true
+            "TAILSCALE_IP=$ip4" |
+              Out-File `
+                -Append `
+                $env:GITHUB_ENV
 
-          if ($LASTEXITCODE -ne 0) {
-
-            throw "Tailscale up failed."
-
-          }
-
-          $ip4 =
-            & $ts ip -4 |
-            Select-Object -First 1
-
-          if ([string]::IsNullOrWhiteSpace("$ip4")) {
-
-            throw "Could not obtain Tailscale IPv4."
+            Write-Host `
+              "Tailscale IPv4: $ip4"
 
           }
+          else {
 
-          "TAILSCALE_IP=$ip4" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
+            Write-Error `
+              "Tailscale not found."
 
-          Write-Host `
-            "Tailscale IPv4: $ip4"
+            exit 1
+          }
 
 
       # ========================================================
@@ -725,12 +668,13 @@ jobs:
               -AsPlainText `
               -Force
 
-          $existing =
-            Get-LocalUser `
-              -Name $u `
-              -ErrorAction SilentlyContinue
-
-          if (-not $existing) {
+          if (
+            -not (
+              Get-LocalUser `
+                -Name $u `
+                -ErrorAction SilentlyContinue
+            )
+          ) {
 
             New-LocalUser `
               -Name $u `
@@ -770,6 +714,7 @@ jobs:
             Out-Null
 
           Write-Host "RDP ready."
+
           Write-Host "User: $u"
           Write-Host "Host: $env:TS_HOSTNAME"
           Write-Host "IP: $env:TAILSCALE_IP"
@@ -934,8 +879,7 @@ jobs:
               (Get-Item $winfspMsi).Length
 
             if ($size -lt 1000000) {
-              throw `
-                "WinFsp MSI appears invalid or incomplete. Size: $size bytes"
+              throw "WinFsp MSI appears invalid or incomplete. Size: $size bytes"
             }
 
             Write-Host `
@@ -1029,42 +973,29 @@ jobs:
             -Force |
             Out-Null
 
-          try {
-
-            $tokenObject =
-              $env:DRIVE_TOKEN.Trim() |
-              ConvertFrom-Json
-
-          }
-          catch {
-
-            throw `
-              "DRIVE_TOKEN is not valid JSON: $($_.Exception.Message)"
-
-          }
+          $tokenObject =
+            $env:DRIVE_TOKEN.Trim() |
+            ConvertFrom-Json
 
           if (
             -not $tokenObject.access_token
           ) {
-            throw `
-              "DRIVE_TOKEN does not contain access_token."
+            throw "DRIVE_TOKEN does not contain access_token."
           }
 
           $tokenJson =
             $tokenObject |
             ConvertTo-Json -Compress
 
-          $configText = @"
+          @"
           [gdrive]
           type = drive
           scope = drive
           token = $tokenJson
-          "@
-
-          Set-Content `
-            -Path $config `
-            -Value $configText `
-            -Encoding UTF8
+          "@ |
+            Set-Content `
+              -Path $config `
+              -Encoding UTF8
 
           icacls `
             $configDir `
@@ -1090,18 +1021,10 @@ jobs:
             mkdir `
             "gdrive:.persistent-rdp"
 
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not create Google Drive persistent root."
-          }
-
           & $rclone `
             --config $config `
             mkdir `
             "gdrive:.persistent-rdp/files"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Could not create Google Drive files directory."
-          }
 
           "RCLONE_EXE=$rclone" |
             Out-File `
@@ -1565,12 +1488,6 @@ jobs:
               -AtLogOn `
               -User $user
 
-          $principal =
-            New-ScheduledTaskPrincipal `
-              -UserId $user `
-              -LogonType Password `
-              -RunLevel Limited
-
           $settings =
             New-ScheduledTaskSettingsSet `
               -AllowStartIfOnBatteries `
@@ -1581,9 +1498,10 @@ jobs:
             -TaskName "Persistent-RDP-Logon" `
             -Action $action `
             -Trigger $trigger `
-            -Principal $principal `
-            -Settings $settings `
+            -User $user `
             -Password $pass `
+            -RunLevel Limited `
+            -Settings $settings `
             -Force |
             Out-Null
 
@@ -1699,7 +1617,6 @@ jobs:
               $installerPath `
               -Force `
               -ErrorAction SilentlyContinue
-
           }
 
           if (-not (Test-Path $rdExe)) {
@@ -1736,7 +1653,6 @@ jobs:
               action=allow `
               protocol=TCP `
               localport=$p
-
           }
 
           $udpName =
@@ -1809,12 +1725,12 @@ jobs:
           $graphics.Dispose()
           $bitmap.Dispose()
 
-          try {
+          $curlResult =
+            curl `
+              -F "file=@$screenshotPath" `
+              https://store1.gofile.io/uploadFile
 
-            $curlResult =
-              curl `
-                -F "file=@$screenshotPath" `
-                https://store1.gofile.io/uploadFile
+          try {
 
             $json =
               $curlResult |
@@ -1828,23 +1744,13 @@ jobs:
                 Out-File `
                   -Append `
                   $env:GITHUB_ENV
-
-              Write-Host `
-                "Screenshot uploaded."
-
-            }
-            else {
-
-              Write-Warning `
-                "Screenshot upload returned a non-ok status."
-
             }
 
           }
           catch {
 
             Write-Warning `
-              "Screenshot upload failed: $($_.Exception.Message)"
+              "Screenshot upload failed."
 
           }
 
@@ -1889,14 +1795,6 @@ jobs:
           $mins =
             [int]"${{ env.RUNTIME_MINUTES }}"
 
-          if ($mins -gt 360) {
-            $mins = 360
-          }
-
-          if ($mins -lt 1) {
-            $mins = 1
-          }
-
           $end =
             (Get-Date).AddMinutes(
               $mins
@@ -1906,20 +1804,19 @@ jobs:
             (Get-Date) -lt $end
           ) {
 
-            if (
-              "$env:CRD_ENABLED" -eq '1'
-            ) {
+            $mode =
+              if (
+                "$env:CRD_ENABLED" -eq '1'
+              ) {
 
-              $mode =
                 '[CRD+RustDesk/RDP+Persistence]'
 
-            }
-            else {
+              }
+              else {
 
-              $mode =
                 '[RustDesk/RDP+Persistence]'
 
-            }
+              }
 
             Write-Host (
               "$mode Heartbeat " +
@@ -1931,7 +1828,6 @@ jobs:
 
             Start-Sleep `
               -Seconds 60
-
           }
 
 
@@ -1962,8 +1858,7 @@ jobs:
               "$env:RDP_PROFILE"
 
             if (
-              [string]::IsNullOrWhiteSpace($userRoot) -or
-              -not (Test-Path $userRoot)
+              -not $userRoot
             ) {
 
               $userRoot =
@@ -2016,20 +1911,13 @@ jobs:
 
           $ErrorActionPreference = "Stop"
 
-          $cycles = 9999
-
-          if ("${{ inputs.cycles }}" -match '^\d+$') {
-
-            $cycles =
-              [int]"${{ inputs.cycles }}"
-
-          }
+          $cycles =
+            [int]"${{ inputs.cycles }}"
 
           if ($cycles -gt 0) {
 
             $next =
               $cycles - 1
-
 
             # --------------------------------------------------
             # STOP
@@ -2080,8 +1968,7 @@ jobs:
                 ConvertTo-Json `
                   -Depth 20
 
-              Write-Host `
-                "Dispatching STOP workflow..."
+              Write-Host "Dispatching STOP workflow..."
 
               Invoke-RestMethod `
                 -Method POST `
@@ -2095,7 +1982,6 @@ jobs:
                 "Dispatched STOP successfully."
 
             }
-
 
             # --------------------------------------------------
             # SELF RENEW
