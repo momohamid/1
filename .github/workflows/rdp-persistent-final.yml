@@ -666,14 +666,6 @@ jobs:
               -Password $sec `
               -AccountNeverExpires
 
-            Add-LocalGroupMember `
-              -Group "Administrators" `
-              -Member $u
-
-            Add-LocalGroupMember `
-              -Group "Remote Desktop Users" `
-              -Member $u
-
           }
           else {
 
@@ -684,17 +676,17 @@ jobs:
 
             Enable-LocalUser `
               -Name $u
-
-            Add-LocalGroupMember `
-              -Group "Administrators" `
-              -Member $u `
-              -ErrorAction SilentlyContinue
-
-            Add-LocalGroupMember `
-              -Group "Remote Desktop Users" `
-              -Member $u `
-              -ErrorAction SilentlyContinue
           }
+
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
+
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $u `
+            -ErrorAction SilentlyContinue
 
           Set-ItemProperty `
             "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
@@ -793,9 +785,7 @@ jobs:
               Select-Object -First 1
 
             if (-not $found) {
-
-              throw `
-                "rclone.exe was not found after download."
+              throw "rclone.exe was not found."
             }
 
             Copy-Item `
@@ -816,20 +806,13 @@ jobs:
           }
 
           if (-not (Test-Path $rcloneExe)) {
-
-            throw `
-              "rclone installation failed."
+            throw "rclone installation failed."
           }
 
-          Write-Host `
-            "rclone installed."
+          $winfspPath =
+            "C:\Program Files (x86)\WinFsp"
 
-          $winfsp =
-            Get-ChildItem `
-              "C:\Program Files (x86)\WinFsp" `
-              -ErrorAction SilentlyContinue
-
-          if (-not $winfsp) {
+          if (-not (Test-Path $winfspPath)) {
 
             $msi =
               "$env:TEMP\winfsp.msi"
@@ -856,15 +839,14 @@ jobs:
               -ErrorAction SilentlyContinue
           }
 
-          Write-Host `
-            "WinFsp installation checked."
+          Write-Host "rclone + WinFsp ready."
 
 
       # ========================================================
-      # GOOGLE DRIVE CONFIG + MOUNT
+      # GOOGLE DRIVE CONFIG
       # ========================================================
 
-      - name: Connect Google Drive and restore persistent files
+      - name: Prepare Google Drive persistence
         shell: pwsh
         env:
           DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
@@ -874,9 +856,7 @@ jobs:
             "C:\Tools\rclone\rclone.exe"
 
           if (-not (Test-Path $rclone)) {
-
-            throw `
-              "rclone.exe missing."
+            throw "rclone.exe missing."
           }
 
           if (
@@ -884,13 +864,17 @@ jobs:
               $env:DRIVE_TOKEN
             )
           ) {
-
-            throw `
-              "DRIVE_TOKEN secret is missing."
+            throw "DRIVE_TOKEN secret is missing."
           }
 
+          $user =
+            $env:RDP_USER
+
+          $profile =
+            "C:\Users\$user"
+
           $configDir =
-            "$env:APPDATA\rclone"
+            "$profile\AppData\Roaming\rclone"
 
           $config =
             "$configDir\rclone.conf"
@@ -901,33 +885,19 @@ jobs:
             -Force |
             Out-Null
 
-          $token =
-            $env:DRIVE_TOKEN.Trim()
+          $tokenObject =
+            $env:DRIVE_TOKEN.Trim() |
+            ConvertFrom-Json
 
-          try {
-
-            $tokenObject =
-              $token |
-              ConvertFrom-Json
-
-            if (
-              -not $tokenObject.access_token
-            ) {
-
-              throw `
-                "JSON does not contain access_token."
-            }
-
-            $tokenJson =
-              $tokenObject |
-              ConvertTo-Json `
-                -Compress
+          if (
+            -not $tokenObject.access_token
+          ) {
+            throw "DRIVE_TOKEN does not contain access_token."
           }
-          catch {
 
-            throw `
-              "DRIVE_TOKEN is not valid OAuth JSON: $($_.Exception.Message)"
-          }
+          $tokenJson =
+            $tokenObject |
+            ConvertTo-Json -Compress
 
           @"
           [gdrive]
@@ -939,9 +909,13 @@ jobs:
               -Path $config `
               -Encoding UTF8
 
-          & $rclone `
-            --config $config `
-            config show gdrive
+          # Give the RDP user ownership/read access to its config.
+          icacls `
+            $configDir `
+            /grant "${user}:(OI)(CI)F" `
+            /T `
+            /C |
+            Out-Null
 
           & $rclone `
             --config $config `
@@ -950,385 +924,208 @@ jobs:
             --timeout 60s
 
           if ($LASTEXITCODE -ne 0) {
-
-            throw `
-              "Google Drive authentication failed."
+            throw "Google Drive authentication failed."
           }
 
-          $persistRoot =
+          # Persistent root.
+          & $rclone `
+            --config $config `
+            mkdir `
             "gdrive:.persistent-rdp"
 
           & $rclone `
             --config $config `
             mkdir `
-            $persistRoot
+            "gdrive:.persistent-rdp/files"
 
-          $manifestRemote =
-            "gdrive:.persistent-rdp/manifest.json"
-
-          $manifestLocal =
-            "$env:TEMP\persistent-rdp-manifest.json"
-
-          $userRoot =
-            $env:USERPROFILE
-
-          if (
-            -not (
-              Test-Path $manifestLocal
-            )
-          ) {
-
-            & $rclone `
-              --config $config `
-              copyto `
-              $manifestRemote `
-              $manifestLocal `
-              --timeout 120s `
-              --retries 3
-
-            if ($LASTEXITCODE -ne 0) {
-
-              Write-Host `
-                "No previous manifest found. Starting fresh."
-
-              @{
-                version = 1
-                files = @()
-              } |
-                ConvertTo-Json `
-                  -Depth 10 |
-                Set-Content `
-                  $manifestLocal `
-                  -Encoding UTF8
-            }
-          }
-
-          try {
-
-            $manifest =
-              Get-Content `
-                $manifestLocal `
-                -Raw |
-              ConvertFrom-Json
-
-          }
-          catch {
-
-            $manifest = @{
-              version = 1
-              files = @()
-            }
-          }
-
-          if (
-            -not $manifest.files
-          ) {
-
-            $manifest = @{
-              version = 1
-              files = @()
-            }
-          }
-
-          foreach (
-            $record in @($manifest.files)
-          ) {
-
-            $relative =
-              [string]$record.path
-
-            if (
-              [string]::IsNullOrWhiteSpace(
-                $relative
-              )
-            ) {
-              continue
-            }
-
-            $target =
-              Join-Path `
-                $userRoot `
-                $relative
-
-            $remote =
-              "gdrive:.persistent-rdp/files/$relative"
-
-            $parent =
-              Split-Path `
-                $target `
-                -Parent
-
-            New-Item `
-              -ItemType Directory `
-              -Path $parent `
-              -Force |
-              Out-Null
-
-            Write-Host `
-              "RESTORE: $relative"
-
-            & $rclone `
-              --config $config `
-              copyto `
-              $remote `
-              $target `
-              --timeout 300s `
-              --retries 3 `
-              --low-level-retries 10
-
-            if ($LASTEXITCODE -ne 0) {
-
-              Write-Warning `
-                "Restore failed: $relative"
-            }
-          }
-
-          # ====================================================
-          # CREATE A REAL FILE-EXPLORER DRIVE
-          # ====================================================
-
-          $driveLetter =
-            "G:"
-
-          Get-Process `
-            rclone `
-            -ErrorAction SilentlyContinue |
-            Stop-Process `
-            -Force `
-            -ErrorAction SilentlyContinue
-
-          Start-Sleep `
-            -Seconds 2
-
-          if (
-            Get-PSDrive `
-              -Name G `
-              -ErrorAction SilentlyContinue
-          ) {
-
-            Remove-PSDrive `
-              -Name G `
-              -Force `
-              -ErrorAction SilentlyContinue
-          }
-
-          $mountLog =
-            "$env:TEMP\rclone-mount.log"
-
-          $mountArgs = @(
-            "--config",
-            $config,
-            "mount",
-            "gdrive:",
-            $driveLetter,
-            "--network-mode",
-            "--volname",
-            "Google Drive",
-            "--vfs-cache-mode",
-            "full",
-            "--vfs-cache-max-size",
-            "20G",
-            "--dir-cache-time",
-            "30s",
-            "--poll-interval",
-            "30s",
-            "--transfers",
-            "4",
-            "--checkers",
-            "8",
-            "--timeout",
-            "1m",
-            "--contimeout",
-            "10s",
-            "--log-file",
-            $mountLog,
-            "--log-level",
-            "INFO"
-          )
-
-          Start-Process `
-            -FilePath $rclone `
-            -ArgumentList $mountArgs `
-            -WindowStyle Hidden
-
-          $deadline =
-            (Get-Date).AddSeconds(45)
-
-          $mounted = $false
-
-          while (
-            (Get-Date) -lt $deadline
-          ) {
-
-            if (
-              Test-Path `
-                "G:\"
-            ) {
-
-              $mounted = $true
-              break
-            }
-
-            Start-Sleep `
-              -Seconds 2
-          }
-
-          if (-not $mounted) {
-
-            Write-Warning `
-              "Google Drive mount was not detected yet."
-
-            if (
-              Test-Path $mountLog
-            ) {
-
-              Get-Content `
-                $mountLog `
-                -Tail 100
-            }
-          }
-          else {
-
-            Write-Host `
-              "=========================================="
-
-            Write-Host `
-              "GOOGLE DRIVE MOUNTED AS G:"
-
-            Write-Host `
-              "=========================================="
-          }
-
-          # Save values for later steps.
+          # Save paths for later steps.
           "RCLONE_EXE=$rclone" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
           "RCLONE_CONFIG=$config" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
-          "DRIVE_MOUNT=G:" |
+          "RDP_PROFILE=$profile" |
             Out-File `
-            -Append `
-            $env:GITHUB_ENV
+              -Append `
+              $env:GITHUB_ENV
 
-          Write-Host `
-            "Google Drive persistence initialized."
+          Write-Host "Google Drive configuration prepared for $user."
 
 
       # ========================================================
-      # START FILE MONITOR
+      # CREATE LOGON PERSISTENCE SCRIPT
       # ========================================================
 
-      - name: Start user-file persistence monitor
+      - name: Install persistence at RDP user logon
         shell: pwsh
         env:
           DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
         run: |
 
-          $monitor =
-            "$env:TEMP\persistent-rdp-monitor.ps1"
+          $user =
+            $env:RDP_USER
 
-          $rclone =
-            "$env:RCLONE_EXE"
+          $pass =
+            $env:RDP_PASS
+
+          $profile =
+            "C:\Users\$user"
 
           $config =
-            "$env:RCLONE_CONFIG"
+            "$profile\AppData\Roaming\rclone\rclone.conf"
 
-          if (
-            -not (Test-Path $rclone)
-          ) {
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
 
-            throw `
-              "rclone not available."
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistDir `
+            -Force |
+            Out-Null
+
+          $mountScript =
+            "$persistDir\Start-PersistentDrive.ps1"
+
+          $monitorScript =
+            "$persistDir\Start-PersistentMonitor.ps1"
+
+          # ----------------------------------------------------
+          # DRIVE MOUNT
+          # ----------------------------------------------------
+
+          @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone =
+              "$rclone"
+
+          `$config =
+              "$config"
+
+          `$log =
+              "C:\ProgramData\Persistent-RDP\rclone-mount.log"
+
+          Start-Sleep -Seconds 3
+
+          Get-Process rclone -ErrorAction SilentlyContinue |
+              Where-Object {
+                  `$_.Path -eq `$rclone
+              } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+
+          Start-Sleep -Seconds 2
+
+          if (-not (Test-Path "G:\")) {
+
+              `$args = @(
+                  "--config",
+                  `$config,
+                  "mount",
+                  "gdrive:.persistent-rdp/files",
+                  "G:",
+                  "--network-mode",
+                  "--volname",
+                  "Persistent-RDP",
+                  "--vfs-cache-mode",
+                  "full",
+                  "--vfs-cache-max-size",
+                  "10G",
+                  "--dir-cache-time",
+                  "30s",
+                  "--poll-interval",
+                  "30s",
+                  "--transfers",
+                  "4",
+                  "--checkers",
+                  "8",
+                  "--timeout",
+                  "1m",
+                  "--contimeout",
+                  "10s",
+                  "--log-file",
+                  `$log,
+                  "--log-level",
+                  "INFO"
+              )
+
+              Start-Process `
+                  -FilePath `$rclone `
+                  -ArgumentList `$args `
+                  -WindowStyle Hidden
           }
-
-          $userRoot =
-            $env:USERPROFILE
-
-          $marker =
-            "$env:TEMP\persistent-rdp-session-start.txt"
-
-          Get-Date |
+          "@ |
             Set-Content `
-              $marker `
+              -Path $mountScript `
               -Encoding UTF8
 
-          @'
-          param(
-              [string]$Rclone,
-              [string]$Config,
-              [string]$UserRoot,
-              [string]$Marker
-          )
+          # ----------------------------------------------------
+          # MONITOR
+          # ----------------------------------------------------
 
-          $ErrorActionPreference = "Continue"
+          @"
+          `$ErrorActionPreference = "Continue"
 
-          $remoteRoot =
+          `$rclone =
+              "$rclone"
+
+          `$config =
+              "$config"
+
+          `$userRoot =
+              "$profile"
+
+          `$remoteRoot =
               "gdrive:.persistent-rdp/files"
 
-          $manifestRemote =
-              "gdrive:.persistent-rdp/manifest.json"
+          `$stateDir =
+              "C:\ProgramData\Persistent-RDP"
 
-          $manifestLocal =
-              "$env:TEMP\persistent-rdp-live-manifest.json"
+          `$manifest =
+              "`$stateDir\manifest.json"
 
-          $stateLock =
-              "$env:TEMP\persistent-rdp-manifest.lock"
+          `$lock =
+              "`$stateDir\manifest.lock"
 
-          $watchRoots = @(
-              "$UserRoot\Desktop",
-              "$UserRoot\Documents",
-              "$UserRoot\Downloads",
-              "$UserRoot\Pictures",
-              "$UserRoot\Videos",
-              "$UserRoot\Music"
+          New-Item `
+              -ItemType Directory `
+              -Path `$stateDir `
+              -Force |
+              Out-Null
+
+          `$excluded = @(
+              "\AppData\"
           )
 
-          $excludedParts = @(
-              "\AppData\Local\Temp\",
-              "\AppData\Local\Microsoft\Edge\User Data\",
-              "\AppData\Local\Google\Chrome\User Data\",
-              "\AppData\Local\Packages\"
-          )
+          function Is-Excluded([string]`$path) {
 
-          function Is-Excluded(
-              [string]$Path
-          ) {
-
-              $full =
-                  [System.IO.Path]::GetFullPath(
-                      $Path
-                  )
-
-              foreach (
-                  $part in $excludedParts
-              ) {
+              foreach (`$x in `$excluded) {
 
                   if (
-                      $full.IndexOf(
-                          $part,
+                      `$path.IndexOf(
+                          `$x,
                           [System.StringComparison]::OrdinalIgnoreCase
                       ) -ge 0
                   ) {
-
-                      return $true
+                      return `$true
                   }
               }
 
-              return $false
+              return `$false
           }
 
-          function Relative-Path(
-              [string]$Path
-          ) {
+          function Relative([string]`$path) {
 
               return (
-                  $Path.Substring(
-                      $UserRoot.Length
+                  `$path.Substring(
+                      `$userRoot.Length
                   ).TrimStart(
                       "\"
                   ).Replace(
@@ -1338,403 +1135,362 @@ jobs:
               )
           }
 
-          function Load-Manifest {
+          function Upload([string]`$path) {
 
               if (
-                  Test-Path $manifestLocal
-              ) {
-
-                  try {
-
-                      return (
-                          Get-Content `
-                              $manifestLocal `
-                              -Raw |
-                          ConvertFrom-Json
-                      )
-
-                  }
-                  catch {}
-              }
-
-              return @{
-                  version = 1
-                  files = @()
-              }
-          }
-
-          function Save-Manifest(
-              $Manifest
-          ) {
-
-              $json =
-                  $Manifest |
-                  ConvertTo-Json `
-                    -Depth 20
-
-              $json |
-                  Set-Content `
-                    $manifestLocal `
-                    -Encoding UTF8
-
-              & $Rclone `
-                  --config $Config `
-                  copyto `
-                  $manifestLocal `
-                  $manifestRemote `
-                  --timeout 120s `
-                  --retries 3 `
-                  --low-level-retries 10 |
-                  Out-Null
-          }
-
-          function Add-Or-Update-Manifest(
-              [string]$Relative,
-              [long]$Size
-          ) {
-
-              while (
-                  Test-Path $stateLock
-              ) {
-
-                  Start-Sleep `
-                      -Milliseconds 100
-              }
-
-              New-Item `
-                  -ItemType File `
-                  -Path $stateLock `
-                  -Force |
-                  Out-Null
-
-              try {
-
-                  $manifest =
-                      Load-Manifest
-
-                  $arr =
-                      @(
-                          $manifest.files
-                      )
-
-                  $existing =
-                      $arr |
-                      Where-Object {
-                          $_.path -eq $Relative
-                      } |
-                      Select-Object -First 1
-
-                  if ($existing) {
-
-                      $existing.size =
-                          $Size
-
-                      $existing.updated_at =
-                          (Get-Date).ToUniversalTime().ToString(
-                              "o"
-                          )
-
-                  }
-                  else {
-
-                      $arr += [PSCustomObject]@{
-                          path =
-                              $Relative
-
-                          size =
-                              $Size
-
-                          created_at =
-                              (Get-Date).ToUniversalTime().ToString(
-                                  "o"
-                              )
-
-                          updated_at =
-                              (Get-Date).ToUniversalTime().ToString(
-                                  "o"
-                              )
-                      }
-                  }
-
-                  $manifest.files =
-                      @($arr)
-
-                  Save-Manifest `
-                      $manifest
-
-              }
-              finally {
-
-                  Remove-Item `
-                      $stateLock `
-                      -Force `
-                      -ErrorAction SilentlyContinue
-              }
-          }
-
-          function Upload-File(
-              [string]$Path
-          ) {
-
-              if (
-                  -not (Test-Path -LiteralPath $Path -PathType Leaf)
+                  -not (
+                      Test-Path `
+                          -LiteralPath `$path `
+                          -PathType Leaf
+                  )
               ) {
                   return
               }
 
               if (
-                  Is-Excluded $Path
+                  Is-Excluded `$path
               ) {
                   return
               }
 
               try {
 
-                  $item =
-                      Get-Item `
-                          -LiteralPath $Path `
-                          -ErrorAction Stop
-
-                  $relative =
-                      Relative-Path `
-                          $Path
+                  `$relative =
+                      Relative `$path
 
                   if (
                       [string]::IsNullOrWhiteSpace(
-                          $relative
+                          `$relative
                       )
                   ) {
                       return
                   }
 
-                  $remote =
-                      "$remoteRoot/$relative"
+                  `$remote =
+                      "`$remoteRoot/`$relative"
 
-                  Write-Host `
-                      "UPLOAD: $relative"
+                  Write-Host "PERSIST: `$relative"
 
-                  & $Rclone `
-                      --config $Config `
+                  & `$rclone `
+                      --config `$config `
                       copyto `
-                      $Path `
-                      $remote `
+                      `$path `
+                      `$remote `
                       --timeout 300s `
                       --retries 3 `
                       --low-level-retries 10
 
                   if (
-                      $LASTEXITCODE -eq 0
+                      `$LASTEXITCODE -eq 0
                   ) {
 
-                      Add-Or-Update-Manifest `
-                          $relative `
-                          $item.Length
-
-                      Write-Host `
-                          "SAVED: $relative"
-                  }
-                  else {
-
-                      Write-Warning `
-                          "Upload failed: $relative"
+                      Write-Host "SAVED: `$relative"
                   }
 
               }
               catch {
 
                   Write-Warning `
-                      "Monitor error: $($_.Exception.Message)"
+                      "Upload error: `$(`$_.Exception.Message)"
               }
           }
 
-          function Remove-File(
-              [string]$Path
-          ) {
+          function Delete-Remote([string]`$path) {
 
               if (
-                  Is-Excluded $Path
+                  Is-Excluded `$path
               ) {
                   return
               }
 
               try {
 
-                  $relative =
-                      Relative-Path `
-                          $Path
+                  `$relative =
+                      Relative `$path
 
-                  $remote =
-                      "$remoteRoot/$relative"
+                  `$remote =
+                      "`$remoteRoot/`$relative"
 
-                  Write-Host `
-                      "DELETE: $relative"
-
-                  & $Rclone `
-                      --config $Config `
+                  & `$rclone `
+                      --config `$config `
                       deletefile `
-                      $remote `
+                      `$remote `
                       --timeout 120s `
                       --retries 3 `
                       --low-level-retries 10 |
                       Out-Null
 
-                  $manifest =
-                      Load-Manifest
-
-                  $manifest.files =
-                      @(
-                          @(
-                              $manifest.files
-                          ) |
-                          Where-Object {
-                              $_.path -ne $relative
-                          }
-                      )
-
-                  Save-Manifest `
-                      $manifest
               }
-              catch {
-
-                  Write-Warning `
-                      "Delete sync failed: $($_.Exception.Message)"
-              }
+              catch {}
           }
 
-          $watchers = @()
+          # Monitor the complete user profile from login onward,
+          # except AppData which contains temporary/cache data.
 
-          foreach (
-              $root in $watchRoots
-          ) {
+          `$watcher =
+              New-Object `
+                  System.IO.FileSystemWatcher
 
-              if (
-                  -not (Test-Path $root)
-              ) {
-                  continue
-              }
+          `$watcher.Path =
+              `$userRoot
 
-              $watcher =
-                  New-Object `
-                      System.IO.FileSystemWatcher
+          `$watcher.IncludeSubdirectories =
+              `$true
 
-              $watcher.Path =
-                  $root
+          `$watcher.NotifyFilter =
+              [System.IO.NotifyFilters]::FileName `
+              -bor
+              [System.IO.NotifyFilters]::DirectoryName `
+              -bor
+              [System.IO.NotifyFilters]::LastWrite `
+              -bor
+              [System.IO.NotifyFilters]::Size
 
-              $watcher.IncludeSubdirectories =
-                  $true
+          `$watcher.EnableRaisingEvents =
+              `$true
 
-              $watcher.NotifyFilter =
-                  [System.IO.NotifyFilters]::FileName `
-                  -bor
-                  [System.IO.NotifyFilters]::DirectoryName `
-                  -bor
-                  [System.IO.NotifyFilters]::LastWrite `
-                  -bor
-                  [System.IO.NotifyFilters]::Size
+          Register-ObjectEvent `
+              `$watcher `
+              Created `
+              -Action {
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
 
-              $watcher.EnableRaisingEvents =
-                  $true
-
-              $createdAction = {
-
-                  Upload-File `
-                      $Event.SourceEventArgs.FullPath
-              }
-
-              $changedAction = {
+          Register-ObjectEvent `
+              `$watcher `
+              Changed `
+              -Action {
 
                   Start-Sleep `
-                      -Milliseconds 500
+                      -Milliseconds 700
 
-                  Upload-File `
-                      $Event.SourceEventArgs.FullPath
-              }
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
 
-              $renamedAction = {
+              } |
+              Out-Null
 
-                  Upload-File `
-                      $Event.SourceEventArgs.FullPath
-              }
+          Register-ObjectEvent `
+              `$watcher `
+              Renamed `
+              -Action {
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
 
-              $deletedAction = {
+          Register-ObjectEvent `
+              `$watcher `
+              Deleted `
+              -Action {
+                  Delete-Remote `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
 
-                  Remove-File `
-                      $Event.SourceEventArgs.FullPath
-              }
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP MONITOR ACTIVE"
+          Write-Host "Watching: `$userRoot"
+          Write-Host "Excluded: AppData"
+          Write-Host "=========================================="
 
-              Register-ObjectEvent `
-                  $watcher `
-                  Created `
-                  -Action $createdAction |
-                  Out-Null
-
-              Register-ObjectEvent `
-                  $watcher `
-                  Changed `
-                  -Action $changedAction |
-                  Out-Null
-
-              Register-ObjectEvent `
-                  $watcher `
-                  Renamed `
-                  -Action $renamedAction |
-                  Out-Null
-
-              Register-ObjectEvent `
-                  $watcher `
-                  Deleted `
-                  -Action $deletedAction |
-                  Out-Null
-
-              $watchers +=
-                  $watcher
-
-              Write-Host `
-                  "Monitoring: $root"
-          }
-
-          Write-Host `
-              "========================================"
-
-          Write-Host `
-              "PERSISTENT-RDP FILE MONITOR ACTIVE"
-
-          Write-Host `
-              "New/changed files are synced to Google Drive."
-
-          Write-Host `
-              "========================================"
-
-          while ($true) {
+          while (`$true) {
 
               Start-Sleep `
-                  -Seconds 5
+                  -Seconds 10
           }
-          '@ |
+          "@ |
             Set-Content `
-              -Path $monitor `
+              -Path $monitorScript `
               -Encoding UTF8
 
+          # ----------------------------------------------------
+          # RESTORE + LOGON TASKS
+          # ----------------------------------------------------
+
+          $restoreScript =
+            "$persistDir\Restore-PersistentFiles.ps1"
+
+          @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone =
+              "$rclone"
+
+          `$config =
+              "$config"
+
+          `$userRoot =
+              "$profile"
+
+          `$remoteRoot =
+              "gdrive:.persistent-rdp/files"
+
+          # Restore only into the user's profile.
+          # Existing local files are not deleted.
+
+          if (
+              Test-Path `$rclone
+          ) {
+
+              & `$rclone `
+                  --config `$config `
+                  copy `
+                  `$remoteRoot `
+                  `$userRoot `
+                  --create-empty-src-dirs `
+                  --timeout 300s `
+                  --retries 3 `
+                  --low-level-retries 10 `
+                  --exclude "AppData/**"
+          }
+
+          # Start the drive in this SAME interactive user session.
           Start-Process `
-            powershell.exe `
-            -ArgumentList `
+              powershell.exe `
+              -ArgumentList `
               "-NoProfile",
               "-ExecutionPolicy",
               "Bypass",
               "-File",
-              "`"$monitor`"",
-              "-Rclone",
-              "`"$rclone`"",
-              "-Config",
-              "`"$config`"",
-              "-UserRoot",
-              "`"$userRoot`"",
-              "-Marker",
-              "`"$marker`"" `
-            -WindowStyle Hidden
+              "`"$mountScript`"" `
+              -WindowStyle Hidden
 
-          Write-Host `
-            "FILE MONITOR STARTED."
+          Start-Sleep `
+              -Seconds 8
+
+          # Start file monitor in this SAME user session.
+          Start-Process `
+              powershell.exe `
+              -ArgumentList `
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-File",
+              "`"$monitorScript`"" `
+              -WindowStyle Hidden
+
+          Write-Host "Persistent-RDP logon initialization completed."
+          "@ |
+            Set-Content `
+              -Path $restoreScript `
+              -Encoding UTF8
+
+          # Remove old tasks if they exist.
+          Unregister-ScheduledTask `
+            -TaskName "Persistent-RDP-Logon" `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
+          $action =
+            New-ScheduledTaskAction `
+              -Execute "powershell.exe" `
+              -Argument `
+              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restoreScript`""
+
+          $trigger =
+            New-ScheduledTaskTrigger `
+              -AtLogOn `
+              -User $user
+
+          $principal =
+            New-ScheduledTaskPrincipal `
+              -UserId $user `
+              -LogonType Password `
+              -RunLevel Limited
+
+          $settings =
+            New-ScheduledTaskSettingsSet `
+              -AllowStartIfOnBatteries `
+              -DontStopIfGoingOnBatteries `
+              -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+          Register-ScheduledTask `
+            -TaskName "Persistent-RDP-Logon" `
+            -Action $action `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Settings $settings `
+            -Password $pass `
+            -Force |
+            Out-Null
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENCE INSTALLED"
+          Write-Host "=========================================="
+          Write-Host "User: $user"
+          Write-Host "Drive: G:"
+          Write-Host "Restore: at RDP login"
+          Write-Host "Monitor: at RDP login"
+          Write-Host "Scope: C:\Users\$user except AppData"
+          Write-Host "=========================================="
+
+
+      # ========================================================
+      # VERIFY PERSISTENCE SETUP
+      # ========================================================
+
+      - name: Verify persistence setup
+        run: |
+
+          $task =
+            Get-ScheduledTask `
+              -TaskName "Persistent-RDP-Logon" `
+              -ErrorAction SilentlyContinue
+
+          if ($task) {
+
+            Write-Host `
+              "Persistent-RDP logon task exists."
+
+            Write-Host `
+              "User: $env:RDP_USER"
+
+          }
+          else {
+
+            Write-Error `
+              "Persistent-RDP logon task was not created."
+
+            exit 1
+          }
+
+          if (
+            Test-Path `
+              "C:\Tools\rclone\rclone.exe"
+          ) {
+
+            Write-Host `
+              "rclone OK."
+
+          }
+          else {
+
+            Write-Error `
+              "rclone missing."
+
+            exit 1
+          }
+
+          if (
+            Test-Path `
+              "C:\Program Files (x86)\WinFsp"
+          ) {
+
+            Write-Host `
+              "WinFsp OK."
+
+          }
+          else {
+
+            Write-Error `
+              "WinFsp missing."
+
+            exit 1
+          }
 
 
       # ========================================================
@@ -1912,43 +1668,30 @@ jobs:
       # STORAGE STATUS
       # ========================================================
 
-      - name: Display Google Drive status
+      - name: Display Google Drive persistence status
         run: |
 
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "GOOGLE DRIVE PERSISTENCE"
+          Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
 
           Write-Host `
-            "Drive mount: G:"
+            "Drive will mount as G: after Yousif190 logs in."
 
           Write-Host `
-            "Remote: gdrive:"
+            "Persistent root: Google Drive/.persistent-rdp/files"
 
           Write-Host `
-            "Persistent files: gdrive:.persistent-rdp/files"
+            "User profile: C:\Users\$env:RDP_USER"
 
-          if (
-            Test-Path "G:\"
-          ) {
+          Write-Host `
+            "Monitor starts at RDP login."
 
-            Write-Host `
-              "G: IS VISIBLE IN FILE EXPLORER"
+          Write-Host `
+            "Files under AppData are excluded."
 
-            Get-ChildItem `
-              "G:\" `
-              -Force `
-              -ErrorAction SilentlyContinue |
-              Select-Object `
-                -First 20 `
-                Name
-          }
-          else {
-
-            Write-Warning `
-              "G: mount is not visible yet."
-          }
+          Write-Host "=========================================="
 
 
       # ========================================================
@@ -1974,10 +1717,10 @@ jobs:
               if (
                 "$env:CRD_ENABLED" -eq '1'
               ) {
-                '[CRD+RustDesk/RDP+Drive]'
+                '[CRD+RustDesk/RDP+Persistence]'
               }
               else {
-                '[RustDesk/RDP+Drive]'
+                '[RustDesk/RDP+Persistence]'
               }
 
             Write-Host (
@@ -1985,8 +1728,7 @@ jobs:
               (Get-Date).ToString("HH:mm:ss") +
               " ends at " +
               $end.ToString("HH:mm:ss") +
-              " | Google Drive: G: | RS URL: " +
-              $env:SCREENSHOT_URL
+              " | Persistent Drive: G:"
             )
 
             Start-Sleep `
@@ -1995,14 +1737,12 @@ jobs:
 
 
       # ========================================================
-      # FINAL DRIVE SYNC
+      # FINAL SAFETY SYNC
       # ========================================================
 
       - name: Final Google Drive sync
         if: always()
         shell: pwsh
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
         run: |
 
           $rclone =
@@ -2017,61 +1757,43 @@ jobs:
           ) {
 
             Write-Host `
-              "Final Google Drive sync starting..."
+              "Final persistence sync starting..."
 
             $userRoot =
-              $env:USERPROFILE
+              "$env:RDP_PROFILE"
 
-            $folders = @(
-              "$userRoot\Desktop",
-              "$userRoot\Documents",
-              "$userRoot\Downloads",
-              "$userRoot\Pictures",
-              "$userRoot\Videos",
-              "$userRoot\Music"
-            )
-
-            foreach (
-              $folder in $folders
+            if (
+              -not $userRoot
             ) {
-
-              if (
-                Test-Path $folder
-              ) {
-
-                $relative =
-                  $folder.Substring(
-                    $userRoot.Length
-                  ).TrimStart(
-                    "\"
-                  ).Replace(
-                    "\",
-                    "/"
-                  )
-
-                $remote =
-                  "gdrive:.persistent-rdp/files/$relative"
-
-                Write-Host `
-                  "Final sync: $relative"
-
-                & $rclone `
-                  --config $config `
-                  copy `
-                  $folder `
-                  $remote `
-                  --timeout 300s `
-                  --retries 3 `
-                  --low-level-retries 10 `
-                  --exclude "AppData/Local/Temp/**" `
-                  --exclude "AppData/Local/Microsoft/Edge/User Data/**" `
-                  --exclude "AppData/Local/Google/Chrome/User Data/**" `
-                  --exclude "AppData/Local/Packages/**"
-              }
+              $userRoot =
+                "$env:USERPROFILE"
             }
 
-            Write-Host `
-              "Final Google Drive sync completed."
+            # Final copy of the normal user profile.
+            # AppData is excluded.
+
+            & $rclone `
+              --config $config `
+              copy `
+              $userRoot `
+              "gdrive:.persistent-rdp/files" `
+              --create-empty-src-dirs `
+              --timeout 300s `
+              --retries 3 `
+              --low-level-retries 10 `
+              --exclude "AppData/**"
+
+            if ($LASTEXITCODE -eq 0) {
+
+              Write-Host `
+                "Final persistence sync completed."
+
+            }
+            else {
+
+              Write-Warning `
+                "Final persistence sync returned exit code $LASTEXITCODE."
+            }
 
           }
           else {
