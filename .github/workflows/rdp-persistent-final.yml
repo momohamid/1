@@ -3,57 +3,74 @@ name: RDP + Tailscale + RustDesk + (Optional) CRD (A) - Auto-Renew + Google Driv
 on:
   schedule:
     - cron: '0 */5 * * *'
+
   workflow_dispatch:
     inputs:
       ts_tailnet:
         description: "Tailscale tailnet (e.g. you@gmail.com)"
         required: true
+
       ts_api_key:
         description: "Tailscale API key (device admin, no Bearer)"
         required: true
+
       ts_authkey:
         description: "Tailscale Auth key (reusable or ephemeral)"
         required: true
+
       quick_test:
         description: "Run 5-minute test"
         type: boolean
         default: false
+
       runtime_minutes:
         description: "Runtime (max 360; default 300 when not test)"
         required: false
         default: "300"
+
       do_purge:
         description: "Purge bullet* devices at start (single instance only)"
         required: false
         default: "true"
+
       cycles:
         description: "0=stop after A; N=handoffs left incl this run"
         required: false
         default: "9999"
+
       rdp_count:
         description: "How many RDP instances (1-10) [ignored if CRD provided]"
         required: false
         default: "1"
+
       crd_code:
         description: >-
           Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
           If provided -> single instance; CRD launches first.
         required: false
         default: ""
+
       crd_pin:
         description: "CRD PIN (6–12 digits). Used when launching CRD to avoid interactive prompt."
         required: false
         default: "123456"
 
+
 permissions:
   contents: write
   actions: write
+
 
 defaults:
   run:
     shell: pwsh
 
+
 jobs:
+
+  # ============================================================
+  # SETUP
+  # ============================================================
 
   setup:
     runs-on: ubuntu-latest
@@ -66,14 +83,18 @@ jobs:
 
       - id: mk
         run: |
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
+
             $n = 1
+
           }
           else {
+
             $n = [int]"${{ inputs.rdp_count }}"
 
             if ($n -lt 1) {
@@ -88,6 +109,7 @@ jobs:
           $inc = @()
 
           for ($i = 1; $i -le $n; $i++) {
+
             $inc += @{
               id = $i
             }
@@ -95,7 +117,8 @@ jobs:
 
           $json = @{
             include = $inc
-          } | ConvertTo-Json -Compress
+          } |
+            ConvertTo-Json -Compress
 
           "matrix=$json" |
             Out-File `
@@ -103,12 +126,13 @@ jobs:
               -Append `
               -Encoding utf8
 
-          $multi = if ($n -gt 1) {
-            '1'
-          }
-          else {
-            '0'
-          }
+          $multi =
+            if ($n -gt 1) {
+              '1'
+            }
+            else {
+              '0'
+            }
 
           "multi=$multi" |
             Out-File `
@@ -116,6 +140,10 @@ jobs:
               -Append `
               -Encoding utf8
 
+
+  # ============================================================
+  # RDP
+  # ============================================================
 
   rdp:
     needs: setup
@@ -140,24 +168,29 @@ jobs:
 
       - name: Set CRD flag early
         run: |
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
           if ($crd.Length -gt 0) {
+
             "CRD_ENABLED=1" |
               Out-File `
               -Append `
               $env:GITHUB_ENV
+
           }
           else {
+
             "CRD_ENABLED=0" |
               Out-File `
               -Append `
               $env:GITHUB_ENV
           }
 
-          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+          Write-Host `
+            "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
 
       # ========================================================
@@ -167,6 +200,7 @@ jobs:
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
+
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -296,6 +330,7 @@ jobs:
             $raw -match `
             'remoting_start_host\.exe'
           ) {
+
             $isFull = $true
           }
 
@@ -446,6 +481,7 @@ jobs:
             $env:GITHUB_ENV
 
           function Yes($v) {
+
             "$v" -match `
               '^(?i:true|1|yes|on)$'
           }
@@ -511,6 +547,7 @@ jobs:
         run: |
 
           function Yes($v) {
+
             "$v" -match `
               '^(?i:true|1|yes|on)$'
           }
@@ -994,6 +1031,10 @@ jobs:
           $monitorScript =
             "$persistDir\Start-PersistentMonitor.ps1"
 
+          # ----------------------------------------------------
+          # DRIVE MOUNT
+          # ----------------------------------------------------
+
           @"
           `$ErrorActionPreference = "Continue"
 
@@ -1058,6 +1099,10 @@ jobs:
             Set-Content `
               -Path $mountScript `
               -Encoding UTF8
+
+          # ----------------------------------------------------
+          # MONITOR
+          # ----------------------------------------------------
 
           @"
           `$ErrorActionPreference = "Continue"
@@ -1291,6 +1336,10 @@ jobs:
             Set-Content `
               -Path $monitorScript `
               -Encoding UTF8
+
+          # ----------------------------------------------------
+          # RESTORE + LOGON TASKS
+          # ----------------------------------------------------
 
           $restoreScript =
             "$persistDir\Restore-PersistentFiles.ps1"
@@ -1677,257 +1726,4 @@ jobs:
       - name: Keep alive
         run: |
 
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
-
-          $end =
-            (Get-Date).AddMinutes(
-              $mins
-            )
-
-          while (
-            (Get-Date) -lt $end
-          ) {
-
-            $mode =
-              if (
-                "$env:CRD_ENABLED" -eq '1'
-              ) {
-                '[CRD+RustDesk/RDP+Persistence]'
-              }
-              else {
-                '[RustDesk/RDP+Persistence]'
-              }
-
-            Write-Host (
-              "$mode Heartbeat " +
-              (Get-Date).ToString("HH:mm:ss") +
-              " ends at " +
-              $end.ToString("HH:mm:ss") +
-              " | Persistent Drive: G:"
-            )
-
-            Start-Sleep `
-              -Seconds 60
-          }
-
-
-      # ========================================================
-      # FINAL SAFETY SYNC
-      # ========================================================
-
-      - name: Final Google Drive sync
-        if: always()
-        shell: pwsh
-        run: |
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $config =
-            "$env:RCLONE_CONFIG"
-
-          if (
-            (Test-Path $rclone) -and
-            (Test-Path $config)
-          ) {
-
-            Write-Host `
-              "Final persistence sync starting..."
-
-            $userRoot =
-              "$env:RDP_PROFILE"
-
-            if (
-              -not $userRoot
-            ) {
-              $userRoot =
-                "$env:USERPROFILE"
-            }
-
-            & $rclone `
-              --config $config `
-              copy `
-              $userRoot `
-              "gdrive:.persistent-rdp/files" `
-              --create-empty-src-dirs `
-              --timeout 300s `
-              --retries 3 `
-              --low-level-retries 10 `
-              --exclude "AppData/**"
-
-            if ($LASTEXITCODE -eq 0) {
-
-              Write-Host `
-                "Final persistence sync completed."
-
-            }
-            else {
-
-              Write-Warning `
-                "Final persistence sync returned exit code $LASTEXITCODE."
-            }
-
-          }
-          else {
-
-            Write-Host `
-              "rclone/config unavailable; skipping final sync."
-          }
-
-
-      # ========================================================
-      # DISPATCH NEXT OR STOP
-      # ========================================================
-
-      - name: Dispatch next or stop
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-
-          $cycles =
-            [int]"${{ inputs.cycles }}"
-
-          if ($cycles -gt 0) {
-
-            $next =
-              $cycles - 1
-
-            if ($next -le 0) {
-
-              $url =
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
-
-              $hdr = @{
-                Authorization =
-                  "Bearer $env:GH_TOKEN"
-
-                Accept =
-                  "application/vnd.github+json"
-
-                "X-GitHub-Api-Version" =
-                  "2022-11-28"
-
-                "Content-Type" =
-                  "application/json"
-              }
-
-              $payload = @{
-                ts_tailnet =
-                  "${{ inputs.ts_tailnet }}"
-
-                ts_api_key =
-                  "${{ inputs.ts_api_key }}"
-
-                base_prefix =
-                  "bullet"
-
-                max_count =
-                  "10"
-
-                dry_run =
-                  "false"
-              }
-
-              $body =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
-
-                  inputs =
-                    $payload
-                } |
-                ConvertTo-Json `
-                  -Depth 20
-
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $url `
-                -Headers $hdr `
-                -Body $body `
-                -ErrorAction Stop
-
-              Write-Host `
-                "Dispatched STOP."
-
-            }
-            else {
-
-              $payload = @{
-                ts_tailnet =
-                  "${{ inputs.ts_tailnet }}"
-
-                ts_api_key =
-                  "${{ inputs.ts_api_key }}"
-
-                ts_authkey =
-                  "${{ inputs.ts_authkey }}"
-
-                quick_test =
-                  "${{ inputs.quick_test }}"
-
-                runtime_minutes =
-                  "300"
-
-                do_purge =
-                  "true"
-
-                cycles =
-                  "$next"
-
-                rdp_count =
-                  "${{ inputs.rdp_count }}"
-
-                crd_code =
-                  "${{ inputs.crd_code }}"
-
-                crd_pin =
-                  "${{ inputs.crd_pin }}"
-              }
-
-              $url2 =
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
-
-              $hdr2 = @{
-                Authorization =
-                  "Bearer $env:GH_TOKEN"
-
-                Accept =
-                  "application/vnd.github+json"
-
-                "X-GitHub-Api-Version" =
-                  "2022-11-28"
-
-                "Content-Type" =
-                  "application/json"
-              }
-
-              $body2 =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
-
-                  inputs =
-                    $payload
-                } |
-                ConvertTo-Json `
-                  -Depth 20
-
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $url2 `
-                -Headers $hdr2 `
-                -Body $body2 `
-                -ErrorAction Stop
-
-              Write-Host `
-                "Dispatched Workflow A self-renew."
-            }
-
-          }
-          else {
-
-            Write-Host `
-              "No cycles configured. Done."
-          }
+          $mins
