@@ -37,8 +37,8 @@ on:
         default: "1"
       crd_code:
         description: >-
-          Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL
-          containing --code="4/...". If provided -> single instance; CRD launches first.
+          Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
+          If provided -> single instance; CRD launches first.
         required: false
         default: ""
       crd_pin:
@@ -55,10 +55,6 @@ defaults:
     shell: pwsh
 
 jobs:
-
-  # ============================================================
-  # SETUP
-  # ============================================================
 
   setup:
     runs-on: ubuntu-latest
@@ -108,7 +104,13 @@ jobs:
               -Append `
               -Encoding utf8
 
-          $multi = if ($n -gt 1) { '1' } else { '0' }
+          $multi =
+            if ($n -gt 1) {
+              '1'
+            }
+            else {
+              '0'
+            }
 
           "multi=$multi" |
             Out-File `
@@ -116,12 +118,9 @@ jobs:
               -Append `
               -Encoding utf8
 
-  # ============================================================
-  # RDP
-  # ============================================================
-
   rdp:
     needs: setup
+
     runs-on: windows-latest
 
     strategy:
@@ -132,13 +131,9 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: ${{ secrets.RDP_PASS }}
+      RDP_PASS: Yousif1990
 
     steps:
-
-      # ========================================================
-      # CRD FLAG
-      # ========================================================
 
       - name: Set CRD flag early
         run: |
@@ -161,10 +156,6 @@ jobs:
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      # ========================================================
-      # CRD INSTALL
-      # ========================================================
-
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
@@ -172,20 +163,28 @@ jobs:
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $exe)) {
+
             Write-Host "CRD host not found, attempting install..."
 
-            $exePath = "$env:TEMP\chromeremotedesktophost.exe"
+            $exePath =
+              "$env:TEMP\chromeremotedesktophost.exe"
+
             $ok = $false
 
             try {
               Invoke-WebRequest `
-                -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
-                -OutFile $exePath `
+                -Uri `
+                "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
+                -OutFile `
+                $exePath `
                 -ErrorAction Stop
 
               Start-Process `
-                -FilePath $exePath `
-                -ArgumentList "/silent", "/install" `
+                -FilePath `
+                $exePath `
+                -ArgumentList `
+                "/silent", `
+                "/install" `
                 -Wait
 
               Remove-Item `
@@ -196,25 +195,30 @@ jobs:
               $ok = $true
             }
             catch {
-              Write-Host "EXE installer failed: $($_.Exception.Message)"
+              Write-Host `
+                "EXE installer failed: $($_.Exception.Message)"
             }
 
             if (-not $ok) {
-              $msi = "$env:TEMP\chromeremotedesktophost.msi"
+
+              $msi =
+                "$env:TEMP\chromeremotedesktophost.msi"
 
               try {
                 Invoke-WebRequest `
-                  -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
-                  -OutFile $msi `
+                  -Uri `
+                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+                  -OutFile `
+                  $msi `
                   -ErrorAction Stop
 
                 Start-Process `
                   msiexec.exe `
                   -ArgumentList `
-                    "/i",
-                    "`"$msi`"",
-                    "/quiet",
-                    "/norestart" `
+                  "/i", `
+                  "`"$msi`"", `
+                  "/quiet", `
+                  "/norestart" `
                   -Wait
 
                 Remove-Item `
@@ -223,7 +227,8 @@ jobs:
                   -ErrorAction SilentlyContinue
               }
               catch {
-                Write-Error "CRD MSI fallback failed: $($_.Exception.Message)"
+                Write-Error `
+                  "CRD MSI fallback failed: $($_.Exception.Message)"
                 exit 1
               }
             }
@@ -232,10 +237,6 @@ jobs:
             Write-Host "CRD host already installed."
           }
 
-      # ========================================================
-      # CRD START
-      # ========================================================
-
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
@@ -243,10 +244,12 @@ jobs:
           ${{ inputs.crd_code }}
           '@.Trim()
 
-          $pin = "${{ inputs.crd_pin }}".Trim()
+          $pin =
+            "${{ inputs.crd_pin }}".Trim()
 
           if ($pin -notmatch '^\d{6,12}$') {
-            Write-Error "crd_pin must be 6–12 digits."
+            Write-Error `
+              "crd_pin must be 6–12 digits."
             exit 1
           }
 
@@ -254,47 +257,55 @@ jobs:
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $starter)) {
-            Write-Error "remoting_start_host.exe not found."
+            Write-Error `
+              "remoting_start_host.exe not found."
             exit 1
           }
 
           $isFull = $false
           $code = $null
 
-          if ($raw -match 'remoting_start_host.exe') {
+          if ($raw -match 'remoting_start_host\.exe') {
             $isFull = $true
           }
 
           if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
-            $code =
-              ([regex]::Match(
+            $code = (
+              [regex]::Match(
                 $raw,
                 '--code\s*=\s*"?([^"\s]+)'
-              )).Groups[1].Value
+              )
+            ).Groups[1].Value
           }
-          elseif ($raw -match '^4/') {
+          elseif ($raw -match '^4\/') {
             $code = $raw
           }
 
           if ($code) {
-            $redir =
-              "https://remotedesktop.google.com/*/oauthredirect"
 
-            $name = $Env:COMPUTERNAME
+            $redir =
+              "https://remotedesktop.google.com/_/oauthredirect"
+
+            $name =
+              $Env:COMPUTERNAME
 
             $args = @(
-              "--code=$code",
-              "--redirect-url=$redir",
-              "--name=$name",
-              "--pin=$pin"
+              "--code=""$code""",
+              "--redirect-url=""$redir""",
+              "--name=""$name""",
+              "--pin=""$pin"""
             )
 
             Start-Process `
-              -FilePath $starter `
-              -ArgumentList $args
+              -FilePath `
+              $starter `
+              -ArgumentList `
+              $args
           }
           elseif ($isFull) {
-            $tmp = "$env:TEMP\crd_full.ps1"
+
+            $tmp =
+              "$env:TEMP\crd_full.ps1"
 
             Set-Content `
               -Path $tmp `
@@ -306,24 +317,26 @@ jobs:
               -File $tmp
           }
           else {
-            Write-Error "Could not detect CRD code."
+            Write-Error `
+              "Could not detect CRD code."
             exit 1
           }
 
           Write-Host "CRD launch step completed."
 
-      # ========================================================
-      # CRD VERIFY
-      # ========================================================
-
       - name: Verify CRD registration
         if: env.CRD_ENABLED == '1'
         run: |
-          $svcName = "Chrome Remote Desktop Service"
-          $deadline = (Get-Date).AddSeconds(60)
+          $svcName =
+            "Chrome Remote Desktop Service"
+
+          $deadline =
+            (Get-Date).AddSeconds(60)
+
           $ok = $false
 
           while ((Get-Date) -lt $deadline) {
+
             $svc =
               Get-Service `
                 -Name $svcName `
@@ -331,7 +344,9 @@ jobs:
 
             if (
               $svc -and
-              $svc.Status -in @('Running', 'StartPending')
+              $svc.Status -in
+              'Running',
+              'StartPending'
             ) {
               $ok = $true
               break
@@ -341,23 +356,23 @@ jobs:
           }
 
           if ($ok) {
-            Write-Host "CRD service is running or starting."
+            Write-Host `
+              "CRD service is running or starting."
           }
           else {
-            Write-Warning "CRD service not running yet."
+            Write-Warning `
+              "CRD service not running yet."
           }
-
-      # ========================================================
-      # HOSTNAME / RUNTIME
-      # ========================================================
 
       - name: Decide hostname + runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) {
-            $hn = "bullet${{ matrix.id }}"
+            $hn =
+              "bullet${{ matrix.id }}"
           }
           else {
-            $hn = "bullet"
+            $hn =
+              "bullet"
           }
 
           "TS_HOSTNAME=$hn" |
@@ -369,7 +384,7 @@ jobs:
             "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          function IntOr($v, $d) {
+          function IntOr($v,$d) {
             if ("$v" -match '^\d+$') {
               [int]$v
             }
@@ -379,7 +394,10 @@ jobs:
           }
 
           $runtime =
-            IntOr "${{ inputs.runtime_minutes }}" 300
+            IntOr(
+              "${{ inputs.runtime_minutes }}",
+              300
+            )
 
           if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
@@ -401,11 +419,8 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "Hostname: $hn | Runtime: $runtime"
-
-      # ========================================================
-      # PURGE
-      # ========================================================
+          Write-Host `
+            "Hostname: $hn | Runtime: $runtime"
 
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
@@ -415,7 +430,9 @@ jobs:
           }
 
           if (Yes("${{ inputs.do_purge }}")) {
+
             try {
+
               $auth =
                 [Convert]::ToBase64String(
                   [Text.Encoding]::ASCII.GetBytes(
@@ -437,7 +454,12 @@ jobs:
                   }
 
               foreach ($d in $list.devices) {
-                if ($d.hostname -match '^bullet[0-9]*$') {
+
+                if (
+                  $d.hostname -match
+                  '^bullet[0-9]*$'
+                ) {
+
                   Invoke-RestMethod `
                     -Method Delete `
                     -Uri `
@@ -452,16 +474,13 @@ jobs:
               Write-Host "Purged bullet devices."
             }
             catch {
-              Write-Host "Purge warning: $($_.Exception.Message)"
+              Write-Host `
+                "Purge warning: $($_.Exception.Message)"
             }
           }
           else {
             Write-Host "Purge disabled."
           }
-
-      # ========================================================
-      # TAILSCALE
-      # ========================================================
 
       - name: Install + Up Tailscale
         run: |
@@ -478,7 +497,9 @@ jobs:
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (Test-Path $ts) {
-            & $ts logout | Out-Null
+
+            & $ts logout |
+              Out-Null
 
             & $ts up `
               --authkey "${{ inputs.ts_authkey }}" `
@@ -495,25 +516,22 @@ jobs:
                 -Append `
                 $env:GITHUB_ENV
 
-            Write-Host "Tailscale IPv4: $ip4"
+            Write-Host `
+              "Tailscale IPv4: $ip4"
           }
           else {
-            Write-Error "Tailscale not found."
+            Write-Error `
+              "Tailscale not found."
             exit 1
           }
 
-      # ========================================================
-      # RDP USER
-      # ========================================================
-
       - name: Enable RDP user + firewall
         run: |
-          $u = $env:RDP_USER
-          $p = $env:RDP_PASS
+          $u =
+            $env:RDP_USER
 
-          if ([string]::IsNullOrWhiteSpace($p)) {
-            throw "RDP_PASS secret is missing."
-          }
+          $p =
+            $env:RDP_PASS
 
           $sec =
             ConvertTo-SecureString `
@@ -528,12 +546,14 @@ jobs:
                 -ErrorAction SilentlyContinue
             )
           ) {
+
             New-LocalUser `
               -Name $u `
               -Password $sec `
               -AccountNeverExpires
           }
           else {
+
             Set-LocalUser `
               -Name $u `
               -Password $sec `
@@ -567,13 +587,11 @@ jobs:
           Write-Host "Host: $env:TS_HOSTNAME"
           Write-Host "IP: $env:TAILSCALE_IP"
 
-      # ========================================================
-      # PYTHON
-      # ========================================================
-
       - name: Install Python libs
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install `
+            --upgrade `
+            pip
 
           python -m pip install `
             --force-reinstall `
@@ -584,17 +602,16 @@ jobs:
           python -c `
             "import pyautogui, pynput, PIL; print('Python libs OK')"
 
-      # ========================================================
-      # RCLONE + WINFSP
-      # ========================================================
-
       - name: Install rclone + WinFsp
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $rcloneDir = "C:\Tools\rclone"
-          $rcloneExe = "$rcloneDir\rclone.exe"
+          $rcloneDir =
+            "C:\Tools\rclone"
+
+          $rcloneExe =
+            "$rcloneDir\rclone.exe"
 
           New-Item `
             -ItemType Directory `
@@ -603,14 +620,26 @@ jobs:
             Out-Null
 
           if (-not (Test-Path $rcloneExe)) {
-            $zip = "$env:TEMP\rclone.zip"
-            $extract = "$env:TEMP\rclone_extract"
+
+            Write-Host "Downloading rclone..."
+
+            $zip =
+              "$env:TEMP\rclone.zip"
+
+            $extract =
+              "$env:TEMP\rclone_extract"
 
             Invoke-WebRequest `
-              -Uri "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-              -OutFile $zip `
+              -Uri `
+              "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+              -OutFile `
+              $zip `
               -UseBasicParsing `
               -ErrorAction Stop
+
+            if (-not (Test-Path $zip)) {
+              throw "rclone download failed."
+            }
 
             Remove-Item `
               $extract `
@@ -639,8 +668,16 @@ jobs:
               $rcloneExe `
               -Force
 
-            Remove-Item $zip -Force -ErrorAction SilentlyContinue
-            Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item `
+              $zip `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+            Remove-Item `
+              $extract `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
           }
 
           if (-not (Test-Path $rcloneExe)) {
@@ -653,32 +690,53 @@ jobs:
             throw "rclone executable test failed."
           }
 
-          $winfspPath = "C:\Program Files (x86)\WinFsp"
-          $winfspMsi = "$env:TEMP\winfsp-2.1.25156.msi"
+          $winfspPath =
+            "C:\Program Files (x86)\WinFsp"
+
+          $winfspMsi =
+            "$env:TEMP\winfsp-2.1.25156.msi"
 
           if (-not (Test-Path $winfspPath)) {
+
+            Write-Host "WinFsp not found."
+            Write-Host "Downloading WinFsp 2.1.25156..."
+
             $winfspUrl =
               "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
 
             Invoke-WebRequest `
-              -Uri $winfspUrl `
-              -OutFile $winfspMsi `
+              -Uri `
+              $winfspUrl `
+              -OutFile `
+              $winfspMsi `
               -UseBasicParsing `
               -ErrorAction Stop
+
+            if (-not (Test-Path $winfspMsi)) {
+              throw "WinFsp MSI was not downloaded."
+            }
+
+            $size =
+              (Get-Item $winfspMsi).Length
+
+            if ($size -lt 1000000) {
+              throw "WinFsp MSI appears invalid or incomplete. Size: $size bytes"
+            }
 
             $proc =
               Start-Process `
                 msiexec.exe `
                 -ArgumentList `
-                  "/i",
-                  "`"$winfspMsi`"",
-                  "/quiet",
-                  "/norestart" `
+                "/i", `
+                "`"$winfspMsi`"", `
+                "/quiet", `
+                "/norestart" `
                 -Wait `
                 -PassThru
 
             if ($proc.ExitCode -ne 0) {
-              throw "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
+              throw `
+                "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
             }
 
             Remove-Item `
@@ -693,11 +751,7 @@ jobs:
 
           Write-Host "rclone + WinFsp READY"
 
-      # ========================================================
-      # GOOGLE DRIVE - FIVE TOKENS
-      # ========================================================
-
-      - name: Prepare Google Drive persistence
+      - name: Prepare Google Drive persistence - 5 drives
         shell: pwsh
         env:
           DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
@@ -711,18 +765,8 @@ jobs:
           $rclone =
             "C:\Tools\rclone\rclone.exe"
 
-          if (-not (Test-Path $rclone)) {
-            throw "rclone.exe missing."
-          }
-
-          $user = $env:RDP_USER
-          $profile = "C:\Users\$user"
-
           $configDir =
-            "$profile\AppData\Roaming\rclone"
-
-          $config =
-            "$configDir\rclone.conf"
+            "C:\ProgramData\Persistent-RDP\rclone"
 
           New-Item `
             -ItemType Directory `
@@ -730,105 +774,91 @@ jobs:
             -Force |
             Out-Null
 
-          $tokens = @(
+          $driveDefinitions = @(
             @{
-              Name = "gdrive"
-              Drive = "G:"
+              Secret = "DRIVE_TOKEN"
               Token = $env:DRIVE_TOKEN
+              Remote = "gdrive_g"
+              Letter = "G:"
             },
             @{
-              Name = "gdrive1"
-              Drive = "H:"
+              Secret = "DRIVE_TOKEN1"
               Token = $env:DRIVE_TOKEN1
+              Remote = "gdrive_h"
+              Letter = "H:"
             },
             @{
-              Name = "gdrive2"
-              Drive = "I:"
+              Secret = "DRIVE_TOKEN2"
               Token = $env:DRIVE_TOKEN2
+              Remote = "gdrive_i"
+              Letter = "I:"
             },
             @{
-              Name = "gdrive3"
-              Drive = "J:"
+              Secret = "DRIVE_TOKEN3"
               Token = $env:DRIVE_TOKEN3
+              Remote = "gdrive_j"
+              Letter = "J:"
             },
             @{
-              Name = "gdrive4"
-              Drive = "K:"
+              Secret = "DRIVE_TOKEN4"
               Token = $env:DRIVE_TOKEN4
+              Remote = "gdrive_k"
+              Letter = "K:"
             }
           )
 
-          $sections = @()
+          foreach ($item in $driveDefinitions) {
 
-          foreach ($item in $tokens) {
             if ([string]::IsNullOrWhiteSpace($item.Token)) {
-              throw "$($item.Name) token secret is missing."
+              throw "$($item.Secret) secret is missing."
             }
 
-            try {
-              $obj =
-                $item.Token.Trim() |
-                ConvertFrom-Json
-            }
-            catch {
-              throw "$($item.Name) token is not valid JSON."
+            $tokenObject =
+              $item.Token.Trim() |
+              ConvertFrom-Json
+
+            if (-not $tokenObject.access_token) {
+              throw "$($item.Secret) does not contain access_token."
             }
 
-            if (-not $obj.access_token) {
-              throw "$($item.Name) token does not contain access_token."
-            }
+            $config =
+              "$configDir\$($item.Remote).conf"
 
             $tokenJson =
-              $obj |
+              $tokenObject |
               ConvertTo-Json -Compress
 
-            $sections += @"
-[$($item.Name)]
-type = drive
-scope = drive
-token = $tokenJson
+            @"
+          [$($item.Remote)]
+          type = drive
+          scope = drive
+          token = $tokenJson
+          "@ |
+              Set-Content `
+                -Path $config `
+                -Encoding UTF8
 
-"@
-          }
-
-          $sections -join "`r`n" |
-            Set-Content `
-              -Path $config `
-              -Encoding UTF8
-
-          icacls `
-            $configDir `
-            /grant "${user}:(OI)(CI)F" `
-            /T `
-            /C |
-            Out-Null
-
-          foreach ($item in $tokens) {
-            Write-Host "Testing $($item.Name)..."
+            Write-Host "Testing $($item.Secret)..."
 
             & $rclone `
               --config $config `
               lsd `
-              "$($item.Name):" `
+              "$($item.Remote):" `
               --timeout 60s
 
             if ($LASTEXITCODE -ne 0) {
-              throw "$($item.Name) Google Drive authentication failed."
+              throw "Google Drive authentication failed for $($item.Secret)."
             }
 
             & $rclone `
               --config $config `
               mkdir `
-              "$($item.Name):.persistent-rdp"
+              "$($item.Remote):.persistent-rdp"
 
             & $rclone `
               --config $config `
               mkdir `
-              "$($item.Name):.persistent-rdp/files"
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to prepare $($item.Name) storage."
-            }
+              "$($item.Remote):.persistent-rdp/files"
           }
 
           "RCLONE_EXE=$rclone" |
@@ -836,32 +866,30 @@ token = $tokenJson
               -Append `
               $env:GITHUB_ENV
 
-          "RCLONE_CONFIG=$config" |
+          "RCLONE_CONFIG_DIR=$configDir" |
             Out-File `
               -Append `
               $env:GITHUB_ENV
 
-          "RDP_PROFILE=$profile" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host "Five Google Drive configurations prepared."
-
-      # ========================================================
-      # CREATE FIVE-DRIVE PERSISTENCE
-      # ========================================================
-
-      - name: Install persistence at RDP user logon
+      - name: Install five-drive persistence at RDP user logon
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $user = $env:RDP_USER
-          $profile = "C:\Users\$user"
-          $config = "$profile\AppData\Roaming\rclone\rclone.conf"
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $persistDir = "C:\ProgramData\Persistent-RDP"
+          $user =
+            $env:RDP_USER
+
+          $pass =
+            $env:RDP_PASS
+
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          $configDir =
+            "$persistDir\rclone"
+
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
 
           New-Item `
             -ItemType Directory `
@@ -873,142 +901,361 @@ token = $tokenJson
             "$persistDir\Start-PersistentDrives.ps1"
 
           @"
-`$ErrorActionPreference = "Continue"
+          `$ErrorActionPreference = "Continue"
 
-`$rclone = "$rclone"
-`$config = "$config"
-`$log = "$persistDir\rclone-mount.log"
+          `$rclone =
+              "$rclone"
 
-Start-Sleep -Seconds 3
+          `$drives = @(
+              @{
+                  Config = "$configDir\gdrive_g.conf"
+                  Remote = "gdrive_g:.persistent-rdp/files"
+                  Letter = "G:"
+              },
+              @{
+                  Config = "$configDir\gdrive_h.conf"
+                  Remote = "gdrive_h:.persistent-rdp/files"
+                  Letter = "H:"
+              },
+              @{
+                  Config = "$configDir\gdrive_i.conf"
+                  Remote = "gdrive_i:.persistent-rdp/files"
+                  Letter = "I:"
+              },
+              @{
+                  Config = "$configDir\gdrive_j.conf"
+                  Remote = "gdrive_j:.persistent-rdp/files"
+                  Letter = "J:"
+              },
+              @{
+                  Config = "$configDir\gdrive_k.conf"
+                  Remote = "gdrive_k:.persistent-rdp/files"
+                  Letter = "K:"
+              }
+          )
 
-Get-Process rclone -ErrorAction SilentlyContinue |
-  Where-Object {
-    `$_.Path -eq `$rclone
-  } |
-  Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
 
-Start-Sleep -Seconds 2
+          foreach (`$drive in `$drives) {
 
-`$mounts = @(
-  @{ Remote = "gdrive:.persistent-rdp/files"; Drive = "G:"; Name = "Persistent-RDP-G" },
-  @{ Remote = "gdrive1:.persistent-rdp/files"; Drive = "H:"; Name = "Persistent-RDP-H" },
-  @{ Remote = "gdrive2:.persistent-rdp/files"; Drive = "I:"; Name = "Persistent-RDP-I" },
-  @{ Remote = "gdrive3:.persistent-rdp/files"; Drive = "J:"; Name = "Persistent-RDP-J" },
-  @{ Remote = "gdrive4:.persistent-rdp/files"; Drive = "K:"; Name = "Persistent-RDP-K" }
-)
+              if (-not (Test-Path `$drive.Config)) {
+                  Write-Warning "Missing rclone config: `$(`$drive.Config)"
+                  continue
+              }
 
-foreach (`$m in `$mounts) {
+              if (-not (Test-Path "`$(`$drive.Letter)\")) {
 
-  if (-not (Test-Path "`$(`$m.Drive)\")) {
+                  `$args = @(
+                      "--config",
+                      `$drive.Config,
+                      "mount",
+                      `$drive.Remote,
+                      `$drive.Letter,
+                      "--network-mode",
+                      "--volname",
+                      "Persistent-RDP-`$(`$drive.Letter.TrimEnd(':'))",
+                      "--vfs-cache-mode",
+                      "full",
+                      "--vfs-cache-max-size",
+                      "10G",
+                      "--dir-cache-time",
+                      "30s",
+                      "--poll-interval",
+                      "30s",
+                      "--transfers",
+                      "4",
+                      "--checkers",
+                      "8",
+                      "--timeout",
+                      "1m",
+                      "--contimeout",
+                      "10s",
+                      "--log-file",
+                      "C:\ProgramData\Persistent-RDP\rclone-`$(`$drive.Letter.TrimEnd(':')).log",
+                      "--log-level",
+                      "INFO"
+                  )
 
-    `$args = @(
-      "--config",
-      `$config,
-      "mount",
-      `$m.Remote,
-      `$m.Drive,
-      "--network-mode",
-      "--volname",
-      `$m.Name,
-      "--vfs-cache-mode",
-      "full",
-      "--vfs-cache-max-size",
-      "10G",
-      "--dir-cache-time",
-      "30s",
-      "--poll-interval",
-      "30s",
-      "--transfers",
-      "4",
-      "--checkers",
-      "8",
-      "--timeout",
-      "1m",
-      "--contimeout",
-      "10s",
-      "--log-file",
-      `$log,
-      "--log-level",
-      "INFO"
-    )
+                  Start-Process `
+                      -FilePath `$rclone `
+                      -ArgumentList `$args `
+                      -WindowStyle Hidden
+              }
 
-    Start-Process `
-      -FilePath `$rclone `
-      -ArgumentList `$args `
-      -WindowStyle Hidden
-
-    Start-Sleep -Seconds 3
-  }
-}
-"@ |
+              Start-Sleep -Seconds 2
+          }
+          "@ |
             Set-Content `
               -Path $mountScript `
               -Encoding UTF8
 
-          # ====================================================
-          # RESTORE SCRIPT
-          # ====================================================
+          $monitorScript =
+            "$persistDir\Start-PersistentMonitor.ps1"
+
+          @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone =
+              "$rclone"
+
+          `$config =
+              "$configDir\gdrive_g.conf"
+
+          `$userRoot =
+              "C:\Users\$user"
+
+          `$remoteRoot =
+              "gdrive_g:.persistent-rdp/files"
+
+          # AppData IS INCLUDED.
+          `$excluded = @()
+
+          function Is-Excluded([string]`$path) {
+              foreach (`$x in `$excluded) {
+                  if (`$path.IndexOf(
+                      `$x,
+                      [System.StringComparison]::OrdinalIgnoreCase
+                  ) -ge 0) {
+                      return `$true
+                  }
+              }
+              return `$false
+          }
+
+          function Relative([string]`$path) {
+              if (`$path.Length -le `$userRoot.Length) {
+                  return ""
+              }
+
+              return (
+                  `$path.Substring(
+                      `$userRoot.Length
+                  ).TrimStart(
+                      "\"
+                  ).Replace(
+                      "\",
+                      "/"
+                  )
+              )
+          }
+
+          function Upload([string]`$path) {
+
+              if (-not (
+                  Test-Path `
+                      -LiteralPath `$path `
+                      -PathType Leaf
+              )) {
+                  return
+              }
+
+              if (Is-Excluded `$path) {
+                  return
+              }
+
+              try {
+
+                  `$relative =
+                      Relative `$path
+
+                  if ([string]::IsNullOrWhiteSpace(`$relative)) {
+                      return
+                  }
+
+                  `$remote =
+                      "`$remoteRoot/`$relative"
+
+                  & `$rclone `
+                      --config `$config `
+                      copyto `
+                      `$path `
+                      `$remote `
+                      --timeout 300s `
+                      --retries 3 `
+                      --low-level-retries 10
+
+              }
+              catch {
+                  Write-Warning `
+                      "Upload error: `$(`$_.Exception.Message)"
+              }
+          }
+
+          function Delete-Remote([string]`$path) {
+
+              if (Is-Excluded `$path) {
+                  return
+              }
+
+              try {
+
+                  `$relative =
+                      Relative `$path
+
+                  if ([string]::IsNullOrWhiteSpace(`$relative)) {
+                      return
+                  }
+
+                  `$remote =
+                      "`$remoteRoot/`$relative"
+
+                  & `$rclone `
+                      --config `$config `
+                      deletefile `
+                      `$remote `
+                      --timeout 120s `
+                      --retries 3 `
+                      --low-level-retries 10 |
+                      Out-Null
+              }
+              catch {}
+          }
+
+          `$watcher =
+              New-Object `
+                  System.IO.FileSystemWatcher
+
+          `$watcher.Path =
+              `$userRoot
+
+          `$watcher.IncludeSubdirectories =
+              `$true
+
+          `$watcher.NotifyFilter =
+              [System.IO.NotifyFilters]::FileName `
+              -bor
+              [System.IO.NotifyFilters]::DirectoryName `
+              -bor
+              [System.IO.NotifyFilters]::LastWrite `
+              -bor
+              [System.IO.NotifyFilters]::Size
+
+          `$watcher.EnableRaisingEvents =
+              `$true
+
+          Register-ObjectEvent `
+              `$watcher `
+              Created `
+              -Action {
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
+
+          Register-ObjectEvent `
+              `$watcher `
+              Changed `
+              -Action {
+                  Start-Sleep -Milliseconds 700
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
+
+          Register-ObjectEvent `
+              `$watcher `
+              Renamed `
+              -Action {
+                  Upload `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
+
+          Register-ObjectEvent `
+              `$watcher `
+              Deleted `
+              -Action {
+                  Delete-Remote `
+                      `$Event.SourceEventArgs.FullPath
+              } |
+              Out-Null
+
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP MONITOR ACTIVE"
+          Write-Host "Watching: `$userRoot"
+          Write-Host "Primary persistence drive: G:"
+          Write-Host "AppData: INCLUDED"
+          Write-Host "=========================================="
+
+          while (`$true) {
+              Start-Sleep -Seconds 10
+          }
+          "@ |
+            Set-Content `
+              -Path $monitorScript `
+              -Encoding UTF8
 
           $restoreScript =
             "$persistDir\Restore-PersistentFiles.ps1"
 
           @"
-`$ErrorActionPreference = "Continue"
+          `$ErrorActionPreference = "Continue"
 
-`$rclone = "$rclone"
-`$config = "$config"
-`$userRoot = "$profile"
+          `$rclone =
+              "$rclone"
 
-`$mountScript = "$mountScript"
+          `$config =
+              "$configDir\gdrive_g.conf"
 
-`$remotes = @(
-  "gdrive:.persistent-rdp/files",
-  "gdrive1:.persistent-rdp/files",
-  "gdrive2:.persistent-rdp/files",
-  "gdrive3:.persistent-rdp/files",
-  "gdrive4:.persistent-rdp/files"
-)
+          `$userRoot =
+              "C:\Users\$user"
 
-if (Test-Path `$rclone) {
+          `$remoteRoot =
+              "gdrive_g:.persistent-rdp/files"
 
-  foreach (`$remote in `$remotes) {
+          `$mountScript =
+              "$mountScript"
 
-    & `$rclone `
-      --config `$config `
-      copy `
-      `$remote `
-      `$userRoot `
-      --create-empty-src-dirs `
-      --timeout 300s `
-      --retries 3 `
-      --low-level-retries 10 `
-      --exclude "AppData/**"
+          `$monitorScript =
+              "$monitorScript"
 
-    if (`$LASTEXITCODE -ne 0) {
-      Write-Warning "Restore failed for `$remote"
-    }
-  }
-}
+          if (
+              (Test-Path `$rclone) -and
+              (Test-Path `$config)
+          ) {
 
-Start-Process `
-  powershell.exe `
-  -ArgumentList `
-    "-NoProfile",
-    "-ExecutionPolicy",
-    "Bypass",
-    "-File",
-    "`"`$mountScript`"" `
-  -WindowStyle Hidden
+              Write-Host "Restoring persistent user files including AppData..."
 
-Write-Host "Persistent-RDP five-drive initialization completed."
-"@ |
+              & `$rclone `
+                  --config `$config `
+                  copy `
+                  `$remoteRoot `
+                  `$userRoot `
+                  --create-empty-src-dirs `
+                  --timeout 300s `
+                  --retries 3 `
+                  --low-level-retries 10
+          }
+
+          Start-Process `
+              powershell.exe `
+              -ArgumentList `
+              "-NoProfile", `
+              "-ExecutionPolicy", `
+              "Bypass", `
+              "-File", `
+              "`"`$mountScript`"" `
+              -WindowStyle Hidden
+
+          Start-Sleep `
+              -Seconds 10
+
+          Start-Process `
+              powershell.exe `
+              -ArgumentList `
+              "-NoProfile", `
+              "-ExecutionPolicy", `
+              "Bypass", `
+              "-File", `
+              "`"`$monitorScript`"" `
+              -WindowStyle Hidden
+
+          Write-Host `
+              "Persistent-RDP logon initialization completed."
+          "@ |
             Set-Content `
               -Path $restoreScript `
               -Encoding UTF8
-
-          # ====================================================
-          # SCHEDULED TASK
-          # ====================================================
 
           Unregister-ScheduledTask `
             -TaskName "Persistent-RDP-Logon" `
@@ -1019,7 +1266,7 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             New-ScheduledTaskAction `
               -Execute "powershell.exe" `
               -Argument `
-                "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restoreScript`""
+              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restoreScript`""
 
           $trigger =
             New-ScheduledTaskTrigger `
@@ -1037,27 +1284,19 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             -Action $action `
             -Trigger $trigger `
             -User $user `
-            -Password $env:RDP_PASS `
+            -Password $pass `
             -RunLevel Limited `
             -Settings $settings `
             -Force |
             Out-Null
 
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "FIVE-DRIVE PERSISTENCE INSTALLED"
-          Write-Host "=========================================="
-          Write-Host "G: = DRIVE_TOKEN"
-          Write-Host "H: = DRIVE_TOKEN1"
-          Write-Host "I: = DRIVE_TOKEN2"
-          Write-Host "J: = DRIVE_TOKEN3"
-          Write-Host "K: = DRIVE_TOKEN4"
-          Write-Host "Restore: at RDP login"
-          Write-Host "=========================================="
-
-      # ========================================================
-      # VERIFY
-      # ========================================================
+          Write-Host "PERSISTENCE INSTALLED"
+          Write-Host "G: DRIVE_TOKEN"
+          Write-Host "H: DRIVE_TOKEN1"
+          Write-Host "I: DRIVE_TOKEN2"
+          Write-Host "J: DRIVE_TOKEN3"
+          Write-Host "K: DRIVE_TOKEN4"
+          Write-Host "AppData: INCLUDED"
 
       - name: Verify persistence setup
         run: |
@@ -1070,7 +1309,8 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             Write-Host "Persistent-RDP logon task exists."
           }
           else {
-            Write-Error "Persistent-RDP logon task was not created."
+            Write-Error `
+              "Persistent-RDP logon task was not created."
             exit 1
           }
 
@@ -1090,17 +1330,22 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             exit 1
           }
 
-          if (Test-Path "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\rclone.conf") {
-            Write-Host "rclone config OK."
-          }
-          else {
-            Write-Error "rclone config missing."
-            exit 1
+          $configs = @(
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf"
+          )
+
+          foreach ($config in $configs) {
+            if (-not (Test-Path $config)) {
+              Write-Error "Missing Google Drive config: $config"
+              exit 1
+            }
           }
 
-      # ========================================================
-      # RUSTDESK
-      # ========================================================
+          Write-Host "All five Google Drive configs OK."
 
       - name: Install RustDesk
         run: |
@@ -1108,6 +1353,7 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (-not (Test-Path $rdExe)) {
+
             $rdUrl =
               "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
 
@@ -1115,18 +1361,20 @@ Write-Host "Persistent-RDP five-drive initialization completed."
               "$env:TEMP\rustdesk.msi"
 
             Invoke-WebRequest `
-              -Uri $rdUrl `
-              -OutFile $installerPath `
+              -Uri `
+              $rdUrl `
+              -OutFile `
+              $installerPath `
               -UseBasicParsing `
               -ErrorAction Stop
 
             Start-Process `
               msiexec.exe `
               -ArgumentList `
-                "/i",
-                "`"$installerPath`"",
-                "/quiet",
-                "/norestart" `
+              "/i", `
+              "`"$installerPath`"", `
+              "/quiet", `
+              "/norestart" `
               -Wait
 
             Remove-Item `
@@ -1139,10 +1387,6 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             throw "RustDesk installation failed."
           }
 
-      # ========================================================
-      # RUSTDESK PORTS
-      # ========================================================
-
       - name: Open RustDesk ports
         run: |
           for (
@@ -1150,7 +1394,9 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             $p -le 21119;
             $p++
           ) {
-            $name = "APP-PORT-TCP-$p"
+
+            $name =
+              "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
               name=$name `
@@ -1164,7 +1410,8 @@ Write-Host "Persistent-RDP five-drive initialization completed."
               localport=$p
           }
 
-          $udpName = "APP-PORT-UDP-21116"
+          $udpName =
+            "APP-PORT-UDP-21116"
 
           netsh advfirewall firewall delete rule `
             name=$udpName `
@@ -1176,10 +1423,6 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             action=allow `
             protocol=UDP `
             localport=21116
-
-      # ========================================================
-      # RUSTDESK + SCREENSHOT
-      # ========================================================
 
       - name: Launch RustDesk + Screenshot
         run: |
@@ -1204,7 +1447,7 @@ Write-Host "Persistent-RDP five-drive initialization completed."
           $bitmap =
             New-Object `
               System.Drawing.Bitmap `
-              $bounds.Width,
+              $bounds.Width, `
               $bounds.Height
 
           $graphics =
@@ -1224,12 +1467,12 @@ Write-Host "Persistent-RDP five-drive initialization completed."
           $graphics.Dispose()
           $bitmap.Dispose()
 
-          try {
-            $curlResult =
-              curl `
-                -F "file=@$screenshotPath" `
-                https://store1.gofile.io/uploadFile
+          $curlResult =
+            curl `
+              -F "file=@$screenshotPath" `
+              https://store1.gofile.io/uploadFile
 
+          try {
             $json =
               $curlResult |
               ConvertFrom-Json
@@ -1245,29 +1488,30 @@ Write-Host "Persistent-RDP five-drive initialization completed."
             Write-Warning "Screenshot upload failed."
           }
 
-      # ========================================================
-      # STORAGE STATUS
-      # ========================================================
-
       - name: Display Google Drive persistence status
         run: |
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "PERSISTENT-RDP STORAGE"
           Write-Host "=========================================="
-          Write-Host "G: = DRIVE_TOKEN"
-          Write-Host "H: = DRIVE_TOKEN1"
-          Write-Host "I: = DRIVE_TOKEN2"
-          Write-Host "J: = DRIVE_TOKEN3"
-          Write-Host "K: = DRIVE_TOKEN4"
-          Write-Host "Drives mount after Yousif190 logs in."
-          Write-Host "Persistent root: .persistent-rdp/files"
-          Write-Host "AppData excluded from sync."
-          Write-Host "=========================================="
 
-      # ========================================================
-      # KEEP ALIVE
-      # ========================================================
+          Write-Host "Drive G: = DRIVE_TOKEN"
+          Write-Host "Drive H: = DRIVE_TOKEN1"
+          Write-Host "Drive I: = DRIVE_TOKEN2"
+          Write-Host "Drive J: = DRIVE_TOKEN3"
+          Write-Host "Drive K: = DRIVE_TOKEN4"
+
+          Write-Host "All five drives mount after Yousif190 logs in."
+
+          Write-Host "G: persistent root: Google Drive/.persistent-rdp/files"
+          Write-Host "H: persistent root: Google Drive/.persistent-rdp/files"
+          Write-Host "I: persistent root: Google Drive/.persistent-rdp/files"
+          Write-Host "J: persistent root: Google Drive/.persistent-rdp/files"
+          Write-Host "K: persistent root: Google Drive/.persistent-rdp/files"
+
+          Write-Host "Monitor starts at RDP login."
+          Write-Host "AppData is INCLUDED."
+          Write-Host "=========================================="
 
       - name: Keep alive
         run: |
@@ -1292,73 +1536,59 @@ Write-Host "Persistent-RDP five-drive initialization completed."
               (Get-Date).ToString("HH:mm:ss") +
               " ends at " +
               $end.ToString("HH:mm:ss") +
-              " | Persistent Drives: G:H:I:J:K"
+              " | Persistent Drives: G:H:I:J:K:"
             )
 
             Start-Sleep -Seconds 60
           }
 
-      # ========================================================
-      # FINAL SYNC - FIVE DRIVES
-      # ========================================================
-
       - name: Final Google Drive sync
         if: always()
         shell: pwsh
         run: |
-          $rclone = "$env:RCLONE_EXE"
-          $config = "$env:RCLONE_CONFIG"
+          $rclone =
+            "$env:RCLONE_EXE"
+
+          $config =
+            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
 
           if (
             (Test-Path $rclone) -and
             (Test-Path $config)
           ) {
 
-            $userRoot = "$env:RDP_PROFILE"
+            Write-Host "Final persistence sync starting..."
 
-            if (-not $userRoot) {
-              $userRoot = "$env:USERPROFILE"
+            $userRoot =
+              "C:\Users\$env:RDP_USER"
+
+            if (-not (Test-Path $userRoot)) {
+              $userRoot =
+                "$env:USERPROFILE"
             }
 
-            $remotes = @(
-              "gdrive:.persistent-rdp/files",
-              "gdrive1:.persistent-rdp/files",
-              "gdrive2:.persistent-rdp/files",
-              "gdrive3:.persistent-rdp/files",
-              "gdrive4:.persistent-rdp/files"
-            )
+            & $rclone `
+              --config $config `
+              copy `
+              $userRoot `
+              "gdrive_g:.persistent-rdp/files" `
+              --create-empty-src-dirs `
+              --timeout 300s `
+              --retries 3 `
+              --low-level-retries 10
 
-            foreach ($remote in $remotes) {
-
-              Write-Host "Final sync -> $remote"
-
-              & $rclone `
-                --config $config `
-                copy `
-                $userRoot `
-                $remote `
-                --create-empty-src-dirs `
-                --timeout 300s `
-                --retries 3 `
-                --low-level-retries 10 `
-                --exclude "AppData/**"
-
-              if ($LASTEXITCODE -eq 0) {
-                Write-Host "Final sync completed -> $remote"
-              }
-              else {
-                Write-Warning `
-                  "Final sync failed for $remote. Exit code: $LASTEXITCODE"
-              }
+            if ($LASTEXITCODE -eq 0) {
+              Write-Host "Final persistence sync completed."
+            }
+            else {
+              Write-Warning `
+                "Final persistence sync returned exit code $LASTEXITCODE."
             }
           }
           else {
-            Write-Host "rclone/config unavailable; skipping final sync."
+            Write-Host `
+              "rclone/config unavailable; skipping final sync."
           }
-
-      # ========================================================
-      # DISPATCH NEXT OR STOP
-      # ========================================================
 
       - name: Dispatch next or stop
         if: always()
@@ -1415,10 +1645,10 @@ Write-Host "Persistent-RDP five-drive initialization completed."
 
                   inputs =
                     $payload
-                } |
-                ConvertTo-Json -Depth 20
 
-              Write-Host "Dispatching STOP workflow..."
+                } |
+                ConvertTo-Json `
+                  -Depth 20
 
               Invoke-RestMethod `
                 -Method POST `
@@ -1485,10 +1715,10 @@ Write-Host "Persistent-RDP five-drive initialization completed."
 
                   inputs =
                     $payload
-                } |
-                ConvertTo-Json -Depth 20
 
-              Write-Host "Dispatching Workflow A self-renew..."
+                } |
+                ConvertTo-Json `
+                  -Depth 20
 
               Invoke-RestMethod `
                 -Method POST `
@@ -1498,7 +1728,8 @@ Write-Host "Persistent-RDP five-drive initialization completed."
                 -Body $body2 `
                 -ErrorAction Stop
 
-              Write-Host "Dispatched Workflow A self-renew successfully."
+              Write-Host `
+                "Dispatched Workflow A self-renew successfully."
             }
           }
           else {
