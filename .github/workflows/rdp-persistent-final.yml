@@ -84,17 +84,7 @@ jobs:
             $n = 1
           }
           else {
-            $rawCount = "${{ inputs.rdp_count }}"
-
-            if ([string]::IsNullOrWhiteSpace($rawCount)) {
-              $n = 1
-            }
-            elseif ($rawCount -match '^\d+$') {
-              $n = [int]$rawCount
-            }
-            else {
-              $n = 1
-            }
+            $n = [int]"${{ inputs.rdp_count }}"
 
             if ($n -lt 1) {
               $n = 1
@@ -146,7 +136,7 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       max-parallel: 10
 
-    timeout-minutes: 360
+    timeout-minutes: 370
 
     env:
       RDP_USER: Yousif190
@@ -265,10 +255,6 @@ jobs:
 
           $pin =
             "${{ inputs.crd_pin }}".Trim()
-
-          if ([string]::IsNullOrWhiteSpace($pin)) {
-            $pin = "123456"
-          }
 
           if ($pin -notmatch '^\d{6,12}$') {
             Write-Error `
@@ -390,12 +376,7 @@ jobs:
 
       - name: Decide hostname + runtime
         run: |
-          $countRaw = "${{ inputs.rdp_count }}"
-
-          if (
-            $countRaw -match '^\d+$' -and
-            [int]$countRaw -gt 1
-          ) {
+          if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn =
               "bullet${{ matrix.id }}"
           }
@@ -428,10 +409,6 @@ jobs:
               300
             )
 
-          if ($runtime -lt 1) {
-            $runtime = 300
-          }
-
           if (Yes("${{ inputs.quick_test }}")) {
             $runtime = 5
           }
@@ -443,8 +420,8 @@ jobs:
             $runtime = 300
           }
 
-          if ($runtime -gt 355) {
-            $runtime = 355
+          if ($runtime -gt 360) {
+            $runtime = 360
           }
 
           "RUNTIME_MINUTES=$runtime" |
@@ -462,13 +439,7 @@ jobs:
             "$v" -match '^(?i:true|1|yes|on)$'
           }
 
-          $purgeValue = "${{ inputs.do_purge }}"
-
-          if ([string]::IsNullOrWhiteSpace($purgeValue)) {
-            $purgeValue = "true"
-          }
-
-          if (Yes($purgeValue)) {
+          if (Yes("${{ inputs.do_purge }}")) {
 
             try {
 
@@ -483,14 +454,6 @@ jobs:
                 [uri]::EscapeDataString(
                   "${{ inputs.ts_tailnet }}"
                 )
-
-              if (
-                [string]::IsNullOrWhiteSpace("${{ inputs.ts_api_key }}") -or
-                [string]::IsNullOrWhiteSpace("${{ inputs.ts_tailnet }}")
-              ) {
-                Write-Host "Tailscale inputs unavailable; skipping purge."
-                return
-              }
 
               $list =
                 Invoke-RestMethod `
@@ -543,57 +506,34 @@ jobs:
           $ts =
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
-          if (-not (Test-Path $ts)) {
-            $ts =
-              "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe"
-          }
+          if (Test-Path $ts) {
 
-          if (-not (Test-Path $ts)) {
+            & $ts logout |
+              Out-Null
+
+            & $ts up `
+              --authkey "${{ inputs.ts_authkey }}" `
+              --hostname "$env:TS_HOSTNAME" `
+              --accept-dns=true `
+              --accept-routes=true
+
+            $ip4 =
+              & $ts ip -4 |
+              Select-Object -First 1
+
+            "TAILSCALE_IP=$ip4" |
+              Out-File `
+                -Append `
+                $env:GITHUB_ENV
+
+            Write-Host `
+              "Tailscale IPv4: $ip4"
+          }
+          else {
             Write-Error `
               "Tailscale not found."
             exit 1
           }
-
-          $tailnet =
-            "${{ inputs.ts_tailnet }}"
-
-          $authkey =
-            "${{ inputs.ts_authkey }}"
-
-          if (
-            [string]::IsNullOrWhiteSpace($tailnet) -or
-            [string]::IsNullOrWhiteSpace($authkey)
-          ) {
-            Write-Error `
-              "Tailscale tailnet/authkey is required for this run."
-            exit 1
-          }
-
-          & $ts logout |
-            Out-Null
-
-          & $ts up `
-            --authkey "$authkey" `
-            --hostname "$env:TS_HOSTNAME" `
-            --accept-dns=true `
-            --accept-routes=true
-
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "Tailscale failed to connect."
-            exit 1
-          }
-
-          $ip4 =
-            & $ts ip -4 |
-            Select-Object -First 1
-
-          "TAILSCALE_IP=$ip4" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host `
-            "Tailscale IPv4: $ip4"
 
       - name: Enable RDP user + firewall
         run: |
@@ -952,11 +892,11 @@ jobs:
               ConvertTo-Json -Compress
 
             @"
-[$($item.Remote)]
-type = drive
-scope = drive
-token = $tokenJson
-"@ |
+            [$($item.Remote)]
+            type = drive
+            scope = drive
+            token = $tokenJson
+            "@ |
               Set-Content `
                 -Path $config `
                 -Encoding UTF8
@@ -976,18 +916,10 @@ token = $tokenJson
               mkdir `
               "$($item.Remote):.persistent-rdp"
 
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to create .persistent-rdp on $($item.Secret)."
-            }
-
             & $rclone `
               --config $config `
               mkdir `
               "$($item.Remote):.persistent-rdp/files"
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to create files directory on $($item.Secret)."
-            }
           }
 
           "RCLONE_EXE=$rclone" |
@@ -1091,6 +1023,28 @@ token = $tokenJson
             -Destination "$configDir\rclone.conf" `
             -Force
 
+          foreach ($name in @(
+            "gdrive_g",
+            "gdrive_h",
+            "gdrive_i",
+            "gdrive_j",
+            "gdrive_k"
+          )) {
+
+            $source =
+              "$configDir\$name.conf"
+
+            $destination =
+              "$rcloneAppData\$name.conf"
+
+            if (Test-Path $source) {
+              Copy-Item `
+                $source `
+                $destination `
+                -Force
+            }
+          }
+
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "REAL RCLONE CONFIG CREATED"
@@ -1105,7 +1059,7 @@ token = $tokenJson
           Write-Host "K: gdrive_k"
           Write-Host "=========================================="
 
-      - name: Create five real mount scripts
+      - name: Install five-drive PowerShell windows
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -1193,21 +1147,7 @@ if (-not (Test-Path `$config)) {
 
 Start-Sleep -Seconds 3
 
-& `$rclone `
-  --config `$config `
-  mount `$remote `$letter `
-  --network-mode `
-  --volname "Persistent-RDP-$($m.Name)" `
-  --vfs-cache-mode full `
-  --vfs-cache-max-size 10G `
-  --dir-cache-time 30s `
-  --poll-interval 30s `
-  --transfers 4 `
-  --checkers 8 `
-  --timeout 1m `
-  --contimeout 10s `
-  --log-file `$log `
-  --log-level INFO
+& `$rclone --config `$config mount `$remote `$letter --network-mode --volname "Persistent-RDP-$($m.Name)" --vfs-cache-mode full --vfs-cache-max-size 10G --dir-cache-time 30s --poll-interval 30s --transfers 4 --checkers 8 --timeout 1m --contimeout 10s --log-file `$log --log-level INFO
 
 Write-Host ""
 Write-Host "rclone stopped for drive `$letter."
@@ -1308,31 +1248,13 @@ if ((Test-Path `$rclone) -and (Test-Path `$config)) {
 
         Write-Host "Downloading persistent files..."
 
-        & `$rclone `
-          --config `$config `
-          copy `
-          `$remote `
-          `$userRoot `
-          --create-empty-src-dirs `
-          --timeout 300s `
-          --retries 3 `
-          --low-level-retries 10 `
-          --exclude "AppData/**"
+        & `$rclone --config `$config copy `$remote `$userRoot --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"
 
         Write-Host "Restore completed."
 
         Write-Host "Uploading persistent files..."
 
-        & `$rclone `
-          --config `$config `
-          copy `
-          `$userRoot `
-          `$remote `
-          --create-empty-src-dirs `
-          --timeout 300s `
-          --retries 3 `
-          --low-level-retries 10 `
-          --exclude "AppData/**"
+        & `$rclone --config `$config copy `$userRoot `$remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"
 
         Write-Host "Upload completed."
     }
@@ -1439,6 +1361,11 @@ Write-Host "Persistent-RDP sync finished."
             "$userRoot\AppData\Roaming",
             "$userRoot\AppData\Roaming\rclone",
             "$userRoot\AppData\Roaming\rclone\rclone.conf",
+            "$userRoot\AppData\Roaming\rclone\gdrive_g.conf",
+            "$userRoot\AppData\Roaming\rclone\gdrive_h.conf",
+            "$userRoot\AppData\Roaming\rclone\gdrive_i.conf",
+            "$userRoot\AppData\Roaming\rclone\gdrive_j.conf",
+            "$userRoot\AppData\Roaming\rclone\gdrive_k.conf",
             "C:\ProgramData\Persistent-RDP\rclone\rclone.conf",
             "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf",
             "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf",
@@ -1647,10 +1574,6 @@ Write-Host "Persistent-RDP sync finished."
           $mins =
             [int]"${{ env.RUNTIME_MINUTES }}"
 
-          if ($mins -gt 355) {
-            $mins = 355
-          }
-
           $end =
             (Get-Date).AddMinutes(
               $mins
@@ -1740,15 +1663,8 @@ Write-Host "Persistent-RDP sync finished."
         run: |
           $ErrorActionPreference = "Stop"
 
-          $cyclesRaw =
-            "${{ inputs.cycles }}"
-
-          if ($cyclesRaw -match '^\d+$') {
-            $cycles = [int]$cyclesRaw
-          }
-          else {
-            $cycles = 9999
-          }
+          $cycles =
+            [int]"${{ inputs.cycles }}"
 
           if ($cycles -gt 0) {
 
@@ -1761,44 +1677,23 @@ Write-Host "Persistent-RDP sync finished."
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
 
               $hdr = @{
-                Authorization =
-                  "Bearer $env:GH_TOKEN"
-
-                Accept =
-                  "application/vnd.github+json"
-
-                "X-GitHub-Api-Version" =
-                  "2022-11-28"
+                Authorization = "Bearer $env:GH_TOKEN"
+                Accept = "application/vnd.github+json"
+                "X-GitHub-Api-Version" = "2022-11-28"
               }
 
               $payload = @{
-                ts_tailnet =
-                  "${{ inputs.ts_tailnet }}"
-
-                ts_api_key =
-                  "${{ inputs.ts_api_key }}"
-
-                base_prefix =
-                  "bullet"
-
-                max_count =
-                  "10"
-
-                dry_run =
-                  "false"
+                ts_tailnet = "${{ inputs.ts_tailnet }}"
+                ts_api_key = "${{ inputs.ts_api_key }}"
+                base_prefix = "bullet"
+                max_count = "10"
+                dry_run = "false"
               }
 
-              $body =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
-
-                  inputs =
-                    $payload
-
-                } |
-                ConvertTo-Json `
-                  -Depth 20
+              $body = @{
+                ref = "${{ github.ref_name }}"
+                inputs = $payload
+              } | ConvertTo-Json -Depth 20
 
               Write-Host "Dispatching STOP workflow..."
 
@@ -1815,62 +1710,31 @@ Write-Host "Persistent-RDP sync finished."
             else {
 
               $payload = @{
-                ts_tailnet =
-                  "${{ inputs.ts_tailnet }}"
-
-                ts_api_key =
-                  "${{ inputs.ts_api_key }}"
-
-                ts_authkey =
-                  "${{ inputs.ts_authkey }}"
-
-                quick_test =
-                  "${{ inputs.quick_test }}"
-
-                runtime_minutes =
-                  "355"
-
-                do_purge =
-                  "true"
-
-                cycles =
-                  "$next"
-
-                rdp_count =
-                  "${{ inputs.rdp_count }}"
-
-                crd_code =
-                  "${{ inputs.crd_code }}"
-
-                crd_pin =
-                  "${{ inputs.crd_pin }}"
+                ts_tailnet = "${{ inputs.ts_tailnet }}"
+                ts_api_key = "${{ inputs.ts_api_key }}"
+                ts_authkey = "${{ inputs.ts_authkey }}"
+                quick_test = "${{ inputs.quick_test }}"
+                runtime_minutes = "300"
+                do_purge = "true"
+                cycles = "$next"
+                rdp_count = "${{ inputs.rdp_count }}"
+                crd_code = "${{ inputs.crd_code }}"
+                crd_pin = "${{ inputs.crd_pin }}"
               }
 
               $url2 =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
 
               $hdr2 = @{
-                Authorization =
-                  "Bearer $env:GH_TOKEN"
-
-                Accept =
-                  "application/vnd.github+json"
-
-                "X-GitHub-Api-Version" =
-                  "2022-11-28"
+                Authorization = "Bearer $env:GH_TOKEN"
+                Accept = "application/vnd.github+json"
+                "X-GitHub-Api-Version" = "2022-11-28"
               }
 
-              $body2 =
-                @{
-                  ref =
-                    "${{ github.ref_name }}"
-
-                  inputs =
-                    $payload
-
-                } |
-                ConvertTo-Json `
-                  -Depth 20
+              $body2 = @{
+                ref = "${{ github.ref_name }}"
+                inputs = $payload
+              } | ConvertTo-Json -Depth 20
 
               Write-Host "Dispatching Workflow A self-renew..."
 
@@ -1882,11 +1746,9 @@ Write-Host "Persistent-RDP sync finished."
                 -Body $body2 `
                 -ErrorAction Stop
 
-              Write-Host `
-                "Dispatched Workflow A self-renew successfully."
+              Write-Host "Dispatched Workflow A self-renew successfully."
             }
           }
           else {
-            Write-Host `
-              "No cycles configured. Done."
+            Write-Host "No cycles configured. Done."
           }
