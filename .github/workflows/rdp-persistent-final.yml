@@ -77,7 +77,6 @@ jobs:
       multi: ${{ steps.mk.outputs.multi }}
 
     steps:
-
       - id: mk
         shell: pwsh
         run: |
@@ -992,7 +991,7 @@ jobs:
           Write-Host "Five Google Drive configs created."
 
       # ========================================================
-      # CREATE REAL RCLONE.CONF + FIVE DRIVE CONF FILES
+      # CREATE REAL RCLONE.CONF + FIVE INDIVIDUAL CONFIGS
       # ========================================================
 
       - name: Create real rclone.conf for Yousif190 and five drives
@@ -1053,7 +1052,8 @@ jobs:
             }
           )
 
-          $lines = New-Object System.Collections.Generic.List[string]
+          $lines =
+            New-Object System.Collections.Generic.List[string]
 
           foreach ($item in $tokens) {
 
@@ -1078,6 +1078,32 @@ jobs:
             [void]$lines.Add("scope = drive")
             [void]$lines.Add("token = $tokenJson")
             [void]$lines.Add("")
+
+            $singleConfig =
+              "$configDir\$($item.Name).conf"
+
+            @"
+          [$($item.Name)]
+          type = drive
+          scope = drive
+          token = $tokenJson
+          "@ |
+              Set-Content `
+                -Path $singleConfig `
+                -Encoding UTF8
+
+            $userSingleConfig =
+              "$rcloneAppData\$($item.Name).conf"
+
+            @"
+          [$($item.Name)]
+          type = drive
+          scope = drive
+          token = $tokenJson
+          "@ |
+              Set-Content `
+                -Path $userSingleConfig `
+                -Encoding UTF8
           }
 
           $lines |
@@ -1090,57 +1116,27 @@ jobs:
             -Destination "$configDir\rclone.conf" `
             -Force
 
-          foreach ($name in @(
-            "gdrive_g",
-            "gdrive_h",
-            "gdrive_i",
-            "gdrive_j",
-            "gdrive_k"
-          )) {
-
-            $source =
-              "$configDir\$name.conf"
-
-            $destination =
-              "$rcloneAppData\$name.conf"
-
-            if (Test-Path $source) {
-              Copy-Item `
-                $source `
-                $destination `
-                -Force
-            }
-          }
-
           Write-Host ""
           Write-Host "=========================================="
           Write-Host "REAL RCLONE CONFIG CREATED"
           Write-Host "=========================================="
           Write-Host "User: $userRoot"
-          Write-Host "rclone.conf:"
-          Write-Host $realConfig
-          Write-Host ""
-          Write-Host "G: gdrive_g"
-          Write-Host "H: gdrive_h"
-          Write-Host "I: gdrive_i"
-          Write-Host "J: gdrive_j"
-          Write-Host "K: gdrive_k"
+          Write-Host "rclone.conf: $realConfig"
+          Write-Host "gdrive_g.conf created"
+          Write-Host "gdrive_h.conf created"
+          Write-Host "gdrive_i.conf created"
+          Write-Host "gdrive_j.conf created"
+          Write-Host "gdrive_k.conf created"
           Write-Host "=========================================="
 
       # ========================================================
-      # CREATE LOGON PERSISTENCE SCRIPTS
+      # CREATE FIVE POWERSHELL WINDOWS + AUTO MOUNT
       # ========================================================
 
-      - name: Install five-drive persistence at RDP user logon
+      - name: Install five visible PowerShell drive windows
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
-          $user =
-            $env:RDP_USER
-
-          $pass =
-            $env:RDP_PASS
 
           $persistDir =
             "C:\ProgramData\Persistent-RDP"
@@ -1151,11 +1147,8 @@ jobs:
           $rclone =
             "C:\Tools\rclone\rclone.exe"
 
-          $userRoot =
-            "C:\Users\$user"
-
-          $userRclone =
-            "$userRoot\AppData\Roaming\rclone"
+          $user =
+            $env:RDP_USER
 
           New-Item `
             -ItemType Directory `
@@ -1163,246 +1156,116 @@ jobs:
             -Force |
             Out-Null
 
-          New-Item `
-            -ItemType Directory `
-            -Path $configDir `
-            -Force |
-            Out-Null
-
-          New-Item `
-            -ItemType Directory `
-            -Path $userRclone `
-            -Force |
-            Out-Null
-
-          if (-not (Test-Path $rclone)) {
-            throw "rclone.exe not found: $rclone"
-          }
-
-          # ----------------------------------------------------
-          # ENSURE ALL FIVE CONFIG FILES ARE IN YOUSIF190
-          # ----------------------------------------------------
-
-          $driveNames = @(
-            "gdrive_g",
-            "gdrive_h",
-            "gdrive_i",
-            "gdrive_j",
-            "gdrive_k"
+          $drives = @(
+            @{
+              Name = "G"
+              Config = "$configDir\gdrive_g.conf"
+              Remote = "gdrive_g:.persistent-rdp/files"
+              Letter = "G:"
+            },
+            @{
+              Name = "H"
+              Config = "$configDir\gdrive_h.conf"
+              Remote = "gdrive_h:.persistent-rdp/files"
+              Letter = "H:"
+            },
+            @{
+              Name = "I"
+              Config = "$configDir\gdrive_i.conf"
+              Remote = "gdrive_i:.persistent-rdp/files"
+              Letter = "I:"
+            },
+            @{
+              Name = "J"
+              Config = "$configDir\gdrive_j.conf"
+              Remote = "gdrive_j:.persistent-rdp/files"
+              Letter = "J:"
+            },
+            @{
+              Name = "K"
+              Config = "$configDir\gdrive_k.conf"
+              Remote = "gdrive_k:.persistent-rdp/files"
+              Letter = "K:"
+            }
           )
 
-          foreach ($name in $driveNames) {
+          foreach ($drive in $drives) {
 
-            $source =
-              "$configDir\$name.conf"
-
-            $destination =
-              "$userRclone\$name.conf"
-
-            if (-not (Test-Path $source)) {
-              throw "Missing drive config: $source"
+            if (-not (Test-Path $drive.Config)) {
+              throw "Missing config: $($drive.Config)"
             }
 
-            Copy-Item `
-              $source `
-              $destination `
-              -Force
+            $script =
+              "$persistDir\Mount-$($drive.Name).ps1"
+
+            @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone = "$rclone"
+          `$config = "$($drive.Config)"
+          `$remote = "$($drive.Remote)"
+          `$letter = "$($drive.Letter)"
+
+          Start-Sleep -Seconds 5
+
+          & `$rclone `
+            --config `$config `
+            mount `
+            `$remote `
+            `$letter `
+            --network-mode `
+            --volname "Persistent-RDP-$($drive.Name)" `
+            --vfs-cache-mode full `
+            --vfs-cache-max-size 10G `
+            --dir-cache-time 30s `
+            --poll-interval 30s `
+            --transfers 4 `
+            --checkers 8 `
+            --timeout 1m `
+            --contimeout 10s
+
+          Read-Host "Drive $($drive.Name) stopped. Press Enter to close"
+          "@ |
+              Set-Content `
+                -Path $script `
+                -Encoding UTF8
           }
 
-          # ----------------------------------------------------
-          # DRIVE MOUNT SCRIPT
-          # ----------------------------------------------------
-
-          $mountScript =
-            "$persistDir\Start-PersistentDrives.ps1"
+          $mountAll =
+            "$persistDir\Start-All-Persistent-Drives.ps1"
 
           @"
-`$ErrorActionPreference = "Continue"
+          Start-Sleep -Seconds 10
 
-`$rclone = "C:\Tools\rclone\rclone.exe"
-
-`$configDir = "C:\Users\$user\AppData\Roaming\rclone"
-
-`$drives = @(
-    @{
-        Config = "`$configDir\gdrive_g.conf"
-        Remote = "gdrive_g:.persistent-rdp/files"
-        Letter = "G:"
-    },
-    @{
-        Config = "`$configDir\gdrive_h.conf"
-        Remote = "gdrive_h:.persistent-rdp/files"
-        Letter = "H:"
-    },
-    @{
-        Config = "`$configDir\gdrive_i.conf"
-        Remote = "gdrive_i:.persistent-rdp/files"
-        Letter = "I:"
-    },
-    @{
-        Config = "`$configDir\gdrive_j.conf"
-        Remote = "gdrive_j:.persistent-rdp/files"
-        Letter = "J:"
-    },
-    @{
-        Config = "`$configDir\gdrive_k.conf"
-        Remote = "gdrive_k:.persistent-rdp/files"
-        Letter = "K:"
-    }
-)
-
-Start-Sleep -Seconds 8
-
-foreach (`$drive in `$drives) {
-
-    if (-not (Test-Path `$drive.Config)) {
-        Write-Host "CONFIG NOT FOUND: `$(`$drive.Config)"
-        continue
-    }
-
-    `$letter = `$drive.Letter
-    `$name = `$letter.TrimEnd(":")
-
-    Write-Host "Starting `$letter ..."
-
-    `$args = @(
-        "--config"
-        `$drive.Config
-        "mount"
-        `$drive.Remote
-        `$drive.Letter
-        "--network-mode"
-        "--volname"
-        "Persistent-RDP-`$name"
-        "--vfs-cache-mode"
-        "full"
-        "--vfs-cache-max-size"
-        "10G"
-        "--dir-cache-time"
-        "30s"
-        "--poll-interval"
-        "30s"
-        "--transfers"
-        "4"
-        "--checkers"
-        "8"
-        "--timeout"
-        "1m"
-        "--contimeout"
-        "10s"
-        "--log-file"
-        "C:\ProgramData\Persistent-RDP\rclone-`$name.log"
-        "--log-level"
-        "INFO"
-    )
-
-    `$command = "& '`$rclone' " + (
-        `$args | ForEach-Object {
-            "'" + (`$_ -replace "'","''") + "'"
-        }
-    ) -join " "
-
-    Start-Process `
-        -FilePath "powershell.exe" `
-        -ArgumentList @(
-            "-NoProfile"
-            "-ExecutionPolicy"
-            "Bypass"
-            "-NoExit"
-            "-Command"
-            `$command
-        )
-
-    Start-Sleep -Seconds 4
-}
-
-Write-Host ""
-Write-Host "=========================================="
-Write-Host "FIVE RCLONE POWERSHELL WINDOWS STARTED"
-Write-Host "G: H: I: J: K:"
-Write-Host "=========================================="
-"@ |
+          Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','"$persistDir\Mount-G.ps1"'
+          Start-Sleep -Seconds 2
+          Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','"$persistDir\Mount-H.ps1"'
+          Start-Sleep -Seconds 2
+          Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','"$persistDir\Mount-I.ps1"'
+          Start-Sleep -Seconds 2
+          Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','"$persistDir\Mount-J.ps1"'
+          Start-Sleep -Seconds 2
+          Start-Process powershell.exe -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-NoExit','-File','"$persistDir\Mount-K.ps1"'
+          "@ |
             Set-Content `
-              -Path $mountScript `
+              -Path $mountAll `
               -Encoding UTF8
-
-          # ----------------------------------------------------
-          # RESTORE SCRIPT
-          # ----------------------------------------------------
-
-          $restoreScript =
-            "$persistDir\Restore-PersistentFiles.ps1"
-
-          @"
-`$ErrorActionPreference = "Continue"
-
-`$rclone = "C:\Tools\rclone\rclone.exe"
-
-`$config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-
-`$userRoot = "C:\Users\$user"
-
-`$remoteRoot = "gdrive_g:.persistent-rdp/files"
-
-`$mountScript = "C:\ProgramData\Persistent-RDP\Start-PersistentDrives.ps1"
-
-if (Test-Path `$rclone) {
-
-    if (Test-Path `$config) {
-
-        Write-Host "Restoring persistent user files..."
-
-        & `$rclone `
-            --config `$config `
-            copy `
-            `$remoteRoot `
-            `$userRoot `
-            --create-empty-src-dirs `
-            --timeout 300s `
-            --retries 3 `
-            --low-level-retries 10 `
-            --exclude "AppData/**"
-
-        Write-Host "Restore completed."
-    }
-    else {
-        Write-Warning "gdrive_g.conf not found."
-    }
-}
-else {
-    Write-Warning "rclone.exe not found."
-}
-
-Start-Process `
-    -FilePath "powershell.exe" `
-    -ArgumentList `
-    "-NoProfile","-ExecutionPolicy","Bypass","-WindowStyle","Hidden","-File","`"`$mountScript`""
-
-Write-Host "Persistent-RDP logon initialization completed."
-"@ |
-            Set-Content `
-              -Path $restoreScript `
-              -Encoding UTF8
-
-          # ----------------------------------------------------
-          # SCHEDULED TASK
-          # ----------------------------------------------------
-
-          Unregister-ScheduledTask `
-            -TaskName "Persistent-RDP-Logon" `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
-
-          $action =
-            New-ScheduledTaskAction `
-              -Execute "powershell.exe" `
-              -Argument `
-              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restoreScript`""
 
           $trigger =
             New-ScheduledTaskTrigger `
               -AtLogOn `
               -User $user
+
+          $action =
+            New-ScheduledTaskAction `
+              -Execute "powershell.exe" `
+              -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Normal -File `"$mountAll`""
+
+          $principal =
+            New-ScheduledTaskPrincipal `
+              -UserId $user `
+              -LogonType Interactive `
+              -RunLevel Limited
 
           $settings =
             New-ScheduledTaskSettingsSet `
@@ -1410,20 +1273,201 @@ Write-Host "Persistent-RDP logon initialization completed."
               -DontStopIfGoingOnBatteries `
               -ExecutionTimeLimit ([TimeSpan]::Zero)
 
+          Unregister-ScheduledTask `
+            -TaskName "Persistent-RDP-Five-Drives" `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
           Register-ScheduledTask `
-            -TaskName "Persistent-RDP-Logon" `
+            -TaskName "Persistent-RDP-Five-Drives" `
             -Action $action `
             -Trigger $trigger `
-            -User $user `
-            -Password $pass `
-            -RunLevel Limited `
+            -Principal $principal `
             -Settings $settings `
             -Force |
             Out-Null
 
+          Write-Host "Five-drive visible PowerShell auto-start installed."
+
+      # ========================================================
+      # RESTORE + SYNC
+      # ========================================================
+
+      - name: Install persistent restore and sync
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          $config =
+            "$persistDir\rclone\gdrive_g.conf"
+
+          $userRoot =
+            "C:\Users\$env:RDP_USER"
+
+          $remoteRoot =
+            "gdrive_g:.persistent-rdp/files"
+
+          $restore =
+            "$persistDir\Restore-And-Sync.ps1"
+
+          @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone = "$rclone"
+          `$config = "$config"
+          `$userRoot = "$userRoot"
+          `$remoteRoot = "$remoteRoot"
+
+          if ((Test-Path `$rclone) -and (Test-Path `$config)) {
+
+              Write-Host "Restoring persistent files..."
+
+              & `$rclone `
+                --config `$config `
+                copy `
+                `$remoteRoot `
+                `$userRoot `
+                --create-empty-src-dirs `
+                --timeout 300s `
+                --retries 3 `
+                --low-level-retries 10 `
+                --exclude "AppData\Local\Temp/**"
+
+              Write-Host "Initial restore completed."
+
+              while (`$true) {
+
+                  Start-Sleep -Seconds 300
+
+                  Write-Host "Persistent sync running..."
+
+                  & `$rclone `
+                    --config `$config `
+                    copy `
+                    `$userRoot `
+                    `$remoteRoot `
+                    --create-empty-src-dirs `
+                    --timeout 300s `
+                    --retries 3 `
+                    --low-level-retries 10 `
+                    --exclude "AppData\Local\Temp/**"
+
+                  Write-Host "Persistent sync completed."
+              }
+          }
+          "@ |
+            Set-Content `
+              -Path $restore `
+              -Encoding UTF8
+
+          $trigger =
+            New-ScheduledTaskTrigger `
+              -AtLogOn `
+              -User $env:RDP_USER
+
+          $action =
+            New-ScheduledTaskAction `
+              -Execute "powershell.exe" `
+              -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restore`""
+
+          $principal =
+            New-ScheduledTaskPrincipal `
+              -UserId $env:RDP_USER `
+              -LogonType Interactive `
+              -RunLevel Limited
+
+          $settings =
+            New-ScheduledTaskSettingsSet `
+              -AllowStartIfOnBatteries `
+              -DontStopIfGoingOnBatteries `
+              -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+          Unregister-ScheduledTask `
+            -TaskName "Persistent-RDP-Sync" `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
+          Register-ScheduledTask `
+            -TaskName "Persistent-RDP-Sync" `
+            -Action $action `
+            -Trigger $trigger `
+            -Principal $principal `
+            -Settings $settings `
+            -Force |
+            Out-Null
+
+          Write-Host "Persistent restore + continuous sync installed."
+
+      # ========================================================
+      # VERIFY ALL RCLONE FILES
+      # ========================================================
+
+      - name: Verify five configs and persistence
+        shell: pwsh
+        run: |
+          $required = @(
+            "C:\Tools\rclone\rclone.exe",
+            "C:\Program Files (x86)\WinFsp",
+            "C:\Users\$env:RDP_USER\AppData",
+            "C:\Users\$env:RDP_USER\AppData\Local",
+            "C:\Users\$env:RDP_USER\AppData\LocalLow",
+            "C:\Users\$env:RDP_USER\AppData\Roaming",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\rclone.conf",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\gdrive_g.conf",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\gdrive_h.conf",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\gdrive_i.conf",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\gdrive_j.conf",
+            "C:\Users\$env:RDP_USER\AppData\Roaming\rclone\gdrive_k.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\rclone.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf",
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf",
+            "C:\ProgramData\Persistent-RDP\Mount-G.ps1",
+            "C:\ProgramData\Persistent-RDP\Mount-H.ps1",
+            "C:\ProgramData\Persistent-RDP\Mount-I.ps1",
+            "C:\ProgramData\Persistent-RDP\Mount-J.ps1",
+            "C:\ProgramData\Persistent-RDP\Mount-K.ps1",
+            "C:\ProgramData\Persistent-RDP\Start-All-Persistent-Drives.ps1",
+            "C:\ProgramData\Persistent-RDP\Restore-And-Sync.ps1"
+          )
+
+          foreach ($path in $required) {
+
+            if (-not (Test-Path $path)) {
+              Write-Error "Missing required path: $path"
+              exit 1
+            }
+
+            Write-Host "OK: $path"
+          }
+
+          $tasks = @(
+            "Persistent-RDP-Five-Drives",
+            "Persistent-RDP-Sync"
+          )
+
+          foreach ($taskName in $tasks) {
+
+            if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+              Write-Error "Missing scheduled task: $taskName"
+              exit 1
+            }
+
+            Write-Host "OK TASK: $taskName"
+          }
+
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENCE INSTALLED"
+          Write-Host "ALL PERSISTENCE COMPONENTS VERIFIED"
           Write-Host "=========================================="
           Write-Host "G: gdrive_g"
           Write-Host "H: gdrive_h"
@@ -1431,69 +1475,12 @@ Write-Host "Persistent-RDP logon initialization completed."
           Write-Host "J: gdrive_j"
           Write-Host "K: gdrive_k"
           Write-Host ""
-          Write-Host "Five PowerShell windows will open at Yousif190 logon."
+          Write-Host "User: C:\Users\$env:RDP_USER"
+          Write-Host "rclone.conf: C:\Users\$env:RDP_USER\AppData\Roaming\rclone\rclone.conf"
+          Write-Host "Five individual .conf files preserved."
+          Write-Host "Five PowerShell windows configured at user logon."
+          Write-Host "Continuous sync configured."
           Write-Host "=========================================="
-
-      # ========================================================
-      # VERIFY PERSISTENCE
-      # ========================================================
-
-      - name: Verify persistence setup
-        run: |
-          $task =
-            Get-ScheduledTask `
-              -TaskName "Persistent-RDP-Logon" `
-              -ErrorAction SilentlyContinue
-
-          if ($task) {
-            Write-Host "Persistent-RDP logon task exists."
-          }
-          else {
-            Write-Error "Persistent-RDP logon task was not created."
-            exit 1
-          }
-
-          if (-not (Test-Path "C:\Tools\rclone\rclone.exe")) {
-            Write-Error "rclone missing."
-            exit 1
-          }
-
-          if (-not (Test-Path "C:\Program Files (x86)\WinFsp")) {
-            Write-Error "WinFsp missing."
-            exit 1
-          }
-
-          $userRoot =
-            "C:\Users\$env:RDP_USER"
-
-          $required = @(
-            "$userRoot\AppData",
-            "$userRoot\AppData\Local",
-            "$userRoot\AppData\LocalLow",
-            "$userRoot\AppData\Roaming",
-            "$userRoot\AppData\Roaming\rclone",
-            "$userRoot\AppData\Roaming\rclone\rclone.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_g.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_h.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_i.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_j.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_k.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\rclone.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf"
-          )
-
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) {
-              Write-Error "Missing required path: $path"
-              exit 1
-            }
-          }
-
-          Write-Host "Complete Yousif190 profile + all five rclone configurations verified."
 
       # ========================================================
       # RUSTDESK
@@ -1686,7 +1673,8 @@ Write-Host "Persistent-RDP logon initialization completed."
           Write-Host "gdrive_j.conf: C:\Users\Yousif190\AppData\Roaming\rclone\gdrive_j.conf"
           Write-Host "gdrive_k.conf: C:\Users\Yousif190\AppData\Roaming\rclone\gdrive_k.conf"
           Write-Host ""
-          Write-Host "All five drives mount after Yousif190 logs in."
+          Write-Host "Five PowerShell mount windows start automatically at Yousif190 logon."
+          Write-Host "Continuous Google Drive sync is enabled."
           Write-Host "=========================================="
 
       # ========================================================
@@ -1769,7 +1757,7 @@ Write-Host "Persistent-RDP logon initialization completed."
               --timeout 300s `
               --retries 3 `
               --low-level-retries 10 `
-              --exclude "AppData/**"
+              --exclude "AppData\Local\Temp/**"
 
             if ($LASTEXITCODE -eq 0) {
               Write-Host "Final persistence sync completed."
