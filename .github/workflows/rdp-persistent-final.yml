@@ -606,52 +606,52 @@ jobs:
           $root = "C:\Users\$user"
 
           $paths = @(
-            $root,
-            "$root\Desktop",
-            "$root\Documents",
-            "$root\Downloads",
-            "$root\Pictures",
-            "$root\Videos",
-            "$root\Music",
-            "$root\Favorites",
-            "$root\Links",
-            "$root\Saved Games",
-            "$root\Searches",
-            "$root\Contacts",
-            "$root\AppData",
-            "$root\AppData\Local",
-            "$root\AppData\LocalLow",
-            "$root\AppData\Local\Temp",
-            "$root\AppData\Local\Packages",
-            "$root\AppData\Local\Microsoft",
-            "$root\AppData\Local\Programs",
-            "$root\AppData\Local\Programs\Common",
-            "$root\AppData\Roaming",
-            "$root\AppData\Roaming\Microsoft",
-            "$root\AppData\Roaming\Microsoft\Windows",
-            "$root\AppData\Roaming\Microsoft\Windows\Start Menu",
-            "$root\AppData\Roaming\Microsoft\Windows\Start Menu\Programs",
-            "$root\AppData\Roaming\Microsoft\Windows\Recent",
-            "$root\AppData\Roaming\Microsoft\Windows\SendTo",
-            "$root\AppData\Roaming\Microsoft\Windows\Templates",
-            "$root\AppData\Roaming\Microsoft\Windows\Network Shortcuts",
-            "$root\AppData\Roaming\Microsoft\Windows\Printer Shortcuts",
-            "$root\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup",
-            "$root\AppData\Roaming\Adobe",
-            "$root\AppData\Roaming\Adobe\After Effects",
-            "$root\AppData\Roaming\Adobe\After Effects\Auto-Save",
-            "$root\AppData\Roaming\Adobe\After Effects\Presets",
-            "$root\AppData\Roaming\Adobe\After Effects\Scripts",
-            "$root\AppData\Roaming\Adobe\After Effects\Plug-ins",
-            "$root\AppData\Local\Adobe",
-            "$root\AppData\Local\Adobe\After Effects",
-            "$root\AppData\Local\Adobe\After Effects\Auto-Save",
-            "$root\AppData\Local\Adobe\After Effects\Cache",
-            "$root\AppData\Local\Temp\Persistent-RDP",
-            "$root\Projects",
-            "$root\Projects\AE",
-            "$root\Assets",
-            "$root\Assets\Fonts",
+            $root
+            "$root\Desktop"
+            "$root\Documents"
+            "$root\Downloads"
+            "$root\Pictures"
+            "$root\Videos"
+            "$root\Music"
+            "$root\Favorites"
+            "$root\Links"
+            "$root\Saved Games"
+            "$root\Searches"
+            "$root\Contacts"
+            "$root\AppData"
+            "$root\AppData\Local"
+            "$root\AppData\LocalLow"
+            "$root\AppData\Local\Temp"
+            "$root\AppData\Local\Packages"
+            "$root\AppData\Local\Microsoft"
+            "$root\AppData\Local\Programs"
+            "$root\AppData\Local\Programs\Common"
+            "$root\AppData\Roaming"
+            "$root\AppData\Roaming\Microsoft"
+            "$root\AppData\Roaming\Microsoft\Windows"
+            "$root\AppData\Roaming\Microsoft\Windows\Start Menu"
+            "$root\AppData\Roaming\Microsoft\Windows\Start Menu\Programs"
+            "$root\AppData\Roaming\Microsoft\Windows\Recent"
+            "$root\AppData\Roaming\Microsoft\Windows\SendTo"
+            "$root\AppData\Roaming\Microsoft\Windows\Templates"
+            "$root\AppData\Roaming\Microsoft\Windows\Network Shortcuts"
+            "$root\AppData\Roaming\Microsoft\Windows\Printer Shortcuts"
+            "$root\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+            "$root\AppData\Roaming\Adobe"
+            "$root\AppData\Roaming\Adobe\After Effects"
+            "$root\AppData\Roaming\Adobe\After Effects\Auto-Save"
+            "$root\AppData\Roaming\Adobe\After Effects\Presets"
+            "$root\AppData\Roaming\Adobe\After Effects\Scripts"
+            "$root\AppData\Roaming\Adobe\After Effects\Plug-ins"
+            "$root\AppData\Local\Adobe"
+            "$root\AppData\Local\Adobe\After Effects"
+            "$root\AppData\Local\Adobe\After Effects\Auto-Save"
+            "$root\AppData\Local\Adobe\After Effects\Cache"
+            "$root\AppData\Local\Temp\Persistent-RDP"
+            "$root\Projects"
+            "$root\Projects\AE"
+            "$root\Assets"
+            "$root\Assets\Fonts"
             "$root\Assets\Plugins"
           )
 
@@ -843,25 +843,25 @@ jobs:
               Token = $env:DRIVE_TOKEN
               Remote = "gdrive_g"
               Letter = "G:"
-            },
+            }
             @{
               Secret = "DRIVE_TOKEN1"
               Token = $env:DRIVE_TOKEN1
               Remote = "gdrive_h"
               Letter = "H:"
-            },
+            }
             @{
               Secret = "DRIVE_TOKEN2"
               Token = $env:DRIVE_TOKEN2
               Remote = "gdrive_i"
               Letter = "I:"
-            },
+            }
             @{
               Secret = "DRIVE_TOKEN3"
               Token = $env:DRIVE_TOKEN3
               Remote = "gdrive_j"
               Letter = "J:"
-            },
+            }
             @{
               Secret = "DRIVE_TOKEN4"
               Token = $env:DRIVE_TOKEN4
@@ -891,12 +891,14 @@ jobs:
               $tokenObject |
               ConvertTo-Json -Compress
 
-            @"
-            [$($item.Remote)]
-            type = drive
-            scope = drive
-            token = $tokenJson
-            "@ |
+            $configLines = @(
+              "[$($item.Remote)]"
+              "type = drive"
+              "scope = drive"
+              "token = $tokenJson"
+            )
+
+            $configLines |
               Set-Content `
                 -Path $config `
                 -Encoding UTF8
@@ -916,10 +918,18 @@ jobs:
               mkdir `
               "$($item.Remote):.persistent-rdp"
 
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not create .persistent-rdp on $($item.Secret)."
+            }
+
             & $rclone `
               --config $config `
               mkdir `
               "$($item.Remote):.persistent-rdp/files"
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Could not create .persistent-rdp/files on $($item.Secret)."
+            }
           }
 
           "RCLONE_EXE=$rclone" |
@@ -967,19 +977,19 @@ jobs:
             @{
               Name = "gdrive_g"
               Token = $env:DRIVE_TOKEN
-            },
+            }
             @{
               Name = "gdrive_h"
               Token = $env:DRIVE_TOKEN1
-            },
+            }
             @{
               Name = "gdrive_i"
               Token = $env:DRIVE_TOKEN2
-            },
+            }
             @{
               Name = "gdrive_j"
               Token = $env:DRIVE_TOKEN3
-            },
+            }
             @{
               Name = "gdrive_k"
               Token = $env:DRIVE_TOKEN4
@@ -1024,10 +1034,10 @@ jobs:
             -Force
 
           foreach ($name in @(
-            "gdrive_g",
-            "gdrive_h",
-            "gdrive_i",
-            "gdrive_j",
+            "gdrive_g"
+            "gdrive_h"
+            "gdrive_i"
+            "gdrive_j"
             "gdrive_k"
           )) {
 
@@ -1079,25 +1089,25 @@ jobs:
               Config = "$configDir\gdrive_g.conf"
               Remote = "gdrive_g:.persistent-rdp/files"
               Letter = "G:"
-            },
+            }
             @{
               Name = "H"
               Config = "$configDir\gdrive_h.conf"
               Remote = "gdrive_h:.persistent-rdp/files"
               Letter = "H:"
-            },
+            }
             @{
               Name = "I"
               Config = "$configDir\gdrive_i.conf"
               Remote = "gdrive_i:.persistent-rdp/files"
               Letter = "I:"
-            },
+            }
             @{
               Name = "J"
               Config = "$configDir\gdrive_j.conf"
               Remote = "gdrive_j:.persistent-rdp/files"
               Letter = "J:"
-            },
+            }
             @{
               Name = "K"
               Config = "$configDir\gdrive_k.conf"
@@ -1114,47 +1124,47 @@ jobs:
             $log =
               "$persistDir\rclone-$($m.Name).log"
 
-            $content = @"
-`$ErrorActionPreference = "Continue"
-
-`$rclone = "$rclone"
-`$config = "$($m.Config)"
-`$remote = "$($m.Remote)"
-`$letter = "$($m.Letter)"
-`$log = "$log"
-
-Write-Host "=========================================="
-Write-Host "Persistent-RDP Drive $($m.Name)"
-Write-Host "=========================================="
-Write-Host "Drive: `$letter"
-Write-Host "Remote: `$remote"
-Write-Host "Config: `$config"
-Write-Host ""
-Write-Host "Starting rclone mount..."
-Write-Host ""
-
-if (-not (Test-Path `$rclone)) {
-    Write-Host "ERROR: rclone.exe not found."
-    Read-Host "Press Enter to close"
-    exit 1
-}
-
-if (-not (Test-Path `$config)) {
-    Write-Host "ERROR: config not found."
-    Read-Host "Press Enter to close"
-    exit 1
-}
-
-Start-Sleep -Seconds 3
-
-& `$rclone --config `$config mount `$remote `$letter --network-mode --volname "Persistent-RDP-$($m.Name)" --vfs-cache-mode full --vfs-cache-max-size 10G --dir-cache-time 30s --poll-interval 30s --transfers 4 --checkers 8 --timeout 1m --contimeout 10s --log-file `$log --log-level INFO
-
-Write-Host ""
-Write-Host "rclone stopped for drive `$letter."
-Write-Host "The PowerShell window will remain open."
-Write-Host ""
-Read-Host "Press Enter to close"
-"@
+            $content = @(
+              '$ErrorActionPreference = "Continue"'
+              ""
+              "`$rclone = `"$rclone`""
+              "`$config = `"$($m.Config)`""
+              "`$remote = `"$($m.Remote)`""
+              "`$letter = `"$($m.Letter)`""
+              "`$log = `"$log`""
+              ""
+              'Write-Host "=========================================="'
+              'Write-Host "Persistent-RDP Drive ' + $m.Name + '"'
+              'Write-Host "=========================================="'
+              'Write-Host "Drive: $letter"'
+              'Write-Host "Remote: $remote"'
+              'Write-Host "Config: $config"'
+              'Write-Host ""'
+              'Write-Host "Starting rclone mount..."'
+              'Write-Host ""'
+              ""
+              'if (-not (Test-Path $rclone)) {'
+              '    Write-Host "ERROR: rclone.exe not found."'
+              '    Read-Host "Press Enter to close"'
+              '    exit 1'
+              '}'
+              ""
+              'if (-not (Test-Path $config)) {'
+              '    Write-Host "ERROR: config not found."'
+              '    Read-Host "Press Enter to close"'
+              '    exit 1'
+              '}'
+              ""
+              'Start-Sleep -Seconds 3'
+              ""
+              '& $rclone --config $config mount $remote $letter --network-mode --volname "Persistent-RDP-' + $m.Name + '" --vfs-cache-mode full --vfs-cache-max-size 10G --dir-cache-time 30s --poll-interval 30s --transfers 4 --checkers 8 --timeout 1m --contimeout 10s --log-file $log --log-level INFO'
+              ""
+              'Write-Host ""'
+              'Write-Host "rclone stopped for drive $letter."'
+              'Write-Host "The PowerShell window will remain open."'
+              'Write-Host ""'
+              'Read-Host "Press Enter to close"'
+            )
 
             Set-Content `
               -Path $script `
@@ -1176,10 +1186,10 @@ Read-Host "Press Enter to close"
             "C:\ProgramData\Persistent-RDP"
 
           foreach ($letter in @(
-            "G",
-            "H",
-            "I",
-            "J",
+            "G"
+            "H"
+            "I"
+            "J"
             "K"
           )) {
 
@@ -1193,11 +1203,11 @@ Read-Host "Press Enter to close"
             Start-Process `
               -FilePath "powershell.exe" `
               -ArgumentList @(
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-NoExit",
-                "-File",
+                "-NoProfile"
+                "-ExecutionPolicy"
+                "Bypass"
+                "-NoExit"
+                "-File"
                 "`"$script`""
               )
 
@@ -1232,39 +1242,39 @@ Read-Host "Press Enter to close"
           $userRoot =
             "C:\Users\$env:RDP_USER"
 
-          $content = @"
-`$ErrorActionPreference = "Continue"
-
-`$rclone = "$rclone"
-`$config = "$configDir\gdrive_g.conf"
-`$userRoot = "$userRoot"
-`$remote = "gdrive_g:.persistent-rdp/files"
-
-Write-Host "Persistent-RDP sync started."
-
-if ((Test-Path `$rclone) -and (Test-Path `$config)) {
-
-    if (Test-Path `$userRoot) {
-
-        Write-Host "Downloading persistent files..."
-
-        & `$rclone --config `$config copy `$remote `$userRoot --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"
-
-        Write-Host "Restore completed."
-
-        Write-Host "Uploading persistent files..."
-
-        & `$rclone --config `$config copy `$userRoot `$remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"
-
-        Write-Host "Upload completed."
-    }
-}
-else {
-    Write-Host "rclone or config missing."
-}
-
-Write-Host "Persistent-RDP sync finished."
-"@
+          $content = @(
+            '$ErrorActionPreference = "Continue"'
+            ""
+            "`$rclone = `"$rclone`""
+            "`$config = `"$configDir\gdrive_g.conf`""
+            "`$userRoot = `"$userRoot`""
+            '`$remote = "gdrive_g:.persistent-rdp/files"'
+            ""
+            'Write-Host "Persistent-RDP sync started."'
+            ""
+            'if ((Test-Path $rclone) -and (Test-Path $config)) {'
+            ""
+            '    if (Test-Path $userRoot) {'
+            ""
+            '        Write-Host "Downloading persistent files..."'
+            ""
+            '        & $rclone --config $config copy $remote $userRoot --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
+            ""
+            '        Write-Host "Restore completed."'
+            ""
+            '        Write-Host "Uploading persistent files..."'
+            ""
+            '        & $rclone --config $config copy $userRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
+            ""
+            '        Write-Host "Upload completed."'
+            '    }'
+            '}'
+            'else {'
+            '    Write-Host "rclone or config missing."'
+            '}'
+            ""
+            'Write-Host "Persistent-RDP sync finished."'
+          )
 
           Set-Content `
             -Path $syncScript `
@@ -1355,27 +1365,27 @@ Write-Host "Persistent-RDP sync finished."
             "C:\Users\$env:RDP_USER"
 
           $required = @(
-            "$userRoot\AppData",
-            "$userRoot\AppData\Local",
-            "$userRoot\AppData\LocalLow",
-            "$userRoot\AppData\Roaming",
-            "$userRoot\AppData\Roaming\rclone",
-            "$userRoot\AppData\Roaming\rclone\rclone.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_g.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_h.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_i.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_j.conf",
-            "$userRoot\AppData\Roaming\rclone\gdrive_k.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\rclone.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf",
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf",
-            "C:\ProgramData\Persistent-RDP\Mount-G.ps1",
-            "C:\ProgramData\Persistent-RDP\Mount-H.ps1",
-            "C:\ProgramData\Persistent-RDP\Mount-I.ps1",
-            "C:\ProgramData\Persistent-RDP\Mount-J.ps1",
+            "$userRoot\AppData"
+            "$userRoot\AppData\Local"
+            "$userRoot\AppData\LocalLow"
+            "$userRoot\AppData\Roaming"
+            "$userRoot\AppData\Roaming\rclone"
+            "$userRoot\AppData\Roaming\rclone\rclone.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_g.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_h.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_i.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_j.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_k.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\rclone.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf"
+            "C:\ProgramData\Persistent-RDP\Mount-G.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-H.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-I.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-J.ps1"
             "C:\ProgramData\Persistent-RDP\Mount-K.ps1"
           )
 
@@ -1677,23 +1687,44 @@ Write-Host "Persistent-RDP sync finished."
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
 
               $hdr = @{
-                Authorization = "Bearer $env:GH_TOKEN"
-                Accept = "application/vnd.github+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
               }
 
               $payload = @{
-                ts_tailnet = "${{ inputs.ts_tailnet }}"
-                ts_api_key = "${{ inputs.ts_api_key }}"
-                base_prefix = "bullet"
-                max_count = "10"
-                dry_run = "false"
+                ts_tailnet =
+                  "${{ inputs.ts_tailnet }}"
+
+                ts_api_key =
+                  "${{ inputs.ts_api_key }}"
+
+                base_prefix =
+                  "bullet"
+
+                max_count =
+                  "10"
+
+                dry_run =
+                  "false"
               }
 
-              $body = @{
-                ref = "${{ github.ref_name }}"
-                inputs = $payload
-              } | ConvertTo-Json -Depth 20
+              $body =
+                @{
+                  ref =
+                    "${{ github.ref_name }}"
+
+                  inputs =
+                    $payload
+
+                } |
+                ConvertTo-Json `
+                  -Depth 20
 
               Write-Host "Dispatching STOP workflow..."
 
@@ -1710,31 +1741,62 @@ Write-Host "Persistent-RDP sync finished."
             else {
 
               $payload = @{
-                ts_tailnet = "${{ inputs.ts_tailnet }}"
-                ts_api_key = "${{ inputs.ts_api_key }}"
-                ts_authkey = "${{ inputs.ts_authkey }}"
-                quick_test = "${{ inputs.quick_test }}"
-                runtime_minutes = "300"
-                do_purge = "true"
-                cycles = "$next"
-                rdp_count = "${{ inputs.rdp_count }}"
-                crd_code = "${{ inputs.crd_code }}"
-                crd_pin = "${{ inputs.crd_pin }}"
+                ts_tailnet =
+                  "${{ inputs.ts_tailnet }}"
+
+                ts_api_key =
+                  "${{ inputs.ts_api_key }}"
+
+                ts_authkey =
+                  "${{ inputs.ts_authkey }}"
+
+                quick_test =
+                  "${{ inputs.quick_test }}"
+
+                runtime_minutes =
+                  "300"
+
+                do_purge =
+                  "true"
+
+                cycles =
+                  "$next"
+
+                rdp_count =
+                  "${{ inputs.rdp_count }}"
+
+                crd_code =
+                  "${{ inputs.crd_code }}"
+
+                crd_pin =
+                  "${{ inputs.crd_pin }}"
               }
 
               $url2 =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
 
               $hdr2 = @{
-                Authorization = "Bearer $env:GH_TOKEN"
-                Accept = "application/vnd.github+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
               }
 
-              $body2 = @{
-                ref = "${{ github.ref_name }}"
-                inputs = $payload
-              } | ConvertTo-Json -Depth 20
+              $body2 =
+                @{
+                  ref =
+                    "${{ github.ref_name }}"
+
+                  inputs =
+                    $payload
+
+                } |
+                ConvertTo-Json `
+                  -Depth 20
 
               Write-Host "Dispatching Workflow A self-renew..."
 
@@ -1746,9 +1808,11 @@ Write-Host "Persistent-RDP sync finished."
                 -Body $body2 `
                 -ErrorAction Stop
 
-              Write-Host "Dispatched Workflow A self-renew successfully."
+              Write-Host `
+                "Dispatched Workflow A self-renew successfully."
             }
           }
           else {
-            Write-Host "No cycles configured. Done."
+            Write-Host `
+              "No cycles configured. Done."
           }
