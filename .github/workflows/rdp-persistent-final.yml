@@ -9,38 +9,47 @@ on:
       ts_tailnet:
         description: "Tailscale tailnet (e.g. you@gmail.com)"
         required: true
+
       ts_api_key:
         description: "Tailscale API key (device admin, no Bearer)"
         required: true
+
       ts_authkey:
         description: "Tailscale Auth key (reusable or ephemeral)"
         required: true
+
       quick_test:
         description: "Run 5-minute test"
         type: boolean
         default: false
+
       runtime_minutes:
         description: "Runtime (max 360; default 300 when not test)"
         required: false
         default: "300"
+
       do_purge:
         description: "Purge bullet* devices at start (single instance only)"
         required: false
         default: "true"
+
       cycles:
         description: "0=stop after A; N=handoffs left incl this run"
         required: false
         default: "9999"
+
       rdp_count:
         description: "How many RDP instances (1-10) [ignored if CRD provided]"
         required: false
         default: "1"
+
       crd_code:
         description: >-
           Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
           If provided -> single instance; CRD launches first.
         required: false
         default: ""
+
       crd_pin:
         description: "CRD PIN (6–12 digits). Used when launching CRD to avoid interactive prompt."
         required: false
@@ -55,6 +64,10 @@ defaults:
     shell: pwsh
 
 jobs:
+
+  # ============================================================
+  # SETUP
+  # ============================================================
 
   setup:
     runs-on: ubuntu-latest
@@ -118,6 +131,10 @@ jobs:
               -Append `
               -Encoding utf8
 
+  # ============================================================
+  # RDP
+  # ============================================================
+
   rdp:
     needs: setup
 
@@ -134,6 +151,10 @@ jobs:
       RDP_PASS: Yousif1990
 
     steps:
+
+      # ========================================================
+      # CRD FLAG
+      # ========================================================
 
       - name: Set CRD flag early
         run: |
@@ -155,6 +176,10 @@ jobs:
           }
 
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+
+      # ========================================================
+      # CRD INSTALL
+      # ========================================================
 
       - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
@@ -237,6 +262,10 @@ jobs:
             Write-Host "CRD host already installed."
           }
 
+      # ========================================================
+      # CRD START
+      # ========================================================
+
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
@@ -270,6 +299,7 @@ jobs:
           }
 
           if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
+
             $code = (
               [regex]::Match(
                 $raw,
@@ -324,6 +354,10 @@ jobs:
 
           Write-Host "CRD launch step completed."
 
+      # ========================================================
+      # CRD VERIFY
+      # ========================================================
+
       - name: Verify CRD registration
         if: env.CRD_ENABLED == '1'
         run: |
@@ -363,6 +397,10 @@ jobs:
             Write-Warning `
               "CRD service not running yet."
           }
+
+      # ========================================================
+      # HOSTNAME / RUNTIME
+      # ========================================================
 
       - name: Decide hostname + runtime
         run: |
@@ -421,6 +459,10 @@ jobs:
 
           Write-Host `
             "Hostname: $hn | Runtime: $runtime"
+
+      # ========================================================
+      # PURGE
+      # ========================================================
 
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
@@ -482,6 +524,10 @@ jobs:
             Write-Host "Purge disabled."
           }
 
+      # ========================================================
+      # TAILSCALE
+      # ========================================================
+
       - name: Install + Up Tailscale
         run: |
           winget install `
@@ -524,6 +570,10 @@ jobs:
               "Tailscale not found."
             exit 1
           }
+
+      # ========================================================
+      # RDP USER
+      # ========================================================
 
       - name: Enable RDP user + firewall
         run: |
@@ -587,6 +637,10 @@ jobs:
           Write-Host "Host: $env:TS_HOSTNAME"
           Write-Host "IP: $env:TAILSCALE_IP"
 
+      # ========================================================
+      # PYTHON
+      # ========================================================
+
       - name: Install Python libs
         run: |
           python -m pip install `
@@ -601,6 +655,10 @@ jobs:
 
           python -c `
             "import pyautogui, pynput, PIL; print('Python libs OK')"
+
+      # ========================================================
+      # RCLONE + WINFSP
+      # ========================================================
 
       - name: Install rclone + WinFsp
         shell: pwsh
@@ -636,10 +694,6 @@ jobs:
               $zip `
               -UseBasicParsing `
               -ErrorAction Stop
-
-            if (-not (Test-Path $zip)) {
-              throw "rclone download failed."
-            }
 
             Remove-Item `
               $extract `
@@ -680,10 +734,6 @@ jobs:
               -ErrorAction SilentlyContinue
           }
 
-          if (-not (Test-Path $rcloneExe)) {
-            throw "rclone installation failed."
-          }
-
           & $rcloneExe version
 
           if ($LASTEXITCODE -ne 0) {
@@ -698,9 +748,6 @@ jobs:
 
           if (-not (Test-Path $winfspPath)) {
 
-            Write-Host "WinFsp not found."
-            Write-Host "Downloading WinFsp 2.1.25156..."
-
             $winfspUrl =
               "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
 
@@ -712,15 +759,11 @@ jobs:
               -UseBasicParsing `
               -ErrorAction Stop
 
-            if (-not (Test-Path $winfspMsi)) {
-              throw "WinFsp MSI was not downloaded."
-            }
-
             $size =
               (Get-Item $winfspMsi).Length
 
             if ($size -lt 1000000) {
-              throw "WinFsp MSI appears invalid or incomplete. Size: $size bytes"
+              throw "WinFsp MSI appears invalid or incomplete."
             }
 
             $proc =
@@ -749,7 +792,9 @@ jobs:
             throw "WinFsp installation verification failed."
           }
 
-          Write-Host "rclone + WinFsp READY"
+      # ========================================================
+      # GOOGLE DRIVE CONFIG - FIVE TOKENS / FIVE REMOTES
+      # ========================================================
 
       - name: Prepare Google Drive persistence - 5 drives
         shell: pwsh
@@ -838,8 +883,6 @@ jobs:
                 -Path $config `
                 -Encoding UTF8
 
-            Write-Host "Testing $($item.Secret)..."
-
             & $rclone `
               --config $config `
               lsd `
@@ -859,6 +902,8 @@ jobs:
               --config $config `
               mkdir `
               "$($item.Remote):.persistent-rdp/files"
+
+            Write-Host "$($item.Secret) -> $($item.Letter) READY"
           }
 
           "RCLONE_EXE=$rclone" |
@@ -870,6 +915,91 @@ jobs:
             Out-File `
               -Append `
               $env:GITHUB_ENV
+
+      # ========================================================
+      # CREATE LOCAL PERSISTENT-RDP DIRECTORY TREE
+      # INCLUDING APPDATA AND DRIVE PATHS
+      # ========================================================
+
+      - name: Prepare persistent Windows storage paths
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $root =
+            "D:\Persistent-RDP"
+
+          $paths = @(
+            "$root",
+            "$root\Desktop",
+            "$root\Documents",
+            "$root\Downloads",
+            "$root\Pictures",
+            "$root\Videos",
+            "$root\Music",
+            "$root\Favorites",
+            "$root\Links",
+            "$root\Searches",
+            "$root\Saved Games",
+            "$root\Contacts",
+            "$root\AppData",
+            "$root\AppData\Local",
+            "$root\AppData\LocalLow",
+            "$root\AppData\Roaming",
+            "$root\AppData\Local\Temp",
+            "$root\AppData\Roaming\Microsoft",
+            "$root\AppData\Roaming\Microsoft\Windows",
+            "$root\AppData\Roaming\Microsoft\Windows\Start Menu",
+            "$root\AppData\Roaming\Microsoft\Windows\Start Menu\Programs",
+            "$root\AppData\Local\Microsoft",
+            "$root\AppData\Local\Packages",
+            "$root\AppData\Local\Programs",
+            "$root\AppData\Local\Temp",
+            "$root\Users",
+            "$root\ProgramData",
+            "$root\ProgramFiles",
+            "$root\ProgramFiles-x86",
+            "$root\Projects",
+            "$root\Projects\AE",
+            "$root\Assets",
+            "$root\Assets\Fonts",
+            "$root\Plugins",
+            "$root\Windows-Profile",
+            "$root\Drive-Paths",
+            "$root\Drive-Paths\G",
+            "$root\Drive-Paths\H",
+            "$root\Drive-Paths\I",
+            "$root\Drive-Paths\J",
+            "$root\Drive-Paths\K"
+          )
+
+          foreach ($path in $paths) {
+            New-Item `
+              -ItemType Directory `
+              -Path $path `
+              -Force |
+              Out-Null
+          }
+
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT WINDOWS PATHS READY"
+          Write-Host "=========================================="
+          Write-Host "Root: $root"
+          Write-Host "AppData: $root\AppData"
+          Write-Host "Roaming: $root\AppData\Roaming"
+          Write-Host "Local: $root\AppData\Local"
+          Write-Host "LocalLow: $root\AppData\LocalLow"
+          Write-Host "G path: $root\Drive-Paths\G"
+          Write-Host "H path: $root\Drive-Paths\H"
+          Write-Host "I path: $root\Drive-Paths\I"
+          Write-Host "J path: $root\Drive-Paths\J"
+          Write-Host "K path: $root\Drive-Paths\K"
+          Write-Host "=========================================="
+
+      # ========================================================
+      # CREATE LOGON PERSISTENCE SCRIPTS
+      # ========================================================
 
       - name: Install five-drive persistence at RDP user logon
         shell: pwsh
@@ -891,11 +1021,18 @@ jobs:
           $rclone =
             "C:\Tools\rclone\rclone.exe"
 
+          $persistentRoot =
+            "D:\Persistent-RDP"
+
           New-Item `
             -ItemType Directory `
             -Path $persistDir `
             -Force |
             Out-Null
+
+          # ----------------------------------------------------
+          # DRIVE MOUNT SCRIPT
+          # ----------------------------------------------------
 
           $mountScript =
             "$persistDir\Start-PersistentDrives.ps1"
@@ -938,7 +1075,9 @@ jobs:
 
           foreach (`$drive in `$drives) {
 
-              if (-not (Test-Path `$drive.Config)) {
+              if (
+                  -not (Test-Path `$drive.Config)
+              ) {
                   Write-Warning "Missing rclone config: `$(`$drive.Config)"
                   continue
               }
@@ -976,18 +1115,29 @@ jobs:
                       "INFO"
                   )
 
+                  Write-Host "Mounting `$(`$drive.Letter) ..."
+
                   Start-Process `
                       -FilePath `$rclone `
                       -ArgumentList `$args `
                       -WindowStyle Hidden
               }
+              else {
+                  Write-Host "`$(`$drive.Letter) already exists."
+              }
 
               Start-Sleep -Seconds 2
           }
+
+          Write-Host "Five persistent drives started."
           "@ |
             Set-Content `
               -Path $mountScript `
               -Encoding UTF8
+
+          # ----------------------------------------------------
+          # APPDATA / USER PROFILE PERSISTENCE MONITOR
+          # ----------------------------------------------------
 
           $monitorScript =
             "$persistDir\Start-PersistentMonitor.ps1"
@@ -1007,23 +1157,13 @@ jobs:
           `$remoteRoot =
               "gdrive_g:.persistent-rdp/files"
 
-          # AppData IS INCLUDED.
           `$excluded = @()
 
-          function Is-Excluded([string]`$path) {
-              foreach (`$x in `$excluded) {
-                  if (`$path.IndexOf(
-                      `$x,
-                      [System.StringComparison]::OrdinalIgnoreCase
-                  ) -ge 0) {
-                      return `$true
-                  }
-              }
-              return `$false
-          }
-
           function Relative([string]`$path) {
-              if (`$path.Length -le `$userRoot.Length) {
+
+              if (
+                  `$path.Length -le `$userRoot.Length
+              ) {
                   return ""
               }
 
@@ -1041,15 +1181,13 @@ jobs:
 
           function Upload([string]`$path) {
 
-              if (-not (
-                  Test-Path `
-                      -LiteralPath `$path `
-                      -PathType Leaf
-              )) {
-                  return
-              }
-
-              if (Is-Excluded `$path) {
+              if (
+                  -not (
+                      Test-Path `
+                          -LiteralPath `$path `
+                          -PathType Leaf
+                  )
+              ) {
                   return
               }
 
@@ -1058,12 +1196,18 @@ jobs:
                   `$relative =
                       Relative `$path
 
-                  if ([string]::IsNullOrWhiteSpace(`$relative)) {
+                  if (
+                      [string]::IsNullOrWhiteSpace(
+                          `$relative
+                      )
+                  ) {
                       return
                   }
 
                   `$remote =
                       "`$remoteRoot/`$relative"
+
+                  Write-Host "PERSIST: `$relative"
 
                   & `$rclone `
                       --config `$config `
@@ -1074,6 +1218,11 @@ jobs:
                       --retries 3 `
                       --low-level-retries 10
 
+                  if (
+                      `$LASTEXITCODE -eq 0
+                  ) {
+                      Write-Host "SAVED: `$relative"
+                  }
               }
               catch {
                   Write-Warning `
@@ -1083,16 +1232,16 @@ jobs:
 
           function Delete-Remote([string]`$path) {
 
-              if (Is-Excluded `$path) {
-                  return
-              }
-
               try {
 
                   `$relative =
                       Relative `$path
 
-                  if ([string]::IsNullOrWhiteSpace(`$relative)) {
+                  if (
+                      [string]::IsNullOrWhiteSpace(
+                          `$relative
+                      )
+                  ) {
                       return
                   }
 
@@ -1146,9 +1295,13 @@ jobs:
               `$watcher `
               Changed `
               -Action {
-                  Start-Sleep -Milliseconds 700
+
+                  Start-Sleep `
+                      -Milliseconds 700
+
                   Upload `
                       `$Event.SourceEventArgs.FullPath
+
               } |
               Out-Null
 
@@ -1173,17 +1326,24 @@ jobs:
           Write-Host "=========================================="
           Write-Host "PERSISTENT-RDP MONITOR ACTIVE"
           Write-Host "Watching: `$userRoot"
-          Write-Host "Primary persistence drive: G:"
-          Write-Host "AppData: INCLUDED"
+          Write-Host "AppData INCLUDED"
+          Write-Host "AppData\Local INCLUDED"
+          Write-Host "AppData\LocalLow INCLUDED"
+          Write-Host "AppData\Roaming INCLUDED"
           Write-Host "=========================================="
 
           while (`$true) {
-              Start-Sleep -Seconds 10
+              Start-Sleep `
+                  -Seconds 10
           }
           "@ |
             Set-Content `
               -Path $monitorScript `
               -Encoding UTF8
+
+          # ----------------------------------------------------
+          # RESTORE SCRIPT
+          # ----------------------------------------------------
 
           $restoreScript =
             "$persistDir\Restore-PersistentFiles.ps1"
@@ -1210,21 +1370,31 @@ jobs:
               "$monitorScript"
 
           if (
-              (Test-Path `$rclone) -and
-              (Test-Path `$config)
+              Test-Path `$rclone
           ) {
 
-              Write-Host "Restoring persistent user files including AppData..."
+              if (
+                  Test-Path `$config
+              ) {
 
-              & `$rclone `
-                  --config `$config `
-                  copy `
-                  `$remoteRoot `
-                  `$userRoot `
-                  --create-empty-src-dirs `
-                  --timeout 300s `
-                  --retries 3 `
-                  --low-level-retries 10
+                  Write-Host "Restoring persistent user profile..."
+
+                  New-Item `
+                      -ItemType Directory `
+                      -Path `$userRoot `
+                      -Force |
+                      Out-Null
+
+                  & `$rclone `
+                      --config `$config `
+                      copy `
+                      `$remoteRoot `
+                      `$userRoot `
+                      --create-empty-src-dirs `
+                      --timeout 300s `
+                      --retries 3 `
+                      --low-level-retries 10
+              }
           }
 
           Start-Process `
@@ -1256,6 +1426,10 @@ jobs:
             Set-Content `
               -Path $restoreScript `
               -Encoding UTF8
+
+          # ----------------------------------------------------
+          # SCHEDULED TASK
+          # ----------------------------------------------------
 
           Unregister-ScheduledTask `
             -TaskName "Persistent-RDP-Logon" `
@@ -1290,13 +1464,27 @@ jobs:
             -Force |
             Out-Null
 
+          Write-Host ""
+          Write-Host "=========================================="
           Write-Host "PERSISTENCE INSTALLED"
+          Write-Host "=========================================="
+          Write-Host "User: $user"
           Write-Host "G: DRIVE_TOKEN"
           Write-Host "H: DRIVE_TOKEN1"
           Write-Host "I: DRIVE_TOKEN2"
           Write-Host "J: DRIVE_TOKEN3"
           Write-Host "K: DRIVE_TOKEN4"
           Write-Host "AppData: INCLUDED"
+          Write-Host "AppData Local: INCLUDED"
+          Write-Host "AppData LocalLow: INCLUDED"
+          Write-Host "AppData Roaming: INCLUDED"
+          Write-Host "Restore: at RDP login"
+          Write-Host "Monitor: at RDP login"
+          Write-Host "=========================================="
+
+      # ========================================================
+      # VERIFY PERSISTENCE + FIVE DRIVES + APPDATA
+      # ========================================================
 
       - name: Verify persistence setup
         run: |
@@ -1314,7 +1502,10 @@ jobs:
             exit 1
           }
 
-          if (Test-Path "C:\Tools\rclone\rclone.exe") {
+          if (
+            Test-Path `
+              "C:\Tools\rclone\rclone.exe"
+          ) {
             Write-Host "rclone OK."
           }
           else {
@@ -1322,7 +1513,10 @@ jobs:
             exit 1
           }
 
-          if (Test-Path "C:\Program Files (x86)\WinFsp") {
+          if (
+            Test-Path `
+              "C:\Program Files (x86)\WinFsp"
+          ) {
             Write-Host "WinFsp OK."
           }
           else {
@@ -1345,7 +1539,32 @@ jobs:
             }
           }
 
+          $persistentPaths = @(
+            "D:\Persistent-RDP\AppData",
+            "D:\Persistent-RDP\AppData\Local",
+            "D:\Persistent-RDP\AppData\LocalLow",
+            "D:\Persistent-RDP\AppData\Roaming",
+            "D:\Persistent-RDP\Drive-Paths\G",
+            "D:\Persistent-RDP\Drive-Paths\H",
+            "D:\Persistent-RDP\Drive-Paths\I",
+            "D:\Persistent-RDP\Drive-Paths\J",
+            "D:\Persistent-RDP\Drive-Paths\K"
+          )
+
+          foreach ($path in $persistentPaths) {
+            if (-not (Test-Path $path)) {
+              Write-Error "Missing persistent path: $path"
+              exit 1
+            }
+          }
+
           Write-Host "All five Google Drive configs OK."
+          Write-Host "AppData persistence paths OK."
+          Write-Host "Drive path storage OK."
+
+      # ========================================================
+      # RUSTDESK
+      # ========================================================
 
       - name: Install RustDesk
         run: |
@@ -1384,8 +1603,13 @@ jobs:
           }
 
           if (-not (Test-Path $rdExe)) {
-            throw "RustDesk installation failed."
+            throw `
+              "RustDesk installation failed."
           }
+
+      # ========================================================
+      # RUSTDESK PORTS
+      # ========================================================
 
       - name: Open RustDesk ports
         run: |
@@ -1424,6 +1648,10 @@ jobs:
             protocol=UDP `
             localport=21116
 
+      # ========================================================
+      # RUSTDESK + SCREENSHOT
+      # ========================================================
+
       - name: Launch RustDesk + Screenshot
         run: |
           $rdExe =
@@ -1438,8 +1666,13 @@ jobs:
           $screenshotPath =
             "$env:TEMP\rustdesk_${{ matrix.id }}.png"
 
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
+          Add-Type `
+            -AssemblyName `
+            System.Windows.Forms
+
+          Add-Type `
+            -AssemblyName `
+            System.Drawing
 
           $bounds =
             [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -1451,7 +1684,9 @@ jobs:
               $bounds.Height
 
           $graphics =
-            [System.Drawing.Graphics]::FromImage($bitmap)
+            [System.Drawing.Graphics]::FromImage(
+              $bitmap
+            )
 
           $graphics.CopyFromScreen(
             $bounds.Location,
@@ -1473,11 +1708,15 @@ jobs:
               https://store1.gofile.io/uploadFile
 
           try {
+
             $json =
               $curlResult |
               ConvertFrom-Json
 
-            if ($json.status -eq "ok") {
+            if (
+              $json.status -eq "ok"
+            ) {
+
               "SCREENSHOT_URL=$($json.data.downloadPage)" |
                 Out-File `
                   -Append `
@@ -1485,8 +1724,13 @@ jobs:
             }
           }
           catch {
-            Write-Warning "Screenshot upload failed."
+            Write-Warning `
+              "Screenshot upload failed."
           }
+
+      # ========================================================
+      # STORAGE STATUS
+      # ========================================================
 
       - name: Display Google Drive persistence status
         run: |
@@ -1503,15 +1747,27 @@ jobs:
 
           Write-Host "All five drives mount after Yousif190 logs in."
 
-          Write-Host "G: persistent root: Google Drive/.persistent-rdp/files"
-          Write-Host "H: persistent root: Google Drive/.persistent-rdp/files"
-          Write-Host "I: persistent root: Google Drive/.persistent-rdp/files"
-          Write-Host "J: persistent root: Google Drive/.persistent-rdp/files"
-          Write-Host "K: persistent root: Google Drive/.persistent-rdp/files"
+          Write-Host "Google Drive root: .persistent-rdp/files"
+
+          Write-Host "Windows persistent root: D:\Persistent-RDP"
+
+          Write-Host "AppData: INCLUDED"
+
+          Write-Host "AppData\Local: INCLUDED"
+
+          Write-Host "AppData\LocalLow: INCLUDED"
+
+          Write-Host "AppData\Roaming: INCLUDED"
+
+          Write-Host "Drive paths: G:H:I:J:K"
 
           Write-Host "Monitor starts at RDP login."
-          Write-Host "AppData is INCLUDED."
+
           Write-Host "=========================================="
+
+      # ========================================================
+      # KEEP ALIVE
+      # ========================================================
 
       - name: Keep alive
         run: |
@@ -1519,12 +1775,18 @@ jobs:
             [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end =
-            (Get-Date).AddMinutes($mins)
+            (Get-Date).AddMinutes(
+              $mins
+            )
 
-          while ((Get-Date) -lt $end) {
+          while (
+            (Get-Date) -lt $end
+          ) {
 
             $mode =
-              if ("$env:CRD_ENABLED" -eq '1') {
+              if (
+                "$env:CRD_ENABLED" -eq '1'
+              ) {
                 '[CRD+RustDesk/RDP+Persistence]'
               }
               else {
@@ -1536,11 +1798,17 @@ jobs:
               (Get-Date).ToString("HH:mm:ss") +
               " ends at " +
               $end.ToString("HH:mm:ss") +
-              " | Persistent Drives: G:H:I:J:K:"
+              " | Persistent Drives: G:H:I:J:K" +
+              " | AppData: ON"
             )
 
-            Start-Sleep -Seconds 60
+            Start-Sleep `
+              -Seconds 60
           }
+
+      # ========================================================
+      # FINAL SAFETY SYNC
+      # ========================================================
 
       - name: Final Google Drive sync
         if: always()
@@ -1557,12 +1825,15 @@ jobs:
             (Test-Path $config)
           ) {
 
-            Write-Host "Final persistence sync starting..."
+            Write-Host `
+              "Final persistence sync starting..."
 
             $userRoot =
               "C:\Users\$env:RDP_USER"
 
-            if (-not (Test-Path $userRoot)) {
+            if (
+              -not (Test-Path $userRoot)
+            ) {
               $userRoot =
                 "$env:USERPROFILE"
             }
@@ -1578,7 +1849,8 @@ jobs:
               --low-level-retries 10
 
             if ($LASTEXITCODE -eq 0) {
-              Write-Host "Final persistence sync completed."
+              Write-Host `
+                "Final persistence sync completed."
             }
             else {
               Write-Warning `
@@ -1589,6 +1861,10 @@ jobs:
             Write-Host `
               "rclone/config unavailable; skipping final sync."
           }
+
+      # ========================================================
+      # DISPATCH NEXT OR STOP
+      # ========================================================
 
       - name: Dispatch next or stop
         if: always()
@@ -1650,6 +1926,8 @@ jobs:
                 ConvertTo-Json `
                   -Depth 20
 
+              Write-Host "Dispatching STOP workflow..."
+
               Invoke-RestMethod `
                 -Method POST `
                 -Uri $url `
@@ -1658,7 +1936,8 @@ jobs:
                 -Body $body `
                 -ErrorAction Stop
 
-              Write-Host "Dispatched STOP successfully."
+              Write-Host `
+                "Dispatched STOP successfully."
             }
             else {
 
@@ -1720,6 +1999,9 @@ jobs:
                 ConvertTo-Json `
                   -Depth 20
 
+              Write-Host `
+                "Dispatching Workflow A self-renew..."
+
               Invoke-RestMethod `
                 -Method POST `
                 -Uri $url2 `
@@ -1733,5 +2015,6 @@ jobs:
             }
           }
           else {
-            Write-Host "No cycles configured. Done."
+            Write-Host `
+              "No cycles configured. Done."
           }
