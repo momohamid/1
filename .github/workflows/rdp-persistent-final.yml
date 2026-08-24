@@ -1177,6 +1177,76 @@ jobs:
 
           Write-Host "Five mount scripts created."
 
+      - name: Prepare D persistent workspace and restore from Google Drive
+        shell: pwsh
+        env:
+          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dRoot = "D:\Persistent-RDP"
+          $rclone = "C:\Tools\rclone\rclone.exe"
+          $config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+          $remote = "gdrive_g:.persistent-rdp/D-storage"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $dRoot `
+            -Force |
+            Out-Null
+
+          if (-not (Test-Path $rclone)) {
+            throw "rclone.exe not found."
+          }
+
+          if (-not (Test-Path $config)) {
+            throw "Google Drive config not found."
+          }
+
+          & $rclone `
+            --config $config `
+            mkdir `
+            $remote
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not prepare Google Drive D-storage."
+          }
+
+          Write-Host "Restoring D persistent workspace from Google Drive..."
+
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            $dRoot `
+            --create-empty-src-dirs `
+            --timeout 300s `
+            --retries 3 `
+            --low-level-retries 10 `
+            --transfers 4 `
+            --checkers 8
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "D persistent workspace restore failed."
+          }
+
+          "D_PERSIST_DIR=$dRoot" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          "D_PERSIST_REMOTE=$remote" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host "=========================================="
+          Write-Host "D PERSISTENT WORKSPACE READY"
+          Write-Host "Local: $dRoot"
+          Write-Host "Remote: $remote"
+          Write-Host "Files placed here will be restored on the next run."
+          Write-Host "=========================================="
+
       - name: Start five PowerShell mount windows
         shell: pwsh
         run: |
@@ -1336,6 +1406,48 @@ jobs:
 
           Write-Host "Persistent-RDP logon task installed."
 
+      - name: Create D persistent sync helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $persistDir = "C:\ProgramData\Persistent-RDP"
+          $syncScript = "$persistDir\D-Persistent-Sync.ps1"
+          $rclone = "C:\Tools\rclone\rclone.exe"
+          $config = "$persistDir\rclone\gdrive_g.conf"
+          $dRoot = "D:\Persistent-RDP"
+          $remote = "gdrive_g:.persistent-rdp/D-storage"
+
+          $content = @'
+          $ErrorActionPreference = "Continue"
+          $rclone = "C:\Tools\rclone\rclone.exe"
+          $config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+          $dRoot = "D:\Persistent-RDP"
+          $remote = "gdrive_g:.persistent-rdp/D-storage"
+
+          if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $dRoot)) {
+              Write-Host "Uploading D persistent workspace..."
+              & $rclone --config $config copy $dRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --transfers 4 --checkers 8
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "D persistent workspace upload completed."
+              }
+              else {
+                  Write-Warning "D persistent workspace upload returned exit code $LASTEXITCODE."
+              }
+          }
+          else {
+              Write-Warning "D persistence prerequisites are missing."
+          }
+          '@
+
+          Set-Content `
+            -Path $syncScript `
+            -Value $content `
+            -Encoding UTF8 `
+            -Force
+
+          Write-Host "D sync helper created: $syncScript"
+
       - name: Verify persistence setup
         run: |
           $task =
@@ -1387,6 +1499,8 @@ jobs:
             "C:\ProgramData\Persistent-RDP\Mount-I.ps1"
             "C:\ProgramData\Persistent-RDP\Mount-J.ps1"
             "C:\ProgramData\Persistent-RDP\Mount-K.ps1"
+            "C:\ProgramData\Persistent-RDP\D-Persistent-Sync.ps1"
+            "D:\Persistent-RDP"
           )
 
           foreach ($path in $required) {
@@ -1577,6 +1691,7 @@ jobs:
           Write-Host ""
           Write-Host "Five PowerShell mount windows started."
           Write-Host "G: H: I: J: K:"
+          Write-Host "D: D:\Persistent-RDP = persistent workspace (restored/uploaded via Google Drive)"
           Write-Host "=========================================="
 
       - name: Keep alive
@@ -1654,11 +1769,41 @@ jobs:
               --exclude "AppData/**"
 
             if ($LASTEXITCODE -eq 0) {
-              Write-Host "Final persistence sync completed."
+              Write-Host "Final C: profile persistence sync completed."
             }
             else {
               Write-Warning `
-                "Final persistence sync returned exit code $LASTEXITCODE."
+                "Final C: profile persistence sync returned exit code $LASTEXITCODE."
+            }
+
+            $dRoot = "D:\Persistent-RDP"
+            $dRemote = "gdrive_g:.persistent-rdp/D-storage"
+
+            if (Test-Path $dRoot) {
+              Write-Host "Final D persistent workspace sync starting..."
+
+              & $rclone `
+                --config $config `
+                copy `
+                $dRoot `
+                $dRemote `
+                --create-empty-src-dirs `
+                --timeout 300s `
+                --retries 3 `
+                --low-level-retries 10 `
+                --transfers 4 `
+                --checkers 8
+
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Final D persistent workspace sync completed."
+              }
+              else {
+                Write-Warning `
+                  "Final D persistent workspace sync returned exit code $LASTEXITCODE."
+              }
+            }
+            else {
+              Write-Host "D:\Persistent-RDP does not exist; skipping D sync."
             }
           }
           else {
