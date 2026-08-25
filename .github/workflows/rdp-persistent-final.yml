@@ -1175,16 +1175,13 @@ jobs:
             Write-Host "Created $script"
           }
 
-          Write-Host "Five mount scripts created."            - name: Create persistent sync script
+          Write-Host "Five mount scripts created."                  - name: Create persistent sync script
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
           $persistDir = "C:\ProgramData\Persistent-RDP"
           $syncScript = "$persistDir\Persistent-Sync.ps1"
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $configDir = "$persistDir\rclone"
-          $userRoot = "C:\Users\$env:RDP_USER"
 
           New-Item `
             -ItemType Directory `
