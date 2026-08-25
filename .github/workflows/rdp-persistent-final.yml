@@ -663,9 +663,22 @@ jobs:
               Out-Null
           }
 
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "COMPLETE USER PROFILE CREATED"
+          Write-Host "=========================================="
+          Write-Host "Root: $root"
+          Write-Host "AppData: $root\AppData"
+          Write-Host "Local: $root\AppData\Local"
+          Write-Host "LocalLow: $root\AppData\LocalLow"
+          Write-Host "Roaming: $root\AppData\Roaming"
+          Write-Host "=========================================="
+
       - name: Install Python libs
         run: |
-          python -m pip install --upgrade pip
+          python -m pip install `
+            --upgrade `
+            pip
 
           python -m pip install `
             --force-reinstall `
@@ -681,8 +694,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $rcloneDir = "C:\Tools\rclone"
-          $rcloneExe = "$rcloneDir\rclone.exe"
+          $rcloneDir =
+            "C:\Tools\rclone"
+
+          $rcloneExe =
+            "$rcloneDir\rclone.exe"
 
           New-Item `
             -ItemType Directory `
@@ -692,8 +708,13 @@ jobs:
 
           if (-not (Test-Path $rcloneExe)) {
 
-            $zip = "$env:TEMP\rclone.zip"
-            $extract = "$env:TEMP\rclone_extract"
+            Write-Host "Downloading rclone..."
+
+            $zip =
+              "$env:TEMP\rclone.zip"
+
+            $extract =
+              "$env:TEMP\rclone_extract"
 
             Invoke-WebRequest `
               -Uri `
@@ -724,8 +745,20 @@ jobs:
               $rcloneExe `
               -Force
 
-            Remove-Item $zip -Force -ErrorAction SilentlyContinue
-            Remove-Item $extract -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item `
+              $zip `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+            Remove-Item `
+              $extract `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
+          }
+
+          if (-not (Test-Path $rcloneExe)) {
+            throw "rclone installation failed."
           }
 
           & $rcloneExe version
@@ -737,14 +770,17 @@ jobs:
           $winfspPath =
             "C:\Program Files (x86)\WinFsp"
 
+          $winfspMsi =
+            "$env:TEMP\winfsp-2.1.25156.msi"
+
           if (-not (Test-Path $winfspPath)) {
 
-            $winfspMsi =
-              "$env:TEMP\winfsp-2.1.25156.msi"
+            $winfspUrl =
+              "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi"
 
             Invoke-WebRequest `
               -Uri `
-              "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
+              $winfspUrl `
               -OutFile `
               $winfspMsi `
               -UseBasicParsing `
@@ -762,7 +798,8 @@ jobs:
                 -PassThru
 
             if ($proc.ExitCode -ne 0) {
-              throw "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
+              throw `
+                "WinFsp installation failed. MSI exit code: $($proc.ExitCode)"
             }
 
             Remove-Item `
@@ -775,6 +812,8 @@ jobs:
             throw "WinFsp installation verification failed."
           }
 
+          Write-Host "rclone + WinFsp READY"
+
       - name: Prepare Google Drive persistence - 5 drives
         shell: pwsh
         env:
@@ -786,8 +825,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $configDir = "C:\ProgramData\Persistent-RDP\rclone"
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          $configDir =
+            "C:\ProgramData\Persistent-RDP\rclone"
 
           New-Item `
             -ItemType Directory `
@@ -842,18 +884,21 @@ jobs:
               throw "$($item.Secret) does not contain access_token."
             }
 
-            $config = "$configDir\$($item.Remote).conf"
+            $config =
+              "$configDir\$($item.Remote).conf"
 
             $tokenJson =
               $tokenObject |
               ConvertTo-Json -Compress
 
-            @(
+            $configLines = @(
               "[$($item.Remote)]"
               "type = drive"
               "scope = drive"
               "token = $tokenJson"
-            ) |
+            )
+
+            $configLines |
               Set-Content `
                 -Path $config `
                 -Encoding UTF8
@@ -888,10 +933,16 @@ jobs:
           }
 
           "RCLONE_EXE=$rclone" |
-            Out-File -Append $env:GITHUB_ENV
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
 
           "RCLONE_CONFIG_DIR=$configDir" |
-            Out-File -Append $env:GITHUB_ENV
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host "Five Google Drive configs created."
 
       - name: Create real rclone.conf for Yousif190 and five drives
         shell: pwsh
@@ -904,9 +955,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
 
-          $userRoot = "C:\Users\$env:RDP_USER"
-          $rcloneAppData = "$userRoot\AppData\Roaming\rclone"
-          $configDir = "C:\ProgramData\Persistent-RDP\rclone"
+          $userRoot =
+            "C:\Users\$env:RDP_USER"
+
+          $rcloneAppData =
+            "$userRoot\AppData\Roaming\rclone"
+
+          $configDir =
+            "C:\ProgramData\Persistent-RDP\rclone"
 
           New-Item `
             -ItemType Directory `
@@ -914,7 +970,8 @@ jobs:
             -Force |
             Out-Null
 
-          $realConfig = "$rcloneAppData\rclone.conf"
+          $realConfig =
+            "$rcloneAppData\rclone.conf"
 
           $tokens = @(
             @{
@@ -939,8 +996,7 @@ jobs:
             }
           )
 
-          $lines =
-            New-Object System.Collections.Generic.List[string]
+          $lines = New-Object System.Collections.Generic.List[string]
 
           foreach ($item in $tokens) {
 
@@ -985,8 +1041,11 @@ jobs:
             "gdrive_k"
           )) {
 
-            $source = "$configDir\$name.conf"
-            $destination = "$rcloneAppData\$name.conf"
+            $source =
+              "$configDir\$name.conf"
+
+            $destination =
+              "$rcloneAppData\$name.conf"
 
             if (Test-Path $source) {
               Copy-Item `
@@ -996,14 +1055,33 @@ jobs:
             }
           }
 
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "REAL RCLONE CONFIG CREATED"
+          Write-Host "=========================================="
+          Write-Host "User: $userRoot"
+          Write-Host "rclone.conf: $realConfig"
+          Write-Host "System config: $configDir\rclone.conf"
+          Write-Host "G: gdrive_g"
+          Write-Host "H: gdrive_h"
+          Write-Host "I: gdrive_i"
+          Write-Host "J: gdrive_j"
+          Write-Host "K: gdrive_k"
+          Write-Host "=========================================="
+
       - name: Install five-drive PowerShell windows
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir = "C:\ProgramData\Persistent-RDP"
-          $configDir = "$persistDir\rclone"
-          $rclone = "C:\Tools\rclone\rclone.exe"
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          $configDir =
+            "$persistDir\rclone"
+
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
 
           $mounts = @(
             @{
@@ -1040,8 +1118,11 @@ jobs:
 
           foreach ($m in $mounts) {
 
-            $script = "$persistDir\Mount-$($m.Name).ps1"
-            $log = "$persistDir\rclone-$($m.Name).log"
+            $script =
+              "$persistDir\Mount-$($m.Name).ps1"
+
+            $log =
+              "$persistDir\rclone-$($m.Name).log"
 
             $content = @(
               '$ErrorActionPreference = "Continue"'
@@ -1052,7 +1133,15 @@ jobs:
               "`$letter = `"$($m.Letter)`""
               "`$log = `"$log`""
               ""
-              "Write-Host `"Starting Persistent-RDP Drive $($m.Name)...`""
+              'Write-Host "=========================================="'
+              'Write-Host "Persistent-RDP Drive ' + $m.Name + '"'
+              'Write-Host "=========================================="'
+              'Write-Host "Drive: $letter"'
+              'Write-Host "Remote: $remote"'
+              'Write-Host "Config: $config"'
+              'Write-Host ""'
+              'Write-Host "Starting rclone mount..."'
+              'Write-Host ""'
               ""
               'if (-not (Test-Path $rclone)) {'
               '    Write-Host "ERROR: rclone.exe not found."'
@@ -1066,11 +1155,14 @@ jobs:
               '    exit 1'
               '}'
               ""
-              'Start-Sleep -Seconds 2'
+              'Start-Sleep -Seconds 3'
               ""
-              '& $rclone --config $config mount $remote $letter --network-mode --volname "Persistent-RDP-' + $m.Name + '" --vfs-cache-mode full --vfs-cache-max-size 20G --vfs-cache-max-age 24h --dir-cache-time 10s --poll-interval 15s --transfers 8 --checkers 16 --buffer-size 32M --drive-chunk-size 64M --timeout 1m --contimeout 10s --retries 5 --low-level-retries 20 --log-file $log --log-level INFO'
+              '& $rclone --config $config mount $remote $letter --network-mode --volname "Persistent-RDP-' + $m.Name + '" --vfs-cache-mode full --vfs-cache-max-size 10G --dir-cache-time 30s --poll-interval 30s --transfers 8 --checkers 16 --timeout 1m --contimeout 10s --log-file $log --log-level INFO'
               ""
+              'Write-Host ""'
               'Write-Host "rclone stopped for drive $letter."'
+              'Write-Host "The PowerShell window will remain open."'
+              'Write-Host ""'
               'Read-Host "Press Enter to close"'
             )
 
@@ -1079,7 +1171,11 @@ jobs:
               -Value $content `
               -Encoding UTF8 `
               -Force
+
+            Write-Host "Created $script"
           }
+
+          Write-Host "Five mount scripts created."
 
       - name: Prepare D persistent workspace and restore from Google Drive
         shell: pwsh
@@ -1122,33 +1218,179 @@ jobs:
             $remote `
             $dRoot `
             --create-empty-src-dirs `
-            --fast-list `
-            --transfers 16 `
-            --checkers 32 `
-            --buffer-size 32M `
-            --drive-chunk-size 64M `
             --timeout 300s `
-            --retries 5 `
-            --low-level-retries 20
+            --retries 3 `
+            --low-level-retries 10 `
+            --transfers 8 `
+            --checkers 16 `
+            --fast-list
 
           if ($LASTEXITCODE -ne 0) {
             throw "D persistent workspace restore failed."
           }
 
           "D_PERSIST_DIR=$dRoot" |
-            Out-File -Append $env:GITHUB_ENV
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
 
           "D_PERSIST_REMOTE=$remote" |
-            Out-File -Append $env:GITHUB_ENV
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
 
+          Write-Host "=========================================="
           Write-Host "D PERSISTENT WORKSPACE READY"
+          Write-Host "Local: $dRoot"
+          Write-Host "Remote: $remote"
+          Write-Host "Files placed here will be restored on the next run."
+          Write-Host "=========================================="
+
+      - name: Prepare C new-file persistence and restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          $config =
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+
+          $remote =
+            "gdrive_g:.persistent-rdp/C-storage"
+
+          $cRoot =
+            "C:\"
+
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          $baseline =
+            "$persistDir\C-baseline.csv"
+
+          $stage =
+            "$persistDir\C-New"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $persistDir `
+            -Force |
+            Out-Null
+
+          New-Item `
+            -ItemType Directory `
+            -Path $stage `
+            -Force |
+            Out-Null
+
+          if (-not (Test-Path $rclone)) {
+            throw "rclone.exe not found."
+          }
+
+          if (-not (Test-Path $config)) {
+            throw "Google Drive config not found."
+          }
+
+          & $rclone `
+            --config $config `
+            mkdir `
+            $remote
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not prepare C-storage on Google Drive."
+          }
+
+          Write-Host "Restoring previously saved C files..."
+
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            $cRoot `
+            --create-empty-src-dirs `
+            --timeout 300s `
+            --retries 3 `
+            --low-level-retries 10 `
+            --transfers 8 `
+            --checkers 16 `
+            --fast-list
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "C persistent files restore failed."
+          }
+
+          Write-Host "C persistent files restored."
+
+          Write-Host "Creating baseline of C: before the session..."
+
+          $excluded = @(
+            '^C:\\Windows(\\|$)'
+            '^C:\\\$Recycle\.Bin(\\|$)'
+            '^C:\\System Volume Information(\\|$)'
+            '^C:\\PerfLogs(\\|$)'
+            '^C:\\ProgramData\\Persistent-RDP(\\|$)'
+            '^C:\\pagefile\.sys$'
+            '^C:\\hiberfil\.sys$'
+            '^C:\\swapfile\.sys$'
+          )
+
+          $items =
+            Get-ChildItem `
+              -Path $cRoot `
+              -File `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue |
+            Where-Object {
+              $p = $_.FullName
+
+              $skip = $false
+
+              foreach ($rx in $excluded) {
+                if ($p -match $rx) {
+                  $skip = $true
+                  break
+                }
+              }
+
+              -not $skip
+            } |
+            Select-Object `
+              @{Name="Path";Expression={$_.FullName}},
+              @{Name="Length";Expression={$_.Length}},
+              @{Name="LastWriteTicks";Expression={$_.LastWriteTimeUtc.Ticks}}
+
+          $items |
+            Export-Csv `
+              -Path $baseline `
+              -NoTypeInformation `
+              -Encoding UTF8
+
+          $count =
+            @($items).Count
+
+          "C_BASELINE=$baseline" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          "C_STORAGE_REMOTE=$remote" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host "C baseline created."
+          Write-Host "Baseline files: $count"
+          Write-Host "Only NEW files appearing after this point will be saved."
 
       - name: Start five PowerShell mount windows
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir = "C:\ProgramData\Persistent-RDP"
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
 
           foreach ($letter in @(
             "G"
@@ -1158,7 +1400,8 @@ jobs:
             "K"
           )) {
 
-            $script = "$persistDir\Mount-$letter.ps1"
+            $script =
+              "$persistDir\Mount-$letter.ps1"
 
             if (-not (Test-Path $script)) {
               throw "Missing mount script: $script"
@@ -1175,49 +1418,95 @@ jobs:
                 "`"$script`""
               )
 
-            Start-Sleep -Seconds 1
+            Start-Sleep -Seconds 2
+
+            Write-Host "PowerShell window started for $letter`:"
           }
 
-      - name: Create persistent sync script
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "FIVE POWERSHELL WINDOWS STARTED"
+          Write-Host "G: H: I: J: K:"
+          Write-Host "=========================================="
+
+      - name: Create C new-file restore helper
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir = "C:\ProgramData\Persistent-RDP"
-          $syncScript = "$persistDir\Persistent-Sync.ps1"
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $configDir = "$persistDir\rclone"
-          $userRoot = "C:\Users\$env:RDP_USER"
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
 
-          $content = @(
-            '$ErrorActionPreference = "Continue"'
-            ""
-            "`$rclone = `"$rclone`""
-            "`$config = `"$configDir\gdrive_g.conf`""
-            "`$userRoot = `"$userRoot`""
-            '`$remote = "gdrive_g:.persistent-rdp/files"'
-            ""
-            'if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $userRoot)) {'
-            '    & $rclone --config $config copy $remote $userRoot --create-empty-src-dirs --fast-list --transfers 16 --checkers 32 --buffer-size 32M --drive-chunk-size 64M --timeout 300s --retries 5 --low-level-retries 20 --exclude "AppData/**"'
-            '    & $rclone --config $config copy $userRoot $remote --create-empty-src-dirs --fast-list --transfers 16 --checkers 32 --buffer-size 32M --drive-chunk-size 64M --timeout 300s --retries 5 --low-level-retries 20 --exclude "AppData/**"'
-            '}'
-          )
+          $restoreScript =
+            "$persistDir\C-Restore-Persistent.ps1"
+
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          $config =
+            "$persistDir\rclone\gdrive_g.conf"
+
+          $remote =
+            "gdrive_g:.persistent-rdp/C-storage"
+
+          $content = @"
+          `$ErrorActionPreference = "Continue"
+
+          `$rclone = "$rclone"
+          `$config = "$config"
+          `$remote = "$remote"
+          `$cRoot = "C:\"
+
+          if (
+              (Test-Path `$rclone) -and
+              (Test-Path `$config)
+          ) {
+              Write-Host "Restoring saved C files..."
+
+              & `$rclone `
+                --config `$config `
+                copy `
+                `$remote `
+                `$cRoot `
+                --create-empty-src-dirs `
+                --timeout 300s `
+                --retries 3 `
+                --low-level-retries 10 `
+                --transfers 8 `
+                --checkers 16 `
+                --fast-list
+
+              Write-Host "C restore completed."
+          }
+          else {
+              Write-Warning "C persistence prerequisites are missing."
+          }
+          "@
 
           Set-Content `
-            -Path $syncScript `
+            -Path $restoreScript `
             -Value $content `
             -Encoding UTF8 `
             -Force
+
+          Write-Host "C restore helper created: $restoreScript"
 
       - name: Install persistent logon task
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $user = $env:RDP_USER
-          $pass = $env:RDP_PASS
-          $persistDir = "C:\ProgramData\Persistent-RDP"
-          $syncScript = "$persistDir\Persistent-Sync.ps1"
+          $user =
+            $env:RDP_USER
+
+          $pass =
+            $env:RDP_PASS
+
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
+
+          $restoreScript =
+            "$persistDir\C-Restore-Persistent.ps1"
 
           Unregister-ScheduledTask `
             -TaskName "Persistent-RDP-Logon" `
@@ -1228,7 +1517,7 @@ jobs:
             New-ScheduledTaskAction `
               -Execute "powershell.exe" `
               -Argument `
-              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$syncScript`""
+              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$restoreScript`""
 
           $trigger =
             New-ScheduledTaskTrigger `
@@ -1252,6 +1541,8 @@ jobs:
             -Force |
             Out-Null
 
+          Write-Host "Persistent-RDP C restore logon task installed."
+
       - name: Create D persistent sync helper
         shell: pwsh
         run: |
@@ -1259,6 +1550,10 @@ jobs:
 
           $persistDir = "C:\ProgramData\Persistent-RDP"
           $syncScript = "$persistDir\D-Persistent-Sync.ps1"
+          $rclone = "C:\Tools\rclone\rclone.exe"
+          $config = "$persistDir\rclone\gdrive_g.conf"
+          $dRoot = "D:\Persistent-RDP"
+          $remote = "gdrive_g:.persistent-rdp/D-storage"
 
           $content = @'
           $ErrorActionPreference = "Continue"
@@ -1268,7 +1563,30 @@ jobs:
           $remote = "gdrive_g:.persistent-rdp/D-storage"
 
           if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $dRoot)) {
-              & $rclone --config $config copy $dRoot $remote --create-empty-src-dirs --fast-list --transfers 16 --checkers 32 --buffer-size 32M --drive-chunk-size 64M --timeout 300s --retries 5 --low-level-retries 20
+              Write-Host "Uploading D persistent workspace..."
+
+              & $rclone `
+                --config $config `
+                copy `
+                $dRoot `
+                $remote `
+                --create-empty-src-dirs `
+                --timeout 300s `
+                --retries 3 `
+                --low-level-retries 10 `
+                --transfers 8 `
+                --checkers 16 `
+                --fast-list
+
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "D persistent workspace upload completed."
+              }
+              else {
+                  Write-Warning "D persistent workspace upload returned exit code $LASTEXITCODE."
+              }
+          }
+          else {
+              Write-Warning "D persistence prerequisites are missing."
           }
           '@
 
@@ -1278,6 +1596,8 @@ jobs:
             -Encoding UTF8 `
             -Force
 
+          Write-Host "D sync helper created: $syncScript"
+
       - name: Verify persistence setup
         run: |
           $task =
@@ -1285,7 +1605,10 @@ jobs:
               -TaskName "Persistent-RDP-Logon" `
               -ErrorAction SilentlyContinue
 
-          if (-not $task) {
+          if ($task) {
+            Write-Host "Persistent-RDP logon task exists."
+          }
+          else {
             Write-Error "Persistent-RDP logon task was not created."
             exit 1
           }
@@ -1300,10 +1623,48 @@ jobs:
             exit 1
           }
 
-          if (-not (Test-Path "D:\Persistent-RDP")) {
-            Write-Error "D:\Persistent-RDP missing."
-            exit 1
+          $userRoot =
+            "C:\Users\$env:RDP_USER"
+
+          $required = @(
+            "$userRoot\AppData"
+            "$userRoot\AppData\Local"
+            "$userRoot\AppData\LocalLow"
+            "$userRoot\AppData\Roaming"
+            "$userRoot\AppData\Roaming\rclone"
+            "$userRoot\AppData\Roaming\rclone\rclone.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_g.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_h.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_i.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_j.conf"
+            "$userRoot\AppData\Roaming\rclone\gdrive_k.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\rclone.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_h.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_i.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_j.conf"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_k.conf"
+            "C:\ProgramData\Persistent-RDP\Mount-G.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-H.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-I.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-J.ps1"
+            "C:\ProgramData\Persistent-RDP\Mount-K.ps1"
+            "C:\ProgramData\Persistent-RDP\D-Persistent-Sync.ps1"
+            "C:\ProgramData\Persistent-RDP\C-Restore-Persistent.ps1"
+            "C:\ProgramData\Persistent-RDP\C-baseline.csv"
+            "D:\Persistent-RDP"
+          )
+
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) {
+              Write-Error "Missing required path: $path"
+              exit 1
+            }
           }
+
+          Write-Host "Complete Yousif190 profile + five rclone configs verified."
+          Write-Host "C new-file persistence baseline verified."
+          Write-Host "D persistent workspace verified."
 
       - name: Install RustDesk
         run: |
@@ -1312,12 +1673,15 @@ jobs:
 
           if (-not (Test-Path $rdExe)) {
 
+            $rdUrl =
+              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+
             $installerPath =
               "$env:TEMP\rustdesk.msi"
 
             Invoke-WebRequest `
               -Uri `
-              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
+              $rdUrl `
               -OutFile `
               $installerPath `
               -UseBasicParsing `
@@ -1350,7 +1714,8 @@ jobs:
             $p++
           ) {
 
-            $name = "APP-PORT-TCP-$p"
+            $name =
+              "APP-PORT-TCP-$p"
 
             netsh advfirewall firewall delete rule `
               name=$name `
@@ -1364,7 +1729,8 @@ jobs:
               localport=$p
           }
 
-          $udpName = "APP-PORT-UDP-21116"
+          $udpName =
+            "APP-PORT-UDP-21116"
 
           netsh advfirewall firewall delete rule `
             name=$udpName `
@@ -1391,17 +1757,27 @@ jobs:
           $screenshotPath =
             "$env:TEMP\rustdesk_${{ matrix.id }}.png"
 
-          Add-Type -AssemblyName System.Windows.Forms
-          Add-Type -AssemblyName System.Drawing
+          Add-Type `
+            -AssemblyName `
+            System.Windows.Forms
+
+          Add-Type `
+            -AssemblyName `
+            System.Drawing
 
           $bounds =
             [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 
           $bitmap =
-            New-Object System.Drawing.Bitmap $bounds.Width,$bounds.Height
+            New-Object `
+              System.Drawing.Bitmap `
+              $bounds.Width, `
+              $bounds.Height
 
           $graphics =
-            [System.Drawing.Graphics]::FromImage($bitmap)
+            [System.Drawing.Graphics]::FromImage(
+              $bitmap
+            )
 
           $graphics.CopyFromScreen(
             $bounds.Location,
@@ -1417,22 +1793,30 @@ jobs:
           $graphics.Dispose()
           $bitmap.Dispose()
 
+          $curlResult =
+            curl `
+              -F "file=@$screenshotPath" `
+              https://store1.gofile.io/uploadFile
+
           try {
+
             $json =
-              (
-                curl `
-                  -F "file=@$screenshotPath" `
-                  https://store1.gofile.io/uploadFile
-              ) |
+              $curlResult |
               ConvertFrom-Json
 
-            if ($json.status -eq "ok") {
+            if (
+              $json.status -eq "ok"
+            ) {
+
               "SCREENSHOT_URL=$($json.data.downloadPage)" |
-                Out-File -Append $env:GITHUB_ENV
+                Out-File `
+                  -Append `
+                  $env:GITHUB_ENV
             }
           }
           catch {
-            Write-Warning "Screenshot upload failed."
+            Write-Warning `
+              "Screenshot upload failed."
           }
 
       - name: Display Google Drive persistence status
@@ -1447,7 +1831,26 @@ jobs:
           Write-Host "J: = DRIVE_TOKEN3"
           Write-Host "K: = DRIVE_TOKEN4"
           Write-Host ""
-          Write-Host "D: D:\Persistent-RDP = persistent workspace"
+          Write-Host "C: ONLY NEW FILES"
+          Write-Host "C files are restored to their original paths."
+          Write-Host "Only files not present in the initial C baseline are uploaded."
+          Write-Host ""
+          Write-Host "User profile: C:\Users\Yousif190"
+          Write-Host "AppData: C:\Users\Yousif190\AppData"
+          Write-Host "Roaming: C:\Users\Yousif190\AppData\Roaming"
+          Write-Host "rclone.conf: C:\Users\Yousif190\AppData\Roaming\rclone\rclone.conf"
+          Write-Host ""
+          Write-Host "Drive configs:"
+          Write-Host "gdrive_g.conf"
+          Write-Host "gdrive_h.conf"
+          Write-Host "gdrive_i.conf"
+          Write-Host "gdrive_j.conf"
+          Write-Host "gdrive_k.conf"
+          Write-Host ""
+          Write-Host "Five PowerShell mount windows started."
+          Write-Host "G: H: I: J: K:"
+          Write-Host "D: D:\Persistent-RDP = FULL persistent workspace"
+          Write-Host "C: New files only = original C paths preserved"
           Write-Host "=========================================="
 
       - name: Keep alive
@@ -1456,12 +1859,18 @@ jobs:
             [int]"${{ env.RUNTIME_MINUTES }}"
 
           $end =
-            (Get-Date).AddMinutes($mins)
+            (Get-Date).AddMinutes(
+              $mins
+            )
 
-          while ((Get-Date) -lt $end) {
+          while (
+            (Get-Date) -lt $end
+          ) {
 
             $mode =
-              if ("$env:CRD_ENABLED" -eq '1') {
+              if (
+                "$env:CRD_ENABLED" -eq '1'
+              ) {
                 '[CRD+RustDesk/RDP+Persistence]'
               }
               else {
@@ -1476,47 +1885,47 @@ jobs:
               " | Persistent Drives: G:H:I:J:K:"
             )
 
-            Start-Sleep -Seconds 60
+            Start-Sleep `
+              -Seconds 60
           }
 
       - name: Final Google Drive sync
         if: always()
         shell: pwsh
         run: |
-          $rclone = "$env:RCLONE_EXE"
-          $config = "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
+          $ErrorActionPreference = "Continue"
+
+          $rclone =
+            "$env:RCLONE_EXE"
+
+          $config =
+            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
 
           if (
             (Test-Path $rclone) -and
             (Test-Path $config)
           ) {
 
-            $userRoot = "C:\Users\$env:RDP_USER"
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host "FINAL PERSISTENCE SYNC"
+            Write-Host "=========================================="
 
-            if (-not (Test-Path $userRoot)) {
-              $userRoot = "$env:USERPROFILE"
-            }
+            #
+            # D:\Persistent-RDP
+            # Save the COMPLETE folder.
+            #
 
-            & $rclone `
-              --config $config `
-              copy `
-              $userRoot `
-              "gdrive_g:.persistent-rdp/files" `
-              --create-empty-src-dirs `
-              --fast-list `
-              --transfers 16 `
-              --checkers 32 `
-              --buffer-size 32M `
-              --drive-chunk-size 64M `
-              --timeout 300s `
-              --retries 5 `
-              --low-level-retries 20 `
-              --exclude "AppData/**"
+            $dRoot =
+              "D:\Persistent-RDP"
 
-            $dRoot = "D:\Persistent-RDP"
-            $dRemote = "gdrive_g:.persistent-rdp/D-storage"
+            $dRemote =
+              "gdrive_g:.persistent-rdp/D-storage"
 
             if (Test-Path $dRoot) {
+
+              Write-Host ""
+              Write-Host "Uploading COMPLETE D:\Persistent-RDP..."
 
               & $rclone `
                 --config $config `
@@ -1524,15 +1933,216 @@ jobs:
                 $dRoot `
                 $dRemote `
                 --create-empty-src-dirs `
-                --fast-list `
-                --transfers 16 `
-                --checkers 32 `
-                --buffer-size 32M `
-                --drive-chunk-size 64M `
                 --timeout 300s `
-                --retries 5 `
-                --low-level-retries 20
+                --retries 3 `
+                --low-level-retries 10 `
+                --transfers 8 `
+                --checkers 16 `
+                --fast-list
+
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "D:\Persistent-RDP upload completed."
+              }
+              else {
+                Write-Warning `
+                  "D persistent workspace sync returned exit code $LASTEXITCODE."
+              }
             }
+            else {
+              Write-Host "D:\Persistent-RDP does not exist; skipping D sync."
+            }
+
+            #
+            # C:
+            # Save ONLY files that did not exist in the initial baseline.
+            #
+
+            $baseline =
+              "$env:C_BASELINE"
+
+            if (-not (Test-Path $baseline)) {
+              $baseline =
+                "C:\ProgramData\Persistent-RDP\C-baseline.csv"
+            }
+
+            $stage =
+              "C:\ProgramData\Persistent-RDP\C-New"
+
+            $cRemote =
+              "gdrive_g:.persistent-rdp/C-storage"
+
+            if (Test-Path $baseline) {
+
+              Write-Host ""
+              Write-Host "Scanning C: for NEW files..."
+
+              $excluded = @(
+                '^C:\\Windows(\\|$)'
+                '^C:\\\$Recycle\.Bin(\\|$)'
+                '^C:\\System Volume Information(\\|$)'
+                '^C:\\PerfLogs(\\|$)'
+                '^C:\\ProgramData\\Persistent-RDP(\\|$)'
+                '^C:\\pagefile\.sys$'
+                '^C:\\hiberfil\.sys$'
+                '^C:\\swapfile\.sys$'
+              )
+
+              $baselineMap =
+                @{}
+
+              foreach ($old in (
+                Import-Csv `
+                  -Path $baseline `
+                  -ErrorAction SilentlyContinue
+              )) {
+
+                if ($old.Path) {
+                  $baselineMap[$old.Path] = $true
+                }
+              }
+
+              if (Test-Path $stage) {
+                Remove-Item `
+                  $stage `
+                  -Recurse `
+                  -Force `
+                  -ErrorAction SilentlyContinue
+              }
+
+              New-Item `
+                -ItemType Directory `
+                -Path $stage `
+                -Force |
+                Out-Null
+
+              $newCount = 0
+              $failedCount = 0
+
+              Get-ChildItem `
+                -Path "C:\" `
+                -File `
+                -Recurse `
+                -Force `
+                -ErrorAction SilentlyContinue |
+              ForEach-Object {
+
+                $file =
+                  $_
+
+                $path =
+                  $file.FullName
+
+                $skip = $false
+
+                foreach ($rx in $excluded) {
+                  if ($path -match $rx) {
+                    $skip = $true
+                    break
+                  }
+                }
+
+                if ($skip) {
+                  return
+                }
+
+                #
+                # Only paths that were NOT present
+                # when the session started.
+                #
+
+                if (-not $baselineMap.ContainsKey($path)) {
+
+                  try {
+
+                    $relative =
+                      $path.Substring(3)
+
+                    $destination =
+                      Join-Path `
+                        $stage `
+                        $relative
+
+                    $destinationDir =
+                      Split-Path `
+                        $destination `
+                        -Parent
+
+                    New-Item `
+                      -ItemType Directory `
+                      -Path $destinationDir `
+                      -Force |
+                      Out-Null
+
+                    Copy-Item `
+                      -LiteralPath $path `
+                      -Destination $destination `
+                      -Force `
+                      -ErrorAction Stop
+
+                    $newCount++
+
+                    Write-Host `
+                      "NEW C FILE: $relative"
+                  }
+                  catch {
+
+                    $failedCount++
+
+                    Write-Warning `
+                      "Could not stage new C file: $path | $($_.Exception.Message)"
+                  }
+                }
+              }
+
+              Write-Host ""
+              Write-Host "New C files found: $newCount"
+              Write-Host "New C files failed to stage: $failedCount"
+
+              if ($newCount -gt 0) {
+
+                Write-Host ""
+                Write-Host "Uploading NEW C files..."
+
+                & $rclone `
+                  --config $config `
+                  copy `
+                  $stage `
+                  $cRemote `
+                  --create-empty-src-dirs `
+                  --timeout 300s `
+                  --retries 3 `
+                  --low-level-retries 10 `
+                  --transfers 8 `
+                  --checkers 16 `
+                  --fast-list
+
+                if ($LASTEXITCODE -eq 0) {
+                  Write-Host "NEW C files upload completed."
+                }
+                else {
+                  Write-Warning `
+                    "NEW C files upload returned exit code $LASTEXITCODE."
+                }
+              }
+              else {
+                Write-Host "No NEW C files to upload."
+              }
+            }
+            else {
+              Write-Warning `
+                "C baseline not found; C new-file persistence skipped."
+            }
+
+            Write-Host ""
+            Write-Host "=========================================="
+            Write-Host "FINAL PERSISTENCE SYNC FINISHED"
+            Write-Host "D = COMPLETE D:\Persistent-RDP"
+            Write-Host "C = NEW FILES ONLY"
+            Write-Host "=========================================="
+          }
+          else {
+            Write-Host `
+              "rclone/config unavailable; skipping final sync."
           }
 
       - name: Dispatch next or stop
@@ -1547,7 +2157,8 @@ jobs:
 
           if ($cycles -gt 0) {
 
-            $next = $cycles - 1
+            $next =
+              $cycles - 1
 
             if ($next -le 0) {
 
@@ -1555,25 +2166,46 @@ jobs:
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
 
               $hdr = @{
-                Authorization = "Bearer $env:GH_TOKEN"
-                Accept = "application/vnd.github+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
               }
 
               $payload = @{
-                ts_tailnet = "${{ inputs.ts_tailnet }}"
-                ts_api_key = "${{ inputs.ts_api_key }}"
-                base_prefix = "bullet"
-                max_count = "10"
-                dry_run = "false"
+                ts_tailnet =
+                  "${{ inputs.ts_tailnet }}"
+
+                ts_api_key =
+                  "${{ inputs.ts_api_key }}"
+
+                base_prefix =
+                  "bullet"
+
+                max_count =
+                  "10"
+
+                dry_run =
+                  "false"
               }
 
               $body =
                 @{
-                  ref = "${{ github.ref_name }}"
-                  inputs = $payload
+                  ref =
+                    "${{ github.ref_name }}"
+
+                  inputs =
+                    $payload
+
                 } |
-                ConvertTo-Json -Depth 20
+                ConvertTo-Json `
+                  -Depth 20
+
+              Write-Host "Dispatching STOP workflow..."
 
               Invoke-RestMethod `
                 -Method POST `
@@ -1582,37 +2214,70 @@ jobs:
                 -ContentType "application/json" `
                 -Body $body `
                 -ErrorAction Stop
+
+              Write-Host "Dispatched STOP successfully."
             }
             else {
 
               $payload = @{
-                ts_tailnet = "${{ inputs.ts_tailnet }}"
-                ts_api_key = "${{ inputs.ts_api_key }}"
-                ts_authkey = "${{ inputs.ts_authkey }}"
-                quick_test = "${{ inputs.quick_test }}"
-                runtime_minutes = "300"
-                do_purge = "true"
-                cycles = "$next"
-                rdp_count = "${{ inputs.rdp_count }}"
-                crd_code = "${{ inputs.crd_code }}"
-                crd_pin = "${{ inputs.crd_pin }}"
+                ts_tailnet =
+                  "${{ inputs.ts_tailnet }}"
+
+                ts_api_key =
+                  "${{ inputs.ts_api_key }}"
+
+                ts_authkey =
+                  "${{ inputs.ts_authkey }}"
+
+                quick_test =
+                  "${{ inputs.quick_test }}"
+
+                runtime_minutes =
+                  "300"
+
+                do_purge =
+                  "true"
+
+                cycles =
+                  "$next"
+
+                rdp_count =
+                  "${{ inputs.rdp_count }}"
+
+                crd_code =
+                  "${{ inputs.crd_code }}"
+
+                crd_pin =
+                  "${{ inputs.crd_pin }}"
               }
 
               $url2 =
                 "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
 
               $hdr2 = @{
-                Authorization = "Bearer $env:GH_TOKEN"
-                Accept = "application/vnd.github+json"
-                "X-GitHub-Api-Version" = "2022-11-28"
+                Authorization =
+                  "Bearer $env:GH_TOKEN"
+
+                Accept =
+                  "application/vnd.github+json"
+
+                "X-GitHub-Api-Version" =
+                  "2022-11-28"
               }
 
               $body2 =
                 @{
-                  ref = "${{ github.ref_name }}"
-                  inputs = $payload
+                  ref =
+                    "${{ github.ref_name }}"
+
+                  inputs =
+                    $payload
+
                 } |
-                ConvertTo-Json -Depth 20
+                ConvertTo-Json `
+                  -Depth 20
+
+              Write-Host "Dispatching Workflow A self-renew..."
 
               Invoke-RestMethod `
                 -Method POST `
@@ -1621,8 +2286,12 @@ jobs:
                 -ContentType "application/json" `
                 -Body $body2 `
                 -ErrorAction Stop
+
+              Write-Host `
+                "Dispatched Workflow A self-renew successfully."
             }
           }
           else {
-            Write-Host "No cycles configured. Done."
+            Write-Host `
+              "No cycles configured. Done."
           }
