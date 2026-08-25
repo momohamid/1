@@ -1175,59 +1175,74 @@ jobs:
             Write-Host "Created $script"
           }
 
-          Write-Host "Five mount scripts created."      - name: Create persistent sync script
+          Write-Host "Five mount scripts created."            - name: Create persistent sync script
         shell: pwsh
-        
+        run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir =
-            "C:\ProgramData\Persistent-RDP"
+          $persistDir = "C:\ProgramData\Persistent-RDP"
+          $syncScript = "$persistDir\Persistent-Sync.ps1"
+          $rclone = "C:\Tools\rclone\rclone.exe"
+          $configDir = "$persistDir\rclone"
+          $userRoot = "C:\Users\$env:RDP_USER"
 
-          $syncScript =
-            "$persistDir\Persistent-Sync.ps1"
+          New-Item `
+            -ItemType Directory `
+            -Path $persistDir `
+            -Force |
+            Out-Null
 
-          $rclone =
-            "C:\Tools\rclone\rclone.exe"
+          $content = @'
+$ErrorActionPreference = "Continue"
 
-          $configDir =
-            "$persistDir\rclone"
+$rclone = "C:\Tools\rclone\rclone.exe"
+$config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+$userRoot = "C:\Users\Yousif190"
+$remote = "gdrive_g:.persistent-rdp/files"
 
-          $userRoot =
-            "C:\Users\$env:RDP_USER"
+Write-Host "Persistent-RDP sync started."
 
-          $content = @(
-            '$ErrorActionPreference = "Continue"'
-            ""
-            "`$rclone = `"$rclone`""
-            "`$config = `"$configDir\gdrive_g.conf`""
-            "`$userRoot = `"$userRoot`""
-            '`$remote = "gdrive_g:.persistent-rdp/files"'
-            ""
-            'Write-Host "Persistent-RDP sync started."'
-            ""
-            'if ((Test-Path $rclone) -and (Test-Path $config)) {'
-            ""
-            '    if (Test-Path $userRoot) {'
-            ""
-            '        Write-Host "Downloading persistent files..."'
-            ""
-            '        & $rclone --config $config copy $remote $userRoot --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
-            ""
-            '        Write-Host "Restore completed."'
-            ""
-            '        Write-Host "Uploading persistent files..."'
-            ""
-            '        & $rclone --config $config copy $userRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
-            ""
-            '        Write-Host "Upload completed."'
-            '    }'
-            '}'
-            'else {'
-            '    Write-Host "rclone or config missing."'
-            '}'
-            ""
-            'Write-Host "Persistent-RDP sync finished."'
-          )
+if ((Test-Path $rclone) -and (Test-Path $config)) {
+
+    if (Test-Path $userRoot) {
+
+        Write-Host "Downloading persistent files..."
+
+        & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            $userRoot `
+            --create-empty-src-dirs `
+            --timeout 300s `
+            --retries 3 `
+            --low-level-retries 10 `
+            --exclude "AppData/**"
+
+        Write-Host "Restore completed."
+
+        Write-Host "Uploading persistent files..."
+
+        & $rclone `
+            --config $config `
+            copy `
+            $userRoot `
+            $remote `
+            --create-empty-src-dirs `
+            --timeout 300s `
+            --retries 3 `
+            --low-level-retries 10 `
+            --exclude "AppData/**"
+
+        Write-Host "Upload completed."
+    }
+}
+else {
+    Write-Host "rclone or config missing."
+}
+
+Write-Host "Persistent-RDP sync finished."
+'@
 
           Set-Content `
             -Path $syncScript `
