@@ -76,9 +76,7 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
-          $crd = @'
-          ${{ inputs.crd_code }}
-          '@.Trim()
+          $crd = "${{ inputs.crd_code }}".Trim()
 
           if ($crd.Length -gt 0) {
             $n = 1
@@ -113,13 +111,12 @@ jobs:
               -Append `
               -Encoding utf8
 
-          $multi =
-            if ($n -gt 1) {
-              '1'
-            }
-            else {
-              '0'
-            }
+          if ($n -gt 1) {
+            $multi = '1'
+          }
+          else {
+            $multi = '0'
+          }
 
           "multi=$multi" |
             Out-File `
@@ -140,15 +137,13 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
       - name: Set CRD flag early
         run: |
-          $crd = @'
-          ${{ inputs.crd_code }}
-          '@.Trim()
+          $crd = "${{ inputs.crd_code }}".Trim()
 
           if ($crd.Length -gt 0) {
             "CRD_ENABLED=1" |
@@ -249,9 +244,7 @@ jobs:
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
-          $raw = @'
-          ${{ inputs.crd_code }}
-          '@.Trim()
+          $raw = "${{ inputs.crd_code }}".Trim()
 
           $pin =
             "${{ inputs.crd_pin }}".Trim()
@@ -542,6 +535,11 @@ jobs:
 
           $p =
             $env:RDP_PASS
+
+          if ([string]::IsNullOrWhiteSpace($p)) {
+            Write-Error "RDP_PASS secret is missing."
+            exit 1
+          }
 
           $sec =
             ConvertTo-SecureString `
@@ -996,7 +994,8 @@ jobs:
             }
           )
 
-          $lines = New-Object System.Collections.Generic.List[string]
+          $lines =
+            New-Object System.Collections.Generic.List[string]
 
           foreach ($item in $tokens) {
 
@@ -1145,13 +1144,11 @@ jobs:
               ""
               'if (-not (Test-Path $rclone)) {'
               '    Write-Host "ERROR: rclone.exe not found."'
-              '    Read-Host "Press Enter to close"'
               '    exit 1'
               '}'
               ""
               'if (-not (Test-Path $config)) {'
               '    Write-Host "ERROR: config not found."'
-              '    Read-Host "Press Enter to close"'
               '    exit 1'
               '}'
               ""
@@ -1161,9 +1158,6 @@ jobs:
               ""
               'Write-Host ""'
               'Write-Host "rclone stopped for drive $letter."'
-              'Write-Host "The PowerShell window will remain open."'
-              'Write-Host ""'
-              'Read-Host "Press Enter to close"'
             )
 
             Set-Content `
@@ -1175,75 +1169,58 @@ jobs:
             Write-Host "Created $script"
           }
 
-          Write-Host "Five mount scripts created."                  - name: Create persistent sync script
+          Write-Host "Five mount scripts created."
+
+      - name: Create persistent sync script
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir = "C:\ProgramData\Persistent-RDP"
-          $syncScript = "$persistDir\Persistent-Sync.ps1"
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
 
-          New-Item `
-            -ItemType Directory `
-            -Path $persistDir `
-            -Force |
-            Out-Null
+          $syncScript =
+            "$persistDir\Persistent-Sync.ps1"
 
-          $content = @'
-$ErrorActionPreference = "Continue"
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
 
-$rclone = "C:\Tools\rclone\rclone.exe"
-$config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-$userRoot = "C:\Users\Yousif190"
-$remote = "gdrive_g:.persistent-rdp/files"
+          $configDir =
+            "$persistDir\rclone"
 
-Write-Host "Persistent-RDP sync started."
+          $userRoot =
+            "C:\Users\$env:RDP_USER"
 
-if ((Test-Path $rclone) -and (Test-Path $config)) {
-
-    if (Test-Path $userRoot) {
-
-        Write-Host "Downloading persistent files..."
-
-        & $rclone `
-            --config $config `
-            copy `
-            $remote `
-            $userRoot `
-            --create-empty-src-dirs `
-            --timeout 300s `
-            --retries 3 `
-            --low-level-retries 10 `
-            --exclude "AppData/**"
-
-        Write-Host "Restore completed."
-
-        Write-Host "Uploading persistent files..."
-
-        & $rclone `
-            --config $config `
-            copy `
-            $userRoot `
-            $remote `
-            --create-empty-src-dirs `
-            --timeout 300s `
-            --retries 3 `
-            --low-level-retries 10 `
-            --exclude "AppData/**"
-
-        Write-Host "Upload completed."
-    }
-}
-else {
-    Write-Host "rclone or config missing."
-}
-
-Write-Host "Persistent-RDP sync finished."
-'@
+          $syncContent = @(
+            '$ErrorActionPreference = "Continue"'
+            ""
+            "`$rclone = `"$rclone`""
+            "`$config = `"$configDir\gdrive_g.conf`""
+            "`$userRoot = `"$userRoot`""
+            '$remote = "gdrive_g:.persistent-rdp/files"'
+            ""
+            'Write-Host "Persistent-RDP sync started."'
+            ""
+            'if ((Test-Path $rclone) -and (Test-Path $config)) {'
+            '    if (Test-Path $userRoot) {'
+            '        Write-Host "Downloading persistent files..."'
+            '        & $rclone --config $config copy $remote $userRoot --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
+            '        Write-Host "Restore completed."'
+            '        Write-Host "Uploading persistent files..."'
+            '        & $rclone --config $config copy $userRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --exclude "AppData/**"'
+            '        Write-Host "Upload completed."'
+            '    }'
+            '}'
+            'else {'
+            '    Write-Host "rclone or config missing."'
+            '}'
+            ""
+            'Write-Host "Persistent-RDP sync finished."'
+          )
 
           Set-Content `
             -Path $syncScript `
-            -Value $content `
+            -Value $syncContent `
             -Encoding UTF8 `
             -Force
 
@@ -1259,6 +1236,11 @@ Write-Host "Persistent-RDP sync finished."
 
           $pass =
             $env:RDP_PASS
+
+          if ([string]::IsNullOrWhiteSpace($pass)) {
+            Write-Error "RDP_PASS secret is missing."
+            exit 1
+          }
 
           $persistDir =
             "C:\ProgramData\Persistent-RDP"
@@ -1306,38 +1288,49 @@ Write-Host "Persistent-RDP sync finished."
         run: |
           $ErrorActionPreference = "Stop"
 
-          $persistDir = "C:\ProgramData\Persistent-RDP"
-          $syncScript = "$persistDir\D-Persistent-Sync.ps1"
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $config = "$persistDir\rclone\gdrive_g.conf"
-          $dRoot = "D:\Persistent-RDP"
-          $remote = "gdrive_g:.persistent-rdp/D-storage"
+          $persistDir =
+            "C:\ProgramData\Persistent-RDP"
 
-          $content = @'
-          $ErrorActionPreference = "Continue"
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-          $dRoot = "D:\Persistent-RDP"
-          $remote = "gdrive_g:.persistent-rdp/D-storage"
+          $syncScript =
+            "$persistDir\D-Persistent-Sync.ps1"
 
-          if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $dRoot)) {
-              Write-Host "Uploading D persistent workspace..."
-              & $rclone --config $config copy $dRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --transfers 4 --checkers 8
-              if ($LASTEXITCODE -eq 0) {
-                  Write-Host "D persistent workspace upload completed."
-              }
-              else {
-                  Write-Warning "D persistent workspace upload returned exit code $LASTEXITCODE."
-              }
-          }
-          else {
-              Write-Warning "D persistence prerequisites are missing."
-          }
-          '@
+          $rclone =
+            "C:\Tools\rclone\rclone.exe"
+
+          $config =
+            "$persistDir\rclone\gdrive_g.conf"
+
+          $dRoot =
+            "D:\Persistent-RDP"
+
+          $remote =
+            "gdrive_g:.persistent-rdp/D-storage"
+
+          $dContent = @(
+            '$ErrorActionPreference = "Continue"'
+            '$rclone = "C:\Tools\rclone\rclone.exe"'
+            '$config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"'
+            '$dRoot = "D:\Persistent-RDP"'
+            '$remote = "gdrive_g:.persistent-rdp/D-storage"'
+            ""
+            'if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $dRoot)) {'
+            '    Write-Host "Uploading D persistent workspace..."'
+            '    & $rclone --config $config copy $dRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --transfers 4 --checkers 8'
+            '    if ($LASTEXITCODE -eq 0) {'
+            '        Write-Host "D persistent workspace upload completed."'
+            '    }'
+            '    else {'
+            '        Write-Warning "D persistent workspace upload returned exit code $LASTEXITCODE."'
+            '    }'
+            '}'
+            'else {'
+            '    Write-Warning "D persistence prerequisites are missing."'
+            '}'
+          )
 
           Set-Content `
             -Path $syncScript `
-            -Value $content `
+            -Value $dContent `
             -Encoding UTF8 `
             -Force
 
@@ -1603,15 +1596,16 @@ Write-Host "Persistent-RDP sync finished."
             (Get-Date) -lt $end
           ) {
 
-            $mode =
-              if (
-                "$env:CRD_ENABLED" -eq '1'
-              ) {
+            if (
+              "$env:CRD_ENABLED" -eq '1'
+            ) {
+              $mode =
                 '[CRD+RustDesk/RDP+Persistence]'
-              }
-              else {
+            }
+            else {
+              $mode =
                 '[RustDesk/RDP+Persistence]'
-              }
+            }
 
             Write-Host (
               "$mode Heartbeat " +
@@ -1671,11 +1665,16 @@ Write-Host "Persistent-RDP sync finished."
                 "Final C: profile persistence sync returned exit code $LASTEXITCODE."
             }
 
-            $dRoot = "D:\Persistent-RDP"
-            $dRemote = "gdrive_g:.persistent-rdp/D-storage"
+            $dRoot =
+              "D:\Persistent-RDP"
+
+            $dRemote =
+              "gdrive_g:.persistent-rdp/D-storage"
 
             if (Test-Path $dRoot) {
-              Write-Host "Final D persistent workspace sync starting..."
+
+              Write-Host `
+                "Final D persistent workspace sync starting..."
 
               & $rclone `
                 --config $config `
@@ -1690,7 +1689,8 @@ Write-Host "Persistent-RDP sync finished."
                 --checkers 8
 
               if ($LASTEXITCODE -eq 0) {
-                Write-Host "Final D persistent workspace sync completed."
+                Write-Host `
+                  "Final D persistent workspace sync completed."
               }
               else {
                 Write-Warning `
@@ -1698,7 +1698,8 @@ Write-Host "Persistent-RDP sync finished."
               }
             }
             else {
-              Write-Host "D:\Persistent-RDP does not exist; skipping D sync."
+              Write-Host `
+                "D:\Persistent-RDP does not exist; skipping D sync."
             }
           }
           else {
@@ -1761,7 +1762,6 @@ Write-Host "Persistent-RDP sync finished."
 
                   inputs =
                     $payload
-
                 } |
                 ConvertTo-Json `
                   -Depth 20
@@ -1833,7 +1833,6 @@ Write-Host "Persistent-RDP sync finished."
 
                   inputs =
                     $payload
-
                 } |
                 ConvertTo-Json `
                   -Depth 20
