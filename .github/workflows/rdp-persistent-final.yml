@@ -1918,7 +1918,7 @@ jobs:
               }
 
               $url2 =
-                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
+                "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-persistent-final.yml/dispatches"
 
               $hdr2 = @{
                 Authorization =
