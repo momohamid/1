@@ -1177,7 +1177,7 @@ jobs:
 
           Write-Host "Five mount scripts created."      - name: Create persistent sync script
         shell: pwsh
-        run: |
+        
           $ErrorActionPreference = "Stop"
 
           $persistDir =
