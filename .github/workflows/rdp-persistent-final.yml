@@ -71,6 +71,7 @@ jobs:
       multi: ${{ steps.mk.outputs.multi }}
 
     steps:
+
       - id: mk
         shell: pwsh
         run: |
@@ -138,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -160,6 +161,7 @@ jobs:
                 -Append `
                 $env:GITHUB_ENV
           }
+
 
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
@@ -832,6 +834,9 @@ jobs:
               $env:GITHUB_ENV
 
 
+      # ==========================================================
+      # FAST D RESTORE
+      # ==========================================================
       - name: Prepare D persistent storage
         shell: pwsh
         run: |
@@ -855,6 +860,9 @@ jobs:
             -Force |
             Out-Null
 
+          Write-Host "Preparing D persistent storage..."
+          Write-Host "Using maximum practical parallelism."
+
           & $rclone `
             --config $config `
             mkdir `
@@ -864,7 +872,7 @@ jobs:
             throw "Could not prepare D storage."
           }
 
-          Write-Host "Restoring D:\Persistent-RDP..."
+          Write-Host "Restoring only missing/changed D files..."
 
           & $rclone `
             --config $config `
@@ -872,11 +880,19 @@ jobs:
             $remote `
             $dRoot `
             --create-empty-src-dirs `
-            --timeout 300s `
+            --fast-list `
+            --transfers 32 `
+            --checkers 64 `
+            --multi-thread-streams 8 `
+            --multi-thread-cutoff 64M `
+            --buffer-size 32M `
+            --drive-chunk-size 64M `
+            --timeout 120s `
+            --contimeout 15s `
             --retries 3 `
             --low-level-retries 10 `
-            --transfers 4 `
-            --checkers 8
+            --stats 10s `
+            --stats-one-line
 
           if ($LASTEXITCODE -ne 0) {
             throw "D restore failed."
@@ -886,6 +902,8 @@ jobs:
             Out-File `
               -Append `
               $env:GITHUB_ENV
+
+          Write-Host "D persistent storage is ready."
 
 
       - name: Restore persistent C files
