@@ -1,4 +1,4 @@
-Name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D
+name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D
 
 on:
   schedule:
