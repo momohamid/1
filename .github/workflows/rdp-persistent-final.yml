@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -834,9 +834,6 @@ jobs:
               $env:GITHUB_ENV
 
 
-      # ==========================================================
-      # FAST D RESTORE
-      # ==========================================================
       - name: Prepare D persistent storage
         shell: pwsh
         run: |
@@ -861,7 +858,7 @@ jobs:
             Out-Null
 
           Write-Host "Preparing D persistent storage..."
-          Write-Host "Using maximum practical parallelism."
+          Write-Host "Fast restore mode enabled."
 
           & $rclone `
             --config $config `
@@ -872,25 +869,26 @@ jobs:
             throw "Could not prepare D storage."
           }
 
-          Write-Host "Restoring only missing/changed D files..."
+          Write-Host "Restoring D storage..."
 
           & $rclone `
             --config $config `
             copy `
             $remote `
             $dRoot `
-            --create-empty-src-dirs `
             --fast-list `
-            --transfers 32 `
-            --checkers 64 `
+            --no-traverse `
+            --transfers 16 `
+            --checkers 32 `
             --multi-thread-streams 8 `
-            --multi-thread-cutoff 64M `
-            --buffer-size 32M `
-            --drive-chunk-size 64M `
-            --timeout 120s `
-            --contimeout 15s `
-            --retries 3 `
-            --low-level-retries 10 `
+            --multi-thread-cutoff 32M `
+            --multi-thread-chunk-size 64M `
+            --buffer-size 64M `
+            --drive-chunk-size 128M `
+            --timeout 300s `
+            --contimeout 20s `
+            --retries 5 `
+            --low-level-retries 20 `
             --stats 10s `
             --stats-one-line
 
@@ -920,31 +918,60 @@ jobs:
           $remote =
             "gdrive_g:.persistent-rdp/C-storage"
 
-          Write-Host "Restoring previously saved C files..."
+          Write-Host "=========================================="
+          Write-Host "FAST C RESTORE"
+          Write-Host "=========================================="
+
+          if (-not (Test-Path $rclone)) {
+            throw "rclone.exe not found."
+          }
+
+          if (-not (Test-Path $config)) {
+            throw "Google Drive configuration not found."
+          }
+
+          Write-Host "Restoring persistent C files..."
+          Write-Host "System directories are excluded."
+          Write-Host "High-parallel restore enabled."
 
           & $rclone `
             --config $config `
             copy `
             $remote `
             "C:\" `
+            --fast-list `
+            --no-traverse `
+            --transfers 16 `
+            --checkers 32 `
+            --multi-thread-streams 8 `
+            --multi-thread-cutoff 32M `
+            --multi-thread-chunk-size 64M `
+            --buffer-size 64M `
+            --drive-chunk-size 128M `
             --exclude "Windows/**" `
+            --exclude "Windows.old/**" `
             --exclude '$Recycle.Bin/**' `
             --exclude 'System Volume Information/**' `
             --exclude 'pagefile.sys' `
             --exclude 'swapfile.sys' `
             --exclude 'hiberfil.sys' `
-            --create-empty-src-dirs `
+            --exclude 'DumpStack.log.tmp' `
+            --exclude 'Recovery/**' `
             --timeout 300s `
-            --retries 3 `
-            --low-level-retries 10 `
-            --transfers 4 `
-            --checkers 8
+            --contimeout 20s `
+            --retries 5 `
+            --low-level-retries 20 `
+            --stats 10s `
+            --stats-one-line
 
-          if ($LASTEXITCODE -ne 0) {
+          $code = $LASTEXITCODE
+
+          if ($code -ne 0) {
+            Write-Host "rclone C restore returned exit code $code."
             throw "C restore failed."
           }
 
-          Write-Host "Persistent C restore completed."
+          Write-Host "C persistent restore completed successfully."
 
 
       - name: Record C session start
@@ -976,21 +1003,22 @@ jobs:
           $content = @'
           $ErrorActionPreference = "Continue"
 
-          $rclone = "C:\Tools\rclone\rclone.exe"
-          $config = "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-          $remote = "gdrive_g:.persistent-rdp/C-storage"
+          $rclone =
+              "C:\Tools\rclone\rclone.exe"
 
-          $sessionStartText = $env:C_SESSION_START
+          $config =
+              "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+
+          $remote =
+              "gdrive_g:.persistent-rdp/C-storage"
+
+          $sessionStartText =
+              $env:C_SESSION_START
 
           if ([string]::IsNullOrWhiteSpace($sessionStartText)) {
               Write-Warning "C_SESSION_START is missing."
               exit 0
           }
-
-          $sessionStart =
-              [DateTime]::Parse(
-                  $sessionStartText
-              ).ToUniversalTime()
 
           if (
               -not (Test-Path $rclone) -or
@@ -1000,10 +1028,17 @@ jobs:
               exit 0
           }
 
+          $sessionStart =
+              [DateTime]::Parse(
+                  $sessionStartText
+              ).ToUniversalTime()
+
           $excludedRoots = @(
               "C:\Windows"
+              "C:\Windows.old"
               "C:\$Recycle.Bin"
               "C:\System Volume Information"
+              "C:\Recovery"
           )
 
           $filesList =
@@ -1017,9 +1052,10 @@ jobs:
               -Force `
               -ErrorAction SilentlyContinue
 
-          $found = New-Object System.Collections.Generic.List[string]
+          $found =
+              New-Object System.Collections.Generic.List[string]
 
-          Write-Host "Scanning C: for files created or modified during this session..."
+          Write-Host "Scanning C: for new/modified persistent files..."
 
           Get-ChildItem `
               -Path "C:\" `
@@ -1055,15 +1091,9 @@ jobs:
                   return
               }
 
-              $created =
-                  $_.CreationTimeUtc
-
-              $modified =
-                  $_.LastWriteTimeUtc
-
               if (
-                  $created -ge $sessionStart -or
-                  $modified -ge $sessionStart
+                  $_.CreationTimeUtc -ge $sessionStart -or
+                  $_.LastWriteTimeUtc -ge $sessionStart
               ) {
 
                   $relative =
@@ -1092,7 +1122,7 @@ jobs:
               -Destination $filesList `
               -Force
 
-          Write-Host "Files to upload: $($found.Count)"
+          Write-Host "Files selected for upload: $($found.Count)"
 
           & $rclone `
               --config $config `
@@ -1100,17 +1130,30 @@ jobs:
               "C:\" `
               $remote `
               --files-from $filesList `
+              --fast-list `
+              --no-traverse `
+              --transfers 16 `
+              --checkers 32 `
+              --multi-thread-streams 8 `
+              --multi-thread-cutoff 32M `
+              --multi-thread-chunk-size 64M `
+              --buffer-size 64M `
+              --drive-chunk-size 128M `
               --exclude "Windows/**" `
+              --exclude "Windows.old/**" `
               --exclude '$Recycle.Bin/**' `
               --exclude 'System Volume Information/**' `
+              --exclude 'Recovery/**' `
               --exclude 'pagefile.sys' `
               --exclude 'swapfile.sys' `
               --exclude 'hiberfil.sys' `
+              --exclude 'DumpStack.log.tmp' `
               --timeout 300s `
-              --retries 3 `
-              --low-level-retries 10 `
-              --transfers 4 `
-              --checkers 8
+              --contimeout 20s `
+              --retries 5 `
+              --low-level-retries 20 `
+              --stats 10s `
+              --stats-one-line
 
           if ($LASTEXITCODE -eq 0) {
               Write-Host "C incremental persistence sync completed."
@@ -1165,12 +1208,21 @@ jobs:
                 copy `
                 $dRoot `
                 $remote `
+                --fast-list `
+                --transfers 16 `
+                --checkers 32 `
+                --multi-thread-streams 8 `
+                --multi-thread-cutoff 32M `
+                --multi-thread-chunk-size 64M `
+                --buffer-size 64M `
+                --drive-chunk-size 128M `
                 --create-empty-src-dirs `
                 --timeout 300s `
-                --retries 3 `
-                --low-level-retries 10 `
-                --transfers 4 `
-                --checkers 8
+                --contimeout 20s `
+                --retries 5 `
+                --low-level-retries 20 `
+                --stats 10s `
+                --stats-one-line
 
               if ($LASTEXITCODE -eq 0) {
                   Write-Host "D persistence sync completed."
@@ -1561,8 +1613,10 @@ jobs:
           Write-Host ""
           Write-Host "EXCLUDED:"
           Write-Host "C:\Windows"
+          Write-Host "Windows.old"
           Write-Host "System Volume Information"
           Write-Host "$Recycle.Bin"
+          Write-Host "Recovery"
           Write-Host "pagefile.sys"
           Write-Host "swapfile.sys"
           Write-Host "hiberfil.sys"
