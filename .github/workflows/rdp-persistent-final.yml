@@ -138,7 +138,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: ${{ secrets.RDP_PASS }}
+      RDP_PASS: Yousif1990
 
     steps:
 
