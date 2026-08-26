@@ -1,4 +1,4 @@
-Name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D (VFS Mount)
+name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D (VFS Mount)
 
 on:
   schedule:
@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: ${{ secrets.RDP_PASS }}
+      RDP_PASS: Yousif1990
 
     steps:
 
