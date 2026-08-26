@@ -137,7 +137,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -1283,6 +1283,35 @@ jobs:
 
           Write-Host "Persistent-RDP logon task installed."
 
+      - name: Create D persistent workspace
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dDrive =
+            "D:\"
+
+          $dRoot =
+            "D:\Persistent-RDP"
+
+          if (-not (Test-Path $dDrive)) {
+            Write-Error "D: drive is not available on this runner."
+            exit 1
+          }
+
+          New-Item `
+            -ItemType Directory `
+            -Path $dRoot `
+            -Force |
+            Out-Null
+
+          if (-not (Test-Path $dRoot)) {
+            Write-Error "Could not create required path: $dRoot"
+            exit 1
+          }
+
+          Write-Host "D persistent workspace created: $dRoot"
+
       - name: Create D persistent sync helper
         shell: pwsh
         run: |
@@ -1313,7 +1342,16 @@ jobs:
             '$dRoot = "D:\Persistent-RDP"'
             '$remote = "gdrive_g:.persistent-rdp/D-storage"'
             ""
-            'if ((Test-Path $rclone) -and (Test-Path $config) -and (Test-Path $dRoot)) {'
+            'if ((Test-Path $rclone) -and (Test-Path $config)) {'
+            '    if (-not (Test-Path "D:\")) {'
+            '        Write-Warning "D: drive is not available."'
+            '        exit 0'
+            '    }'
+            ''
+            '    if (-not (Test-Path $dRoot)) {'
+            '        New-Item -ItemType Directory -Path $dRoot -Force | Out-Null'
+            '    }'
+            ''
             '    Write-Host "Uploading D persistent workspace..."'
             '    & $rclone --config $config copy $dRoot $remote --create-empty-src-dirs --timeout 300s --retries 3 --low-level-retries 10 --transfers 4 --checkers 8'
             '    if ($LASTEXITCODE -eq 0) {'
