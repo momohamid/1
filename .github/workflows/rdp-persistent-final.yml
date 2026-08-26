@@ -9,45 +9,36 @@ on:
       ts_tailnet:
         description: "Tailscale tailnet"
         required: true
-
       ts_api_key:
         description: "Tailscale API key"
         required: true
-
       ts_authkey:
         description: "Tailscale Auth key"
         required: true
-
       quick_test:
         description: "Run 5-minute test"
         type: boolean
         default: false
-
       runtime_minutes:
         description: "Runtime (max 360; default 300)"
         required: false
         default: "300"
-
       do_purge:
         description: "Purge bullet devices at start"
         required: false
         default: "true"
-
       cycles:
         description: "0=stop after A; N=handoffs left"
         required: false
         default: "9999"
-
       rdp_count:
         description: "How many RDP instances (1-10)"
         required: false
         default: "1"
-
       crd_code:
         description: "Chrome Remote Desktop code/command"
         required: false
         default: ""
-
       crd_pin:
         description: "CRD PIN"
         required: false
@@ -139,7 +130,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -857,9 +848,6 @@ jobs:
             -Force |
             Out-Null
 
-          Write-Host "Preparing D persistent storage..."
-          Write-Host "Fast restore mode enabled."
-
           & $rclone `
             --config $config `
             mkdir `
@@ -868,8 +856,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             throw "Could not prepare D storage."
           }
-
-          Write-Host "Restoring D storage..."
 
           & $rclone `
             --config $config `
@@ -901,10 +887,8 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "D persistent storage is ready."
 
-
-      - name: Restore persistent C files
+      - name: Prepare C persistent storage
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -918,21 +902,21 @@ jobs:
           $remote =
             "gdrive_g:.persistent-rdp/C-storage"
 
-          Write-Host "=========================================="
-          Write-Host "FAST C RESTORE"
-          Write-Host "=========================================="
+          Write-Host "Preparing C persistent storage..."
 
-          if (-not (Test-Path $rclone)) {
-            throw "rclone.exe not found."
+          # FIX:
+          # The original workflow failed when C-storage did not yet exist.
+          # Create it first so a fresh Google Drive works correctly.
+          & $rclone `
+            --config $config `
+            mkdir `
+            $remote
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not create C persistent storage."
           }
 
-          if (-not (Test-Path $config)) {
-            throw "Google Drive configuration not found."
-          }
-
-          Write-Host "Restoring persistent C files..."
-          Write-Host "System directories are excluded."
-          Write-Host "High-parallel restore enabled."
+          Write-Host "Restoring C persistent files..."
 
           & $rclone `
             --config $config `
@@ -952,11 +936,11 @@ jobs:
             --exclude "Windows.old/**" `
             --exclude '$Recycle.Bin/**' `
             --exclude 'System Volume Information/**' `
+            --exclude 'Recovery/**' `
             --exclude 'pagefile.sys' `
             --exclude 'swapfile.sys' `
             --exclude 'hiberfil.sys' `
             --exclude 'DumpStack.log.tmp' `
-            --exclude 'Recovery/**' `
             --timeout 300s `
             --contimeout 20s `
             --retries 5 `
@@ -964,19 +948,10 @@ jobs:
             --stats 10s `
             --stats-one-line
 
-          $code = $LASTEXITCODE
-
-          if ($code -ne 0) {
-            Write-Host "rclone C restore returned exit code $code."
+          if ($LASTEXITCODE -ne 0) {
             throw "C restore failed."
           }
 
-          Write-Host "C persistent restore completed successfully."
-
-
-      - name: Record C session start
-        shell: pwsh
-        run: |
           $start =
             (Get-Date).ToUniversalTime()
 
@@ -985,8 +960,7 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "C persistence session started at:"
-          Write-Host $start
+          Write-Host "C persistence session started."
 
 
       - name: Create C persistence sync script
@@ -1028,6 +1002,13 @@ jobs:
               exit 0
           }
 
+          # Make sure the remote exists even on a completely new Drive.
+          & $rclone `
+              --config $config `
+              mkdir `
+              $remote `
+              2>$null
+
           $sessionStart =
               [DateTime]::Parse(
                   $sessionStartText
@@ -1055,7 +1036,7 @@ jobs:
           $found =
               New-Object System.Collections.Generic.List[string]
 
-          Write-Host "Scanning C: for new/modified persistent files..."
+          Write-Host "Scanning C: for ALL new/modified files..."
 
           Get-ChildItem `
               -Path "C:\" `
@@ -1106,13 +1087,19 @@ jobs:
               }
           }
 
-          if ($found.Count -eq 0) {
+          $found =
+              $found |
+              Sort-Object -Unique
+
+          if (
+              -not $found -or
+              $found.Count -eq 0
+          ) {
               Write-Host "No new or modified C files found."
               exit 0
           }
 
           $found |
-              Sort-Object -Unique |
               Set-Content `
                 -Path $tempList `
                 -Encoding UTF8
@@ -1139,15 +1126,6 @@ jobs:
               --multi-thread-chunk-size 64M `
               --buffer-size 64M `
               --drive-chunk-size 128M `
-              --exclude "Windows/**" `
-              --exclude "Windows.old/**" `
-              --exclude '$Recycle.Bin/**' `
-              --exclude 'System Volume Information/**' `
-              --exclude 'Recovery/**' `
-              --exclude 'pagefile.sys' `
-              --exclude 'swapfile.sys' `
-              --exclude 'hiberfil.sys' `
-              --exclude 'DumpStack.log.tmp' `
               --timeout 300s `
               --contimeout 20s `
               --retries 5 `
@@ -1168,8 +1146,6 @@ jobs:
             -Value $content `
             -Encoding UTF8 `
             -Force
-
-          Write-Host "Created C incremental persistence script."
 
 
       - name: Create D persistent sync script
@@ -1200,6 +1176,12 @@ jobs:
               (Test-Path $config) -and
               (Test-Path $dRoot)
           ) {
+
+              & $rclone `
+                --config $config `
+                mkdir `
+                $remote `
+                2>$null
 
               Write-Host "Uploading D:\Persistent-RDP..."
 
@@ -1314,8 +1296,6 @@ jobs:
             -Force |
             Out-Null
 
-          Write-Host "Periodic persistence task installed."
-
 
       - name: Create persistent user logon sync
         shell: pwsh
@@ -1352,17 +1332,9 @@ jobs:
             -Force |
             Out-Null
 
-          Write-Host "Persistent logon sync installed."
-
 
       - name: Prepare five Google Drive mounts
         shell: pwsh
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
-          DRIVE_TOKEN1: ${{ secrets.DRIVE_TOKEN1 }}
-          DRIVE_TOKEN2: ${{ secrets.DRIVE_TOKEN2 }}
-          DRIVE_TOKEN3: ${{ secrets.DRIVE_TOKEN3 }}
-          DRIVE_TOKEN4: ${{ secrets.DRIVE_TOKEN4 }}
         run: |
           $ErrorActionPreference = "Stop"
 
@@ -1695,142 +1667,3 @@ jobs:
           }
 
           Write-Host "Final persistence sync completed."
-
-
-      - name: Dispatch next or stop
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $cycles =
-            [int]"${{ inputs.cycles }}"
-
-          if ($cycles -le 0) {
-            Write-Host "No cycles configured. Done."
-            exit 0
-          }
-
-          $next =
-            $cycles - 1
-
-          if ($next -le 0) {
-
-            $url =
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
-
-            $headers = @{
-              Authorization =
-                "Bearer $env:GH_TOKEN"
-
-              Accept =
-                "application/vnd.github+json"
-
-              "X-GitHub-Api-Version" =
-                "2022-11-28"
-            }
-
-            $payload = @{
-              ts_tailnet =
-                "${{ inputs.ts_tailnet }}"
-
-              ts_api_key =
-                "${{ inputs.ts_api_key }}"
-
-              base_prefix =
-                "bullet"
-
-              max_count =
-                "10"
-
-              dry_run =
-                "false"
-            }
-
-            $body =
-              @{
-                ref =
-                  "${{ github.ref_name }}"
-
-                inputs =
-                  $payload
-              } |
-              ConvertTo-Json -Depth 20
-
-            Invoke-RestMethod `
-              -Method POST `
-              -Uri $url `
-              -Headers $headers `
-              -ContentType "application/json" `
-              -Body $body
-
-            Write-Host "STOP workflow dispatched."
-          }
-          else {
-
-            $payload = @{
-              ts_tailnet =
-                "${{ inputs.ts_tailnet }}"
-
-              ts_api_key =
-                "${{ inputs.ts_api_key }}"
-
-              ts_authkey =
-                "${{ inputs.ts_authkey }}"
-
-              quick_test =
-                "${{ inputs.quick_test }}"
-
-              runtime_minutes =
-                "300"
-
-              do_purge =
-                "true"
-
-              cycles =
-                "$next"
-
-              rdp_count =
-                "${{ inputs.rdp_count }}"
-
-              crd_code =
-                "${{ inputs.crd_code }}"
-
-              crd_pin =
-                "${{ inputs.crd_pin }}"
-            }
-
-            $url =
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
-
-            $headers = @{
-              Authorization =
-                "Bearer $env:GH_TOKEN"
-
-              Accept =
-                "application/vnd.github+json"
-
-              "X-GitHub-Api-Version" =
-                "2022-11-28"
-            }
-
-            $body =
-              @{
-                ref =
-                  "${{ github.ref_name }}"
-
-                inputs =
-                  $payload
-              } |
-              ConvertTo-Json -Depth 20
-
-            Invoke-RestMethod `
-              -Method POST `
-              -Uri $url `
-              -Headers $headers `
-              -ContentType "application/json" `
-              -Body $body
-
-            Write-Host "Next Workflow A dispatched."
-          }
