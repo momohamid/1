@@ -970,7 +970,7 @@ jobs:
           Write-Host "C persistent restore completed successfully."
 
 
-      - name: Restore Drive files to original places (G H I J K)
+      - name: Restore Drive files to local folders (Safe fallback for non-existent drives)
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
@@ -989,8 +989,15 @@ jobs:
             New-Item -ItemType Directory -Path $d.Letter -Force | Out-Null
             $conf = "$configDir\gdrive_$($d.Name.ToLower()).conf"
             if (Test-Path $conf) {
-              Write-Host "Restoring Google Drive $($d.Name) files to local folder: $($d.Letter)"
-              & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s
+              Write-Host "Checking remote folder for Google Drive $($d.Name)..."
+              # التحقق من وجود المجلد البعيد على Google Drive أولاً لتجنب خطأ عدم وجود المسار المحلي
+              & $rclone --config $conf lsf "$($d.Name):.persistent-rdp/files" --max-depth 1 2>$null
+              if ($LASTEXITCODE -eq 0) {
+                Write-Host "Restoring Google Drive $($d.Name) files to local folder: $($d.Letter)"
+                & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s
+              } else {
+                Write-Host "Remote directory for Drive $($d.Name) does not exist yet. Skipping restore safely."
+              }
             }
           }
 
@@ -1378,129 +1385,6 @@ jobs:
             Out-Null
 
           Write-Host "Persistent logon sync installed."
-
-
-      - name: Prepare five Google Drive mounts
-        shell: pwsh
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
-          DRIVE_TOKEN1: ${{ secrets.DRIVE_TOKEN1 }}
-          DRIVE_TOKEN2: ${{ secrets.DRIVE_TOKEN2 }}
-          DRIVE_TOKEN3: ${{ secrets.DRIVE_TOKEN3 }}
-          DRIVE_TOKEN4: ${{ secrets.DRIVE_TOKEN4 }}
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          $persistDir =
-            "C:\ProgramData\Persistent-RDP"
-
-          $configDir =
-            "$persistDir\rclone"
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $mounts = @(
-            @{
-              Name = "G"
-              Config = "$configDir\gdrive_g.conf"
-              Remote = "gdrive_g:.persistent-rdp/files"
-              Letter = "G:"
-            }
-            @{
-              Name = "H"
-              Config = "$configDir\gdrive_h.conf"
-              Remote = "gdrive_h:.persistent-rdp/files"
-              Letter = "H:"
-            }
-            @{
-              Name = "I"
-              Config = "$configDir\gdrive_i.conf"
-              Remote = "gdrive_i:.persistent-rdp/files"
-              Letter = "I:"
-            }
-            @{
-              Name = "J"
-              Config = "$configDir\gdrive_j.conf"
-              Remote = "gdrive_j:.persistent-rdp/files"
-              Letter = "J:"
-            }
-            @{
-              Name = "K"
-              Config = "$configDir\gdrive_k.conf"
-              Remote = "gdrive_k:.persistent-rdp/files"
-              Letter = "K:"
-            }
-          )
-
-          foreach ($m in $mounts) {
-
-            $script =
-              "$persistDir\Mount-$($m.Name).ps1"
-
-            $content = @"
-          `$rclone = "$rclone"
-          `$config = "$($m.Config)"
-          `$remote = "$($m.Remote)"
-          `$letter = "$($m.Letter)"
-
-          & `$rclone `
-            --config `$config `
-            mount `$remote `$letter `
-            --network-mode `
-            --volname "Persistent-RDP-$($m.Name)" `
-            --vfs-cache-mode full `
-            --vfs-cache-max-size 15G `
-            --dir-cache-time 30s `
-            --poll-interval 30s `
-            --transfers 16 `
-            --checkers 32 `
-            --timeout 2m `
-            --contimeout 15s
-          "@
-
-            Set-Content `
-              -Path $script `
-              -Value $content `
-              -Encoding UTF8 `
-              -Force
-          }
-
-
-      - name: Start five persistent drive mounts
-        shell: pwsh
-        run: |
-          $persistDir =
-            "C:\ProgramData\Persistent-RDP"
-
-          foreach ($letter in @(
-            "G"
-            "H"
-            "I"
-            "J"
-            "K"
-          )) {
-
-            $script =
-              "$persistDir\Mount-$letter.ps1"
-
-            if (Test-Path $script) {
-
-              Start-Process `
-                -FilePath "powershell.exe" `
-                -ArgumentList @(
-                  "-NoProfile"
-                  "-ExecutionPolicy"
-                  "Bypass"
-                  "-WindowStyle"
-                  "Hidden"
-                  "-File"
-                  "`"$script`""
-                )
-            }
-          }
-
-          Write-Host "G:H:I:J:K mounts started."
 
 
       - name: Verify persistence
