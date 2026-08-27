@@ -870,7 +870,6 @@ jobs:
 
           Write-Host "Restoring D storage and large files..."
 
-          # التحقق من وجود المجلد البعيد قبل الاستعادة لتفادي الخطأ
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
 
           if ($LASTEXITCODE -eq 0) {
@@ -935,7 +934,6 @@ jobs:
           Write-Host "Ensuring remote C-storage directory exists..."
           & $rclone --config $config mkdir $remote
 
-          # التاكد من وجود الملفات في المجلد البعيد قبل الاستعادة
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
 
           if ($LASTEXITCODE -eq 0) {
@@ -1022,7 +1020,6 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          # حفظ التاريخ أيضا في ملف محلي لضمان قراءته في السكربت المجدول دون الاعتماد على البيئة المفقودة
           New-Item -ItemType Directory -Path "C:\ProgramData\Persistent-RDP" -Force | Out-Null
           Set-Content -Path "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Value "$($start.ToString('o'))" -Encoding UTF8 -Force
 
@@ -1100,7 +1097,6 @@ jobs:
 
           Write-Host "Scanning C: for new/modified persistent files (optimized)..."
 
-          # التاكد من المجلدات الهامة مثل البرامج والبلجنات
           $scanRoots = @(
               "C:\Users\Yousif190",
               "C:\Program Files\Adobe",
