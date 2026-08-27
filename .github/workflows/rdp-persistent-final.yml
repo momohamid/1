@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -1626,7 +1626,6 @@ jobs:
           $end = (Get-Date).AddMinutes($mins)
           $syncScript = "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
           
-          # نحسب وقت التشغيل لنقوم بعمل حفظ استباقي قبل انتهاء الوقت بـ 8 دقائق لضمان عدم حدوث Hard Kill مفاجئ
           $earlySyncTriggered = $false
 
           while ((Get-Date) -lt $end) {
