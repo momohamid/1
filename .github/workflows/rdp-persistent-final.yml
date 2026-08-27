@@ -837,6 +837,33 @@ jobs:
               $env:GITHUB_ENV
 
 
+      - name: Organize Remote Drive Folders (Move C system files out of D-storage)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          $rclone = "$env:RCLONE_EXE"
+          $config = "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
+
+          Write-Host "Fixing remote drive structures: Moving C folders out of D-storage..."
+
+          $systemFolders = @(
+            "Program Files",
+            "Program Files (x86)",
+            "ProgramData",
+            "Users",
+            "Windows",
+            "Common Files",
+            "Adobe"
+          )
+
+          foreach ($folder in $systemFolders) {
+            & $rclone --config $config move "gdrive_g:.persistent-rdp/D-storage/$folder" "gdrive_g:.persistent-rdp/C-storage/$folder" --delete-empty-src-dirs 2>$null
+          }
+
+          Write-Host "Drive restructuring completed."
+
+
       - name: Restore persistent C files
         shell: pwsh
         run: |
@@ -855,15 +882,6 @@ jobs:
           Write-Host "FAST & OPTIMIZED C RESTORE TO ORIGINAL PATHS"
           Write-Host "=========================================="
 
-          if (-not (Test-Path $rclone)) {
-            throw "rclone.exe not found."
-          }
-
-          if (-not (Test-Path $config)) {
-            throw "Google Drive configuration not found."
-          }
-
-          Write-Host "Ensuring remote C-storage directory exists..."
           & $rclone --config $config mkdir $remote
 
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
@@ -958,6 +976,14 @@ jobs:
               --multi-thread-chunk-size 32M `
               --buffer-size 512M `
               --drive-chunk-size 1024M `
+              --exclude "/Program Files/**" `
+              --exclude "/Program Files (x86)/**" `
+              --exclude "/ProgramData/**" `
+              --exclude "/Users/**" `
+              --exclude "/Windows/**" `
+              --exclude "/Common Files/**" `
+              --exclude "/`$RECYCLE.BIN/**" `
+              --exclude "/System Volume Information/**" `
               --timeout 600s `
               --contimeout 30s `
               --retries 10 `
@@ -1235,6 +1261,14 @@ jobs:
                 --multi-thread-chunk-size 32M `
                 --buffer-size 512M `
                 --drive-chunk-size 1024M `
+                --exclude "/Program Files/**" `
+                --exclude "/Program Files (x86)/**" `
+                --exclude "/ProgramData/**" `
+                --exclude "/Users/**" `
+                --exclude "/Windows/**" `
+                --exclude "/Common Files/**" `
+                --exclude "/`$RECYCLE.BIN/**" `
+                --exclude "/System Volume Information/**" `
                 --create-empty-src-dirs `
                 --timeout 600s `
                 --contimeout 30s `
