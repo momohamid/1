@@ -837,74 +837,6 @@ jobs:
               $env:GITHUB_ENV
 
 
-      - name: Prepare D persistent storage
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $config =
-            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
-
-          $dRoot =
-            "D:\"
-
-          $remote =
-            "gdrive_g:.persistent-rdp/D-storage"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $dRoot `
-            -Force |
-            Out-Null
-
-          Write-Host "Preparing D persistent storage..."
-          Write-Host "Fast restore mode enabled with high-speed options."
-
-          & $rclone `
-            --config $config `
-            mkdir `
-            $remote
-
-          Write-Host "Restoring D storage and large files..."
-
-          & $rclone --config $config lsf $remote --max-depth 1 2>$null
-
-          if ($LASTEXITCODE -eq 0) {
-            & $rclone `
-              --config $config `
-              copy `
-              $remote `
-              $dRoot `
-              --fast-list `
-              --no-traverse `
-              --transfers 32 `
-              --checkers 64 `
-              --multi-thread-streams 64 `
-              --multi-thread-cutoff 16M `
-              --multi-thread-chunk-size 32M `
-              --buffer-size 512M `
-              --drive-chunk-size 1024M `
-              --timeout 600s `
-              --contimeout 30s `
-              --retries 10 `
-              --low-level-retries 30 `
-              --stats 10s `
-              --stats-one-line
-          } else {
-            Write-Host "Remote D-storage directory does not exist yet. Skipping restore safely."
-          }
-
-          "D_PERSIST_DIR=$dRoot" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host "D persistent storage is ready."
-
-
       - name: Restore persistent C files
         shell: pwsh
         run: |
@@ -975,6 +907,74 @@ jobs:
           }
 
           Write-Host "C persistent restore finished safely."
+
+
+      - name: Prepare D persistent storage
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          $rclone =
+            "$env:RCLONE_EXE"
+
+          $config =
+            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
+
+          $dRoot =
+            "D:\"
+
+          $remote =
+            "gdrive_g:.persistent-rdp/D-storage"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $dRoot `
+            -Force |
+            Out-Null
+
+          Write-Host "Preparing D persistent storage..."
+          Write-Host "Fast restore mode enabled with high-speed options."
+
+          & $rclone `
+            --config $config `
+            mkdir `
+            $remote
+
+          Write-Host "Restoring D storage and large files..."
+
+          & $rclone --config $config lsf $remote --max-depth 1 2>$null
+
+          if ($LASTEXITCODE -eq 0) {
+            & $rclone `
+              --config $config `
+              copy `
+              $remote `
+              $dRoot `
+              --fast-list `
+              --no-traverse `
+              --transfers 32 `
+              --checkers 64 `
+              --multi-thread-streams 64 `
+              --multi-thread-cutoff 16M `
+              --multi-thread-chunk-size 32M `
+              --buffer-size 512M `
+              --drive-chunk-size 1024M `
+              --timeout 600s `
+              --contimeout 30s `
+              --retries 10 `
+              --low-level-retries 30 `
+              --stats 10s `
+              --stats-one-line
+          } else {
+            Write-Host "Remote D-storage directory does not exist yet. Skipping restore safely."
+          }
+
+          "D_PERSIST_DIR=$dRoot" |
+            Out-File `
+              -Append `
+              $env:GITHUB_ENV
+
+          Write-Host "D persistent storage is ready."
 
 
       - name: Restore Drive files to local folders (Safe fallback for non-existent drives)
@@ -1557,7 +1557,7 @@ jobs:
 
           if (Test-Path $dScript) {
             Write-Host "Executing Final D sync..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript
+            & powershell.exe -NoProfile -ExecutionProfile Bypass -File $dScript
           }
 
           Write-Host "Final safe persistence sync completed."
