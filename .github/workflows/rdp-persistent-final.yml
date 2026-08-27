@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -1022,6 +1022,10 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
+          # حفظ التاريخ أيضا في ملف محلي لضمان قراءته في السكربت المجدول دون الاعتماد على البيئة المفقودة
+          New-Item -ItemType Directory -Path "C:\ProgramData\Persistent-RDP" -Force | Out-Null
+          Set-Content -Path "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Value "$($start.ToString('o'))" -Encoding UTF8 -Force
+
           Write-Host "C persistence session started at:"
           Write-Host $start
 
@@ -1049,12 +1053,17 @@ jobs:
           $remote =
               "gdrive_g:.persistent-rdp/C-storage"
 
-          $sessionStartText =
-              $env:C_SESSION_START
+          $sessionStartText = $env:C_SESSION_START
+
+          if ([string]::IsNullOrWhiteSpace($sessionStartText) -and (Test-Path "C:\ProgramData\Persistent-RDP\SessionStart.txt")) {
+              $sessionStartText = (Get-Content "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Raw).Trim()
+          }
 
           if ([string]::IsNullOrWhiteSpace($sessionStartText)) {
-              Write-Warning "C_SESSION_START is missing."
-              exit 0
+              Write-Warning "C_SESSION_START missing. Using 24 hours fallback to ensure no plugin/file is lost."
+              $sessionStart = (Get-Date).AddDays(-1).ToUniversalTime()
+          } else {
+              $sessionStart = [DateTime]::Parse($sessionStartText).ToUniversalTime()
           }
 
           if (
@@ -1064,11 +1073,6 @@ jobs:
               Write-Warning "rclone/config missing."
               exit 0
           }
-
-          $sessionStart =
-              [DateTime]::Parse(
-                  $sessionStartText
-              ).ToUniversalTime()
 
           $excludedRoots = @(
               "C:\Windows"
@@ -1096,52 +1100,30 @@ jobs:
 
           Write-Host "Scanning C: for new/modified persistent files (optimized)..."
 
-          Get-ChildItem `
-              -Path "C:\" `
-              -File `
-              -Force `
-              -Recurse `
-              -ErrorAction SilentlyContinue |
-          ForEach-Object {
+          # التاكد من المجلدات الهامة مثل البرامج والبلجنات
+          $scanRoots = @(
+              "C:\Users\Yousif190",
+              "C:\Program Files\Adobe",
+              "C:\Program Files\Common Files\Adobe"
+          )
 
-              $full =
-                  $_.FullName
+          foreach ($rootTarget in $scanRoots) {
+              if (Test-Path $rootTarget) {
+                  Get-ChildItem -Path $rootTarget -File -Force -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+                      $full = $_.FullName
+                      $skip = $false
+                      foreach ($root in $excludedRoots) {
+                          if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or $full.StartsWith($root + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
+                              $skip = $true; break
+                          }
+                      }
+                      if ($skip) { return }
 
-              $skip = $false
-
-              foreach ($root in $excludedRoots) {
-
-                  if (
-                      $full.Equals(
-                          $root,
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      ) -or
-                      $full.StartsWith(
-                          $root + "\",
-                          [System.StringComparison]::OrdinalIgnoreCase
-                      )
-                  ) {
-                      $skip = $true
-                      break
+                      if ($_.CreationTimeUtc -ge $sessionStart -or $_.LastWriteTimeUtc -ge $sessionStart) {
+                          $relative = $full.Substring(3).Replace('\','/')
+                          [void]$found.Add($relative)
+                      }
                   }
-              }
-
-              if ($skip) {
-                  return
-              }
-
-              if (
-                  $_.CreationTimeUtc -ge $sessionStart -or
-                  $_.LastWriteTimeUtc -ge $sessionStart
-              ) {
-
-                  $relative =
-                      $full.Substring(3)
-
-                  $relative =
-                      $relative.Replace('\','/')
-
-                  [void]$found.Add($relative)
               }
           }
 
