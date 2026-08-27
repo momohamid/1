@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -996,8 +996,7 @@ jobs:
             $conf = "$configDir\gdrive_$($d.Name.ToLower()).conf"
             if (Test-Path $conf) {
               Write-Host "Checking remote folder for Google Drive $($d.Name)..."
-              # التحقق من وجود المجلد البعيد على Google Drive أولاً لتجنب خطأ عدم وجود المسار المحلي
-              & $rclone --config $conf lsf "$($d.Name):.persistent-rdp/files" --max-depth 1 2>$null
+              $null = & $rclone --config $conf lsf "$($d.Name):.persistent-rdp/files" --max-depth 1 2>&1
               if ($LASTEXITCODE -eq 0) {
                 Write-Host "Restoring Google Drive $($d.Name) files to local folder: $($d.Letter)"
                 & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s
@@ -1006,6 +1005,7 @@ jobs:
               }
             }
           }
+          exit 0
 
 
       - name: Record C session start
