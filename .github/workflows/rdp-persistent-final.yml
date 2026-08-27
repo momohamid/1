@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -852,7 +852,7 @@ jobs:
             "gdrive_g:.persistent-rdp/C-storage"
 
           Write-Host "=========================================="
-          Write-Host "FAST & OPTIMIZED C RESTORE"
+          Write-Host "FAST & OPTIMIZED C RESTORE TO ORIGINAL PATHS"
           Write-Host "=========================================="
 
           if (-not (Test-Path $rclone)) {
@@ -869,7 +869,7 @@ jobs:
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
 
           if ($LASTEXITCODE -eq 0) {
-            Write-Host "Restoring persistent C files and plugins with high speed..."
+            Write-Host "Restoring persistent C files to original system paths..."
 
             & $rclone `
               --config $config `
@@ -933,14 +933,13 @@ jobs:
             Out-Null
 
           Write-Host "Preparing D persistent storage..."
-          Write-Host "Fast restore mode enabled with high-speed options."
 
           & $rclone `
             --config $config `
             mkdir `
             $remote
 
-          Write-Host "Restoring D storage and large files..."
+          Write-Host "Restoring D storage..."
 
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
 
@@ -1099,8 +1098,9 @@ jobs:
 
           $scanRoots = @(
               "C:\Users\Yousif190",
-              "C:\Program Files\Adobe",
-              "C:\Program Files\Common Files\Adobe"
+              "C:\Program Files",
+              "C:\Program Files (x86)",
+              "C:\ProgramData"
           )
 
           foreach ($rootTarget in $scanRoots) {
@@ -1395,7 +1395,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host "PERSISTENCE VERIFIED & OPTIMIZED"
           Write-Host "D:\ = full persistent workspace"
-          Write-Host "C:\ = new/modified files persisted"
+          Write-Host "C:\ = new/modified files persisted to original paths"
           Write-Host "Safe high-speed multi-thread transfer enabled"
           Write-Host "=========================================="
 
