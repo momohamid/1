@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -933,7 +933,7 @@ jobs:
           Write-Host "Ensuring remote C-storage directory exists..."
           & $rclone --config $config mkdir $remote
 
-          Write-Host "Restoring persistent C files and plugins..."
+          Write-Host "Restoring persistent C files and plugins with high speed..."
 
           & $rclone `
             --config $config `
@@ -949,17 +949,17 @@ jobs:
             --multi-thread-chunk-size 32M `
             --buffer-size 512M `
             --drive-chunk-size 1024M `
-            --exclude "Windows/**" `
-            --exclude "Windows.old/**" `
-            --exclude "WindowsAzure/**" `
-            --exclude 'ProgramData\Microsoft\WindowsDefender/**' `
-            --exclude '$Recycle.Bin/**' `
-            --exclude 'System Volume Information/**' `
-            --exclude 'pagefile.sys' `
-            --exclude 'swapfile.sys' `
-            --exclude 'hiberfil.sys' `
-            --exclude 'DumpStack.log.tmp' `
-            --exclude 'Recovery/**' `
+            --exclude "/Windows/**" `
+            --exclude "/Windows.old/**" `
+            --exclude "/WindowsAzure/**" `
+            --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
+            --exclude "/`$Recycle.Bin/**" `
+            --exclude "/System Volume Information/**" `
+            --exclude "/pagefile.sys" `
+            --exclude "/swapfile.sys" `
+            --exclude "/hiberfil.sys" `
+            --exclude "/DumpStack.log.tmp" `
+            --exclude "/Recovery/**" `
             --timeout 600s `
             --contimeout 30s `
             --retries 10 `
@@ -1162,17 +1162,17 @@ jobs:
               --multi-thread-chunk-size 32M `
               --buffer-size 512M `
               --drive-chunk-size 1024M `
-              --exclude "Windows/**" `
-              --exclude "Windows.old/**" `
-              --exclude "WindowsAzure/**" `
-              --exclude 'ProgramData\Microsoft\WindowsDefender/**' `
-              --exclude '$Recycle.Bin/**' `
-              --exclude 'System Volume Information/**' `
-              --exclude 'Recovery/**' `
-              --exclude 'pagefile.sys' `
-              --exclude 'swapfile.sys' `
-              --exclude 'hiberfil.sys' `
-              --exclude 'DumpStack.log.tmp' `
+              --exclude "/Windows/**" `
+              --exclude "/Windows.old/**" `
+              --exclude "/WindowsAzure/**" `
+              --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
+              --exclude "/`$Recycle.Bin/**" `
+              --exclude "/System Volume Information/**" `
+              --exclude "/Recovery/**" `
+              --exclude "/pagefile.sys" `
+              --exclude "/swapfile.sys" `
+              --exclude "/hiberfil.sys" `
+              --exclude "/DumpStack.log.tmp" `
               --timeout 600s `
               --contimeout 30s `
               --retries 10 `
