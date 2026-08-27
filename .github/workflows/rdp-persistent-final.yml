@@ -596,6 +596,9 @@ jobs:
             "$root\Assets"
             "$root\Assets\Fonts"
             "$root\Assets\Plugins"
+            "C:\Program Files\Adobe"
+            "C:\Program Files\Common Files\Adobe"
+            "C:\Program Files\Common Files\Adobe\Plug-Ins"
           )
 
           foreach ($path in $paths) {
@@ -846,7 +849,7 @@ jobs:
             "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
 
           $dRoot =
-            "D:\Persistent-RDP"
+            "D:\"
 
           $remote =
             "gdrive_g:.persistent-rdp/D-storage"
@@ -1228,7 +1231,7 @@ jobs:
               "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
 
           $dRoot =
-              "D:\Persistent-RDP"
+              "D:\"
 
           $remote =
               "gdrive_g:.persistent-rdp/D-storage"
@@ -1239,7 +1242,7 @@ jobs:
               (Test-Path $dRoot)
           ) {
 
-              Write-Host "Uploading D:\Persistent-RDP with high-speed multi-threading..."
+              Write-Host "Uploading D:\ with high-speed multi-threading..."
 
               & $rclone `
                 --config $config `
@@ -1401,7 +1404,7 @@ jobs:
             "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
             "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
             "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
-            "D:\Persistent-RDP"
+            "D:\"
           )
 
           foreach ($path in $required) {
@@ -1413,7 +1416,7 @@ jobs:
 
           Write-Host "=========================================="
           Write-Host "PERSISTENCE VERIFIED & OPTIMIZED"
-          Write-Host "D:\Persistent-RDP = full persistent workspace"
+          Write-Host "D:\ = full persistent workspace"
           Write-Host "C:\ = new/modified files persisted"
           Write-Host "Safe high-speed multi-thread transfer enabled"
           Write-Host "=========================================="
