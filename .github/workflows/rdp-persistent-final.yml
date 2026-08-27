@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D (VFS Mount)
+name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D
 
 on:
   schedule:
@@ -139,7 +139,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -834,7 +834,7 @@ jobs:
               $env:GITHUB_ENV
 
 
-      - name: Mount D persistent storage (VFS Fast Mode)
+      - name: Prepare D persistent storage
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -857,48 +857,54 @@ jobs:
             -Force |
             Out-Null
 
-          Write-Host "Ensuring remote D-storage directory exists..."
-          & $rclone --config $config mkdir $remote
+          Write-Host "Preparing D persistent storage..."
+          Write-Host "Fast restore mode enabled with high-speed options."
 
-          Write-Host "Mounting D storage instantly..."
+          & $rclone `
+            --config $config `
+            mkdir `
+            $remote
 
-          $script =
-            "C:\ProgramData\Persistent-RDP\Mount-D.ps1"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Could not prepare D storage."
+          }
 
-          $content = @"
-          `$rclone = "$rclone"
-          `$config = "$config"
-          `$remote = "$remote"
-          `$dRoot = "$dRoot"
+          Write-Host "Restoring D storage and large files..."
 
-          & `$rclone `
-            --config `$config `
-            mount `$remote `$dRoot `
-            --network-mode `
-            --volname "Persistent-D" `
-            --vfs-cache-mode full `
-            --vfs-cache-max-size 30G `
-            --dir-cache-time 30s `
-            --poll-interval 30s `
-            --transfers 8 `
-            --checkers 16 `
-            --timeout 1m `
-            --contimeout 10s
-          "@
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            $dRoot `
+            --fast-list `
+            --no-traverse `
+            --transfers 16 `
+            --checkers 32 `
+            --multi-thread-streams 32 `
+            --multi-thread-cutoff 32M `
+            --multi-thread-chunk-size 64M `
+            --buffer-size 256M `
+            --drive-chunk-size 512M `
+            --timeout 600s `
+            --contimeout 30s `
+            --retries 10 `
+            --low-level-retries 30 `
+            --stats 10s `
+            --stats-one-line
 
-          Set-Content -Path $script -Value $content -Encoding UTF8 -Force
-
-          Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "D restore completed with minor notices, continuing..."
+          }
 
           "D_PERSIST_DIR=$dRoot" |
             Out-File `
               -Append `
               $env:GITHUB_ENV
 
-          Write-Host "D persistent storage mounted successfully in 0 seconds!"
+          Write-Host "D persistent storage is ready."
 
 
-      - name: Mount C persistent storage overlay (VFS Fast Mode)
+      - name: Restore persistent C files
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -913,41 +919,78 @@ jobs:
             "gdrive_g:.persistent-rdp/C-storage"
 
           Write-Host "=========================================="
-          Write-Host "INSTANT C VFS MOUNT"
+          Write-Host "FAST & OPTIMIZED C RESTORE"
           Write-Host "=========================================="
 
+          if (-not (Test-Path $rclone)) {
+            throw "rclone.exe not found."
+          }
+
+          if (-not (Test-Path $config)) {
+            throw "Google Drive configuration not found."
+          }
+
+          Write-Host "Ensuring remote C-storage directory exists..."
           & $rclone --config $config mkdir $remote
 
-          $cMountDir = "C:\Persistent-Overlay"
-          New-Item -ItemType Directory -Path $cMountDir -Force | Out-Null
+          Write-Host "Restoring persistent C files and plugins..."
 
-          $script = "C:\ProgramData\Persistent-RDP\Mount-C.ps1"
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            "C:\" `
+            --fast-list `
+            --no-traverse `
+            --transfers 16 `
+            --checkers 32 `
+            --multi-thread-streams 32 `
+            --multi-thread-cutoff 32M `
+            --multi-thread-chunk-size 64M `
+            --buffer-size 256M `
+            --drive-chunk-size 512M `
+            --exclude "Windows/**" `
+            --exclude "Windows.old/**" `
+            --exclude '$Recycle.Bin/**' `
+            --exclude 'System Volume Information/**' `
+            --exclude 'pagefile.sys' `
+            --exclude 'swapfile.sys' `
+            --exclude 'hiberfil.sys' `
+            --exclude 'DumpStack.log.tmp' `
+            --exclude 'Recovery/**' `
+            --timeout 600s `
+            --contimeout 30s `
+            --retries 10 `
+            --low-level-retries 30 `
+            --stats 10s `
+            --stats-one-line
 
-          $content = @"
-          `$rclone = "$rclone"
-          `$config = "$config"
-          `$remote = "$remote"
-          `$cMountDir = "$cMountDir"
+          Write-Host "C persistent restore completed successfully."
 
-          & `$rclone `
-            --config `$config `
-            mount `$remote `$cMountDir `
-            --network-mode `
-            --volname "Persistent-C" `
-            --vfs-cache-mode full `
-            --vfs-cache-max-size 30G `
-            --dir-cache-time 30s `
-            --poll-interval 30s `
-            --transfers 8 `
-            --checkers 16 `
-            --timeout 1m `
-            --contimeout 10s
-          "@
 
-          Set-Content -Path $script -Value $content -Encoding UTF8 -Force
-          Start-Process -FilePath "powershell.exe" -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+      - name: Restore Drive files to original places (G H I J K)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+          $rclone = "$env:RCLONE_EXE"
+          $configDir = "$env:RCLONE_CONFIG_DIR"
 
-          Write-Host "C persistent overlay mounted instantly!"
+          $drives = @(
+            @{ Name = "G"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-G"; Remote = "gdrive_g:.persistent-rdp/files" }
+            @{ Name = "H"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-H"; Remote = "gdrive_h:.persistent-rdp/files" }
+            @{ Name = "I"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-I"; Remote = "gdrive_i:.persistent-rdp/files" }
+            @{ Name = "J"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-J"; Remote = "gdrive_j:.persistent-rdp/files" }
+            @{ Name = "K"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-K"; Remote = "gdrive_k:.persistent-rdp/files" }
+          )
+
+          foreach ($d in $drives) {
+            New-Item -ItemType Directory -Path $d.Letter -Force | Out-Null
+            $conf = "$configDir\gdrive_$($d.Name.ToLower()).conf"
+            if (Test-Path $conf) {
+              Write-Host "Restoring Google Drive $($d.Name) files to local folder: $($d.Letter)"
+              & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 8 --timeout 300s --contimeout 20s
+            }
+          }
 
 
       - name: Record C session start
@@ -992,6 +1035,7 @@ jobs:
               $env:C_SESSION_START
 
           if ([string]::IsNullOrWhiteSpace($sessionStartText)) {
+              Write-Warning "C_SESSION_START is missing."
               exit 0
           }
 
@@ -999,6 +1043,7 @@ jobs:
               -not (Test-Path $rclone) -or
               -not (Test-Path $config)
           ) {
+              Write-Warning "rclone/config missing."
               exit 0
           }
 
@@ -1013,7 +1058,6 @@ jobs:
               "C:\$Recycle.Bin"
               "C:\System Volume Information"
               "C:\Recovery"
-              "C:\Persistent-Overlay"
           )
 
           $filesList =
@@ -1029,6 +1073,8 @@ jobs:
 
           $found =
               New-Object System.Collections.Generic.List[string]
+
+          Write-Host "Scanning C: for new/modified persistent files (optimized)..."
 
           Get-ChildItem `
               -Path "C:\" `
@@ -1080,6 +1126,7 @@ jobs:
           }
 
           if ($found.Count -eq 0) {
+              Write-Host "No new or modified C files found."
               exit 0
           }
 
@@ -1094,6 +1141,8 @@ jobs:
               -Destination $filesList `
               -Force
 
+          Write-Host "Files selected for high-speed upload: $($found.Count)"
+
           & $rclone `
               --config $config `
               copy `
@@ -1104,12 +1153,33 @@ jobs:
               --no-traverse `
               --transfers 16 `
               --checkers 32 `
-              --timeout 300s `
-              --contimeout 20s `
-              --retries 5 `
-              --low-level-retries 20 `
+              --multi-thread-streams 32 `
+              --multi-thread-cutoff 32M `
+              --multi-thread-chunk-size 64M `
+              --buffer-size 256M `
+              --drive-chunk-size 512M `
+              --exclude "Windows/**" `
+              --exclude "Windows.old/**" `
+              --exclude '$Recycle.Bin/**' `
+              --exclude 'System Volume Information/**' `
+              --exclude 'Recovery/**' `
+              --exclude 'pagefile.sys' `
+              --exclude 'swapfile.sys' `
+              --exclude 'hiberfil.sys' `
+              --exclude 'DumpStack.log.tmp' `
+              --timeout 600s `
+              --contimeout 30s `
+              --retries 10 `
+              --low-level-retries 30 `
               --stats 10s `
               --stats-one-line
+
+          if ($LASTEXITCODE -eq 0) {
+              Write-Host "C incremental persistence sync completed successfully."
+          }
+          else {
+              Write-Warning "C sync returned exit code $LASTEXITCODE."
+          }
           '@
 
           Set-Content `
@@ -1117,6 +1187,8 @@ jobs:
             -Value $content `
             -Encoding UTF8 `
             -Force
+
+          Write-Host "Created optimized C incremental persistence script."
 
 
       - name: Create D persistent sync script
@@ -1147,6 +1219,9 @@ jobs:
               (Test-Path $config) -and
               (Test-Path $dRoot)
           ) {
+
+              Write-Host "Uploading D:\Persistent-RDP with high-speed multi-threading..."
+
               & $rclone `
                 --config $config `
                 copy `
@@ -1155,10 +1230,28 @@ jobs:
                 --fast-list `
                 --transfers 16 `
                 --checkers 32 `
-                --timeout 300s `
-                --contimeout 20s `
-                --retries 5 `
-                --low-level-retries 20
+                --multi-thread-streams 32 `
+                --multi-thread-cutoff 32M `
+                --multi-thread-chunk-size 64M `
+                --buffer-size 256M `
+                --drive-chunk-size 512M `
+                --create-empty-src-dirs `
+                --timeout 600s `
+                --contimeout 30s `
+                --retries 10 `
+                --low-level-retries 30 `
+                --stats 10s `
+                --stats-one-line
+
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "D persistence sync completed successfully."
+              }
+              else {
+                  Write-Warning "D sync returned exit code $LASTEXITCODE."
+              }
+          }
+          else {
+              Write-Warning "D persistence prerequisites missing."
           }
           '@
 
@@ -1176,8 +1269,17 @@ jobs:
             "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
 
           $content = @'
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP FAST INCREMENTAL SYNC"
+          Write-Host "=========================================="
+
           & "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
+
           & "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+
+          Write-Host "=========================================="
+          Write-Host "SYNC FINISHED SUCCESSFULLY"
+          Write-Host "=========================================="
           '@
 
           Set-Content `
@@ -1212,8 +1314,8 @@ jobs:
           $trigger =
             New-ScheduledTaskTrigger `
               -Once `
-              -At (Get-Date).AddMinutes(5) `
-              -RepetitionInterval (New-TimeSpan -Minutes 10) `
+              -At (Get-Date).AddMinutes(3) `
+              -RepetitionInterval (New-TimeSpan -Minutes 5) `
               -RepetitionDuration (New-TimeSpan -Days 1)
 
           $settings =
@@ -1230,6 +1332,46 @@ jobs:
             -RunLevel Highest `
             -Force |
             Out-Null
+
+          Write-Host "Periodic persistence task installed (Every 5 minutes)."
+
+
+      - name: Create persistent user logon sync
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $taskName =
+            "Persistent-RDP-Logon"
+
+          $script =
+            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
+
+          Unregister-ScheduledTask `
+            -TaskName $taskName `
+            -Confirm:$false `
+            -ErrorAction SilentlyContinue
+
+          $action =
+            New-ScheduledTaskAction `
+              -Execute "powershell.exe" `
+              -Argument `
+              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
+
+          $trigger =
+            New-ScheduledTaskTrigger `
+              -AtLogOn `
+              -User $env:RDP_USER
+
+          Register-ScheduledTask `
+            -TaskName $taskName `
+            -Action $action `
+            -Trigger $trigger `
+            -RunLevel Highest `
+            -Force |
+            Out-Null
+
+          Write-Host "Persistent logon sync installed."
 
 
       - name: Prepare five Google Drive mounts
@@ -1302,13 +1444,13 @@ jobs:
             --network-mode `
             --volname "Persistent-RDP-$($m.Name)" `
             --vfs-cache-mode full `
-            --vfs-cache-max-size 10G `
+            --vfs-cache-max-size 15G `
             --dir-cache-time 30s `
             --poll-interval 30s `
-            --transfers 4 `
-            --checkers 8 `
-            --timeout 1m `
-            --contimeout 10s
+            --transfers 8 `
+            --checkers 16 `
+            --timeout 2m `
+            --contimeout 15s
           "@
 
             Set-Content `
@@ -1352,6 +1494,34 @@ jobs:
             }
           }
 
+          Write-Host "G:H:I:J:K mounts started."
+
+
+      - name: Verify persistence
+        run: |
+          $required = @(
+            "C:\Tools\rclone\rclone.exe"
+            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
+            "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
+            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
+            "D:\Persistent-RDP"
+          )
+
+          foreach ($path in $required) {
+
+            if (-not (Test-Path $path)) {
+              throw "Missing persistence path: $path"
+            }
+          }
+
+          Write-Host "=========================================="
+          Write-Host "PERSISTENCE VERIFIED & OPTIMIZED"
+          Write-Host "D:\Persistent-RDP = full persistent workspace"
+          Write-Host "C:\ = new/modified files persisted"
+          Write-Host "Safe high-speed multi-thread transfer enabled"
+          Write-Host "=========================================="
+
 
       - name: Install RustDesk
         run: |
@@ -1384,6 +1554,10 @@ jobs:
               $installer `
               -Force `
               -ErrorAction SilentlyContinue
+          }
+
+          if (-not (Test-Path $rdExe)) {
+            throw "RustDesk installation failed."
           }
 
 
@@ -1435,27 +1609,54 @@ jobs:
           }
 
 
-      - name: Keep alive
+      - name: Display persistence status
         run: |
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT-RDP OPTIMIZED STORAGE"
+          Write-Host "=========================================="
+          Write-Host "Periodic safe sync: every 5 minutes"
+          Write-Host "Pre-shutdown sync: safe guarded"
+          Write-Host "=========================================="
 
-          $end =
-            (Get-Date).AddMinutes($mins)
 
-          while (
-            (Get-Date) -lt $end
-          ) {
+      - name: Keep alive with Safe Early Sync
+        run: |
+          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
+          $end = (Get-Date).AddMinutes($mins)
+          $syncScript = "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
+          
+          # نحسب وقت التشغيل لنقوم بعمل حفظ استباقي قبل انتهاء الوقت بـ 8 دقائق لضمان عدم حدوث Hard Kill مفاجئ
+          $earlySyncTriggered = $false
+
+          while ((Get-Date) -lt $end) {
+
+            $remaining = ($end - (Get-Date)).TotalMinutes
+
+            if (-not $earlySyncTriggered -and $remaining -le 8) {
+              Write-Host "=== WARNING: Session ending soon! Running Safe Early Final Sync now ===" -ForegroundColor Yellow
+              if (Test-Path $syncScript) {
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript
+              }
+              $earlySyncTriggered = $true
+            }
+
+            if ("$env:CRD_ENABLED" -eq '1') {
+              $mode = '[CRD+RustDesk/RDP+Fast-Persistence]'
+            }
+            else {
+              $mode = '[RustDesk/RDP+Fast-Persistence]'
+            }
+
             Write-Host (
-              "Heartbeat " +
+              "$mode Heartbeat " +
               (Get-Date).ToString("HH:mm:ss") +
               " | ends " +
               $end.ToString("HH:mm:ss") +
-              " | VFS Mount persistence active (0 min wait)"
+              " | Rem: $([math]::Round($remaining, 1))m"
             )
 
-            Start-Sleep `
-              -Seconds 60
+            Start-Sleep -Seconds 60
           }
 
 
@@ -1463,6 +1664,10 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          Write-Host "=========================================="
+          Write-Host "ABSOLUTE FINAL PERSISTENCE SYNC"
+          Write-Host "=========================================="
+
           $cScript =
             "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
 
@@ -1470,12 +1675,16 @@ jobs:
             "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
 
           if (Test-Path $cScript) {
+            Write-Host "Executing Final C sync..."
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cScript
           }
 
           if (Test-Path $dScript) {
+            Write-Host "Executing Final D sync..."
             & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript
           }
+
+          Write-Host "Final safe persistence sync completed."
 
 
       - name: Dispatch next or stop
@@ -1489,6 +1698,7 @@ jobs:
             [int]"${{ inputs.cycles }}"
 
           if ($cycles -le 0) {
+            Write-Host "No cycles configured. Done."
             exit 0
           }
 
@@ -1544,6 +1754,8 @@ jobs:
               -Headers $headers `
               -ContentType "application/json" `
               -Body $body
+
+            Write-Host "STOP workflow dispatched."
           }
           else {
 
@@ -1609,4 +1821,6 @@ jobs:
               -Headers $headers `
               -ContentType "application/json" `
               -Body $body
+
+            Write-Host "Next Workflow A dispatched."
           }
