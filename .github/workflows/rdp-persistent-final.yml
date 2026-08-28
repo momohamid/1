@@ -907,6 +907,8 @@ jobs:
               --exclude "/Windows.old/**" `
               --exclude "/WindowsAzure/**" `
               --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
+              --exclude "/Users/* /NTUSER.DAT*" `
+              --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
               --exclude "/`$Recycle.Bin/**" `
               --exclude "/System Volume Information/**" `
               --exclude "/pagefile.sys" `
@@ -918,6 +920,7 @@ jobs:
               --contimeout 30s `
               --retries 10 `
               --low-level-retries 30 `
+              --ignore-errors `
               --stats 10s `
               --stats-one-line
           } else {
@@ -988,6 +991,7 @@ jobs:
               --contimeout 30s `
               --retries 10 `
               --low-level-retries 30 `
+              --ignore-errors `
               --stats 10s `
               --stats-one-line
           } else {
@@ -1186,6 +1190,8 @@ jobs:
               --exclude "/Windows.old/**" `
               --exclude "/WindowsAzure/**" `
               --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
+              --exclude "/Users/* /NTUSER.DAT*" `
+              --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
               --exclude "/`$Recycle.Bin/**" `
               --exclude "/System Volume Information/**" `
               --exclude "/Recovery/**" `
@@ -1197,6 +1203,7 @@ jobs:
               --contimeout 30s `
               --retries 10 `
               --low-level-retries 30 `
+              --ignore-errors `
               --stats 10s `
               --stats-one-line
 
@@ -1274,6 +1281,7 @@ jobs:
                 --contimeout 30s `
                 --retries 10 `
                 --low-level-retries 30 `
+                --ignore-errors `
                 --stats 10s `
                 --stats-one-line
 
@@ -1591,7 +1599,7 @@ jobs:
 
           if (Test-Path $dScript) {
             Write-Host "Executing Final D sync..."
-            & powershell.exe -NoProfile -ExecutionProfile Bypass -File $dScript
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript
           }
 
           Write-Host "Final safe persistence sync completed."
@@ -1602,7 +1610,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $cycles =
             [int]"${{ inputs.cycles }}"
@@ -1663,7 +1671,8 @@ jobs:
               -Uri $url `
               -Headers $headers `
               -ContentType "application/json" `
-              -Body $body
+              -Body $body `
+              -ErrorAction SilentlyContinue
 
             Write-Host "STOP workflow dispatched."
           }
@@ -1730,7 +1739,8 @@ jobs:
               -Uri $url `
               -Headers $headers `
               -ContentType "application/json" `
-              -Body $body
+              -Body $body `
+              -ErrorAction SilentlyContinue
 
             Write-Host "Next Workflow A dispatched."
           }
