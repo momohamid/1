@@ -142,7 +142,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -586,61 +586,6 @@ jobs:
           Write-Host "RDP ready."
 
 
-      - name: Create user profile directories
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $root =
-            "C:\Users\$env:RDP_USER"
-
-          $paths = @(
-            $root
-            "$root\Desktop"
-            "$root\Documents"
-            "$root\Downloads"
-            "$root\Pictures"
-            "$root\Videos"
-            "$root\Music"
-            "$root\Favorites"
-            "$root\Links"
-            "$root\Saved Games"
-            "$root\Searches"
-            "$root\Contacts"
-            "$root\AppData"
-            "$root\AppData\Local"
-            "$root\AppData\LocalLow"
-            "$root\AppData\Roaming"
-            "$root\AppData\Roaming\Adobe"
-            "$root\AppData\Roaming\Adobe\After Effects"
-            "$root\AppData\Roaming\Adobe\After Effects\Auto-Save"
-            "$root\AppData\Roaming\Adobe\After Effects\Presets"
-            "$root\AppData\Roaming\Adobe\After Effects\Scripts"
-            "$root\AppData\Roaming\Adobe\After Effects\Plug-ins"
-            "$root\AppData\Local\Adobe"
-            "$root\AppData\Local\Adobe\After Effects"
-            "$root\AppData\Local\Adobe\After Effects\Auto-Save"
-            "$root\AppData\Local\Adobe\After Effects\Cache"
-            "$root\Projects"
-            "$root\Projects\AE"
-            "$root\Assets"
-            "$root\Assets\Fonts"
-            "$root\Assets\Plugins"
-            "C:\Program Files\Adobe"
-            "C:\Program Files\Common Files\Adobe"
-            "C:\Program Files\Common Files\Adobe\Plug-Ins"
-          )
-
-          foreach ($path in $paths) {
-            New-Item `
-              -ItemType Directory `
-              -Path $path `
-              -Force `
-              -ErrorAction SilentlyContinue |
-              Out-Null
-          }
-
-
       - name: Install Python libraries
         continue-on-error: true
         run: |
@@ -867,97 +812,6 @@ jobs:
               $env:GITHUB_ENV
 
 
-      - name: Organize Remote Drive Folders (Move C system files out of D-storage)
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rclone = "$env:RCLONE_EXE"
-          $config = "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
-
-          Write-Host "Fixing remote drive structures: Moving C folders out of D-storage..."
-
-          $systemFolders = @(
-            "Program Files",
-            "Program Files (x86)",
-            "ProgramData",
-            "Users",
-            "Windows",
-            "Common Files",
-            "Adobe"
-          )
-
-          foreach ($folder in $systemFolders) {
-            & $rclone --config $config move "gdrive_g:.persistent-rdp/D-storage/$folder" "gdrive_g:.persistent-rdp/C-storage/$folder" --delete-empty-src-dirs 2>$null
-          }
-
-          Write-Host "Drive restructuring completed."
-
-
-      - name: Restore persistent C files
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $config =
-            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
-
-          $remote =
-            "gdrive_g:.persistent-rdp/C-storage"
-
-          Write-Host "=========================================="
-          Write-Host "FAST & OPTIMIZED C RESTORE TO ORIGINAL PATHS"
-          Write-Host "=========================================="
-
-          & $rclone --config $config mkdir $remote 2>$null
-
-          & $rclone --config $config lsf $remote --max-depth 1 2>$null
-
-          Write-Host "Restoring persistent C files to original system paths safely..."
-
-          & $rclone `
-            --config $config `
-            copy `
-            $remote `
-            "C:\" `
-            --fast-list `
-            --no-traverse `
-            --transfers 32 `
-            --checkers 64 `
-            --multi-thread-streams 64 `
-            --multi-thread-cutoff 16M `
-            --multi-thread-chunk-size 32M `
-            --buffer-size 512M `
-            --drive-chunk-size 1024M `
-            --exclude "/Windows/**" `
-            --exclude "/Windows.old/**" `
-            --exclude "/WindowsAzure/**" `
-            --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
-            --exclude "/Users/* /NTUSER.DAT*" `
-            --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
-            --exclude "/`$Recycle.Bin/**" `
-            --exclude "/System Volume Information/**" `
-            --exclude "/pagefile.sys" `
-            --exclude "/swapfile.sys" `
-            --exclude "/hiberfil.sys" `
-            --exclude "/DumpStack.log.tmp" `
-            --exclude "/Recovery/**" `
-            --timeout 600s `
-            --contimeout 30s `
-            --retries 10 `
-            --low-level-retries 30 `
-            --ignore-errors `
-            --stats 10s `
-            --stats-one-line 2>$null
-
-          Write-Host "C persistent restore finished safely."
-
-
       - name: Prepare D persistent storage
         shell: pwsh
         continue-on-error: true
@@ -1030,6 +884,32 @@ jobs:
           Write-Host "D persistent storage is ready."
 
 
+      - name: Link Adobe Settings from D to C (Symlink)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+          Write-Host "Creating Symlinks for Adobe Settings and Plugins..."
+
+          # إنشاء المجلدات على القرص D إن لم تكن موجودة
+          New-Item -ItemType Directory -Path "D:\Adobe_Data\Roaming_Adobe" -Force -ErrorAction SilentlyContinue | Out-Null
+          New-Item -ItemType Directory -Path "D:\Adobe_Data\Common_Adobe" -Force -ErrorAction SilentlyContinue | Out-Null
+
+          # تنظيف المسارات الافتراضية على C لمنع التعارض
+          Remove-Item -Path "$env:APPDATA\Adobe" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "C:\Program Files\Common Files\Adobe" -Recurse -Force -ErrorAction SilentlyContinue
+
+          # إنشاء المجلدات الأب
+          New-Item -ItemType Directory -Path "$env:APPDATA" -Force -ErrorAction SilentlyContinue | Out-Null
+          New-Item -ItemType Directory -Path "C:\Program Files\Common Files" -Force -ErrorAction SilentlyContinue | Out-Null
+
+          # ربط C بـ D باستخدام الوصلات الرمزية
+          cmd /c mklink /D "$env:APPDATA\Adobe" "D:\Adobe_Data\Roaming_Adobe"
+          cmd /c mklink /D "C:\Program Files\Common Files\Adobe" "D:\Adobe_Data\Common_Adobe"
+
+          Write-Host "Adobe Symlinks established successfully."
+
+
       - name: Restore Drive files to local folders (Safe fallback for non-existent drives)
         shell: pwsh
         continue-on-error: true
@@ -1055,193 +935,6 @@ jobs:
             }
           }
           exit 0
-
-
-      - name: Record C session start
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-          $start =
-            (Get-Date).ToUniversalTime()
-
-          "C_SESSION_START=$($start.ToString('o'))" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          New-Item -ItemType Directory -Path "C:\ProgramData\Persistent-RDP" -Force -ErrorAction SilentlyContinue | Out-Null
-          Set-Content -Path "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Value "$($start.ToString('o'))" -Encoding UTF8 -Force -ErrorAction SilentlyContinue
-
-          Write-Host "C persistence session started at:"
-          Write-Host $start
-
-
-      - name: Create C persistence sync script
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $persistDir =
-            "C:\ProgramData\Persistent-RDP"
-
-          $script =
-            "$persistDir\Sync-C-NewFiles.ps1"
-
-          $content = @'
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-              "C:\Tools\rclone\rclone.exe"
-
-          $config =
-              "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-
-          $remote =
-              "gdrive_g:.persistent-rdp/C-storage"
-
-          $sessionStartText = $env:C_SESSION_START
-
-          if ([string]::IsNullOrWhiteSpace($sessionStartText) -and (Test-Path "C:\ProgramData\Persistent-RDP\SessionStart.txt")) {
-              $sessionStartText = (Get-Content "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Raw).Trim()
-          }
-
-          if ([string]::IsNullOrWhiteSpace($sessionStartText)) {
-              Write-Warning "C_SESSION_START missing. Using 24 hours fallback to ensure no plugin/file is lost."
-              $sessionStart = (Get-Date).AddDays(-1).ToUniversalTime()
-          } else {
-              $sessionStart = [DateTime]::Parse($sessionStartText).ToUniversalTime()
-          }
-
-          if (
-              -not (Test-Path $rclone) -or
-              -not (Test-Path $config)
-          ) {
-              Write-Warning "rclone/config missing."
-              exit 0
-          }
-
-          $excludedRoots = @(
-              "C:\Windows"
-              "C:\Windows.old"
-              "C:\WindowsAzure"
-              "C:\ProgramData\Microsoft\WindowsDefender"
-              "C:\`$Recycle.Bin"
-              "C:\System Volume Information"
-              "C:\Recovery"
-          )
-
-          $filesList =
-              "C:\ProgramData\Persistent-RDP\C-files-to-sync.txt"
-
-          $tempList =
-              "C:\ProgramData\Persistent-RDP\C-files-to-sync.tmp"
-
-          Remove-Item `
-              $tempList `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-          $found = New-Object System.Collections.Generic.List[string]
-
-          Write-Host "Scanning C: for new/modified persistent files (optimized)..."
-
-          $scanRoots = @(
-              "C:\Users\Yousif190",
-              "C:\Program Files",
-              "C:\Program Files (x86)",
-              "C:\ProgramData"
-          )
-
-          foreach ($rootTarget in $scanRoots) {
-              if (Test-Path $rootTarget) {
-                  Get-ChildItem -Path $rootTarget -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
-                      $full = $_.FullName
-                      $skip = $false
-                      foreach ($root in $excludedRoots) {
-                          if ($full.Equals($root, [System.StringComparison]::OrdinalIgnoreCase) -or $full.StartsWith($root + "\", [System.StringComparison]::OrdinalIgnoreCase)) {
-                              $skip = $true; break
-                          }
-                      }
-                      if ($skip) { return }
-
-                      try {
-                          if ($_.CreationTimeUtc -ge $sessionStart -or $_.LastWriteTimeUtc -ge $sessionStart) {
-                              $relative = $full.Substring(3).Replace('\','/')
-                              [void]$found.Add($relative)
-                          }
-                      } catch {}
-                  }
-              }
-          }
-
-          if ($null -eq $found -or $found.Count -eq 0) {
-              Write-Host "No new or modified C files found."
-              exit 0
-          }
-
-          $found |
-              Sort-Object -Unique |
-              Set-Content `
-                -Path $tempList `
-                -Encoding UTF8
-
-          Move-Item `
-              -Path $tempList `
-              -Destination $filesList `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-          Write-Host "Files selected for high-speed upload: $($found.Count)"
-
-          & $rclone `
-              --config $config `
-              copy `
-              "C:\" `
-              $remote `
-              --files-from $filesList `
-              --fast-list `
-              --no-traverse `
-              --transfers 32 `
-              --checkers 64 `
-              --multi-thread-streams 64 `
-              --multi-thread-cutoff 16M `
-              --multi-thread-chunk-size 32M `
-              --buffer-size 512M `
-              --drive-chunk-size 1024M `
-              --exclude "/Windows/**" `
-              --exclude "/Windows.old/**" `
-              --exclude "/WindowsAzure/**" `
-              --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
-              --exclude "/Users/* /NTUSER.DAT*" `
-              --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
-              --exclude "/\`$Recycle.Bin/**" `
-              --exclude "/System Volume Information/**" `
-              --exclude "/Recovery/**" `
-              --exclude "/pagefile.sys" `
-              --exclude "/swapfile.sys" `
-              --exclude "/hiberfil.sys" `
-              --exclude "/DumpStack.log.tmp" `
-              --timeout 600s `
-              --contimeout 30s `
-              --retries 10 `
-              --low-level-retries 30 `
-              --ignore-errors `
-              --stats 10s `
-              --stats-one-line 2>$null
-
-          Write-Host "C incremental persistence sync finished safely."
-          exit 0
-          '@
-
-          Set-Content `
-            -Path $script `
-            -Value $content `
-            -Encoding UTF8 `
-            -Force
-
-          Write-Host "Created optimized C incremental persistence script."
 
 
       - name: Create D persistent sync script
@@ -1316,37 +1009,6 @@ jobs:
             -Force
 
 
-      - name: Create combined persistence sync script
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-          $script =
-            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
-
-          $content = @'
-          $ErrorActionPreference = "Continue"
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT-RDP FAST INCREMENTAL SYNC"
-          Write-Host "=========================================="
-
-          & "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1" 2>$null
-
-          & "C:\ProgramData\Persistent-RDP\Sync-D.ps1" 2>$null
-
-          Write-Host "=========================================="
-          Write-Host "SYNC FINISHED SUCCESSFULLY"
-          Write-Host "=========================================="
-          exit 0
-          '@
-
-          Set-Content `
-            -Path $script `
-            -Value $content `
-            -Encoding UTF8 `
-            -Force
-
-
       - name: Install persistent background sync
         shell: pwsh
         continue-on-error: true
@@ -1357,7 +1019,7 @@ jobs:
             "Persistent-RDP-Periodic-Sync"
 
           $script =
-            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
+            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
 
           Unregister-ScheduledTask `
             -TaskName $taskName `
@@ -1393,47 +1055,7 @@ jobs:
             -ErrorAction SilentlyContinue |
             Out-Null
 
-          Write-Host "Periodic persistence task installed (Every 5 minutes)."
-
-
-      - name: Create persistent user logon sync
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $taskName =
-            "Persistent-RDP-Logon"
-
-          $script =
-            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
-
-          Unregister-ScheduledTask `
-            -TaskName $taskName `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
-
-          $action =
-            New-ScheduledTaskAction `
-              -Execute "powershell.exe" `
-              -Argument `
-              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
-
-          $trigger =
-            New-ScheduledTaskTrigger `
-              -AtLogOn `
-              -User $env:RDP_USER
-
-          Register-ScheduledTask `
-            -TaskName $taskName `
-            -Action $action `
-            -Trigger $trigger `
-            -RunLevel Highest `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          Write-Host "Persistent logon sync installed."
+          Write-Host "Periodic persistence task installed (Every 5 minutes for D:\)."
 
 
       - name: Verify persistence
@@ -1443,9 +1065,7 @@ jobs:
           $required = @(
             "C:\Tools\rclone\rclone.exe"
             "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-            "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
             "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
-            "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
             "D:\"
           )
 
@@ -1459,8 +1079,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host "PERSISTENCE VERIFIED & OPTIMIZED"
           Write-Host "D:\ = full persistent workspace"
-          Write-Host "C:\ = new/modified files persisted to original paths"
-          Write-Host "Safe high-speed multi-thread transfer enabled"
+          Write-Host "Adobe Configs Symlinked smoothly to D:\"
           Write-Host "=========================================="
 
 
@@ -1572,7 +1191,7 @@ jobs:
           $ErrorActionPreference = "Continue"
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
           $end = (Get-Date).AddMinutes($mins)
-          $syncScript = "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
+          $syncScript = "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
           
           $earlySyncTriggered = $false
 
@@ -1607,26 +1226,18 @@ jobs:
           }
 
 
-      - name: Final C and D persistence sync
+      - name: Final D persistence sync
         if: always()
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
           Write-Host "=========================================="
-          Write-Host "ABSOLUTE FINAL PERSISTENCE SYNC"
+          Write-Host "ABSOLUTE FINAL PERSISTENCE SYNC (D ONLY)"
           Write-Host "=========================================="
-
-          $cScript =
-            "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
 
           $dScript =
             "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
-
-          if (Test-Path $cScript) {
-            Write-Host "Executing Final C sync..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cScript 2>$null
-          }
 
           if (Test-Path $dScript) {
             Write-Host "Executing Final D sync..."
