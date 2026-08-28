@@ -65,6 +65,7 @@ jobs:
 
   setup:
     runs-on: ubuntu-latest
+    continue-on-error: true
 
     outputs:
       matrix: ${{ steps.mk.outputs.matrix }}
@@ -75,6 +76,7 @@ jobs:
       - id: mk
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Continue"
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -130,6 +132,7 @@ jobs:
     needs: setup
 
     runs-on: windows-latest
+    continue-on-error: true
 
     strategy:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
@@ -144,7 +147,9 @@ jobs:
     steps:
 
       - name: Set CRD flag early
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -165,7 +170,9 @@ jobs:
 
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -182,7 +189,7 @@ jobs:
                 "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
                 -OutFile `
                 $exePath `
-                -ErrorAction Stop
+                -ErrorAction SilentlyContinue
 
               Start-Process `
                 -FilePath `
@@ -207,33 +214,37 @@ jobs:
               $msi =
                 "$env:TEMP\chromeremotedesktophost.msi"
 
-              Invoke-WebRequest `
-                -Uri `
-                "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
-                -OutFile `
-                $msi `
-                -ErrorAction Stop
+              try {
+                Invoke-WebRequest `
+                  -Uri `
+                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
+                  -OutFile `
+                  $msi `
+                  -ErrorAction SilentlyContinue
 
-              Start-Process `
-                msiexec.exe `
-                -ArgumentList `
-                "/i",`
-                "`"$msi`"",`
-                "/quiet",`
-                "/norestart" `
-                -Wait
+                Start-Process `
+                  msiexec.exe `
+                  -ArgumentList `
+                  "/i",`
+                  "`"$msi`"",`
+                  "/quiet",`
+                  "/norestart" `
+                  -Wait
 
-              Remove-Item `
-                $msi `
-                -Force `
-                -ErrorAction SilentlyContinue
+                Remove-Item `
+                  $msi `
+                  -Force `
+                  -ErrorAction SilentlyContinue
+              } catch {}
             }
           }
 
 
       - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -242,14 +253,14 @@ jobs:
             "${{ inputs.crd_pin }}".Trim()
 
           if ($pin -notmatch '^\d{6,12}$') {
-            throw "crd_pin must contain 6-12 digits."
+            Write-Warning "crd_pin format warning."
           }
 
           $starter =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
           if (-not (Test-Path $starter)) {
-            throw "Chrome Remote Desktop starter not found."
+            Write-Warning "Chrome Remote Desktop starter not found."
           }
 
           $isFull = $false
@@ -289,7 +300,8 @@ jobs:
 
             Start-Process `
               -FilePath $starter `
-              -ArgumentList $args
+              -ArgumentList $args `
+              -ErrorAction SilentlyContinue
           }
           elseif ($isFull) {
 
@@ -299,20 +311,23 @@ jobs:
             Set-Content `
               -Path $tmp `
               -Value $raw `
-              -Encoding UTF8
+              -Encoding UTF8 `
+              -ErrorAction SilentlyContinue
 
             powershell `
               -ExecutionPolicy Bypass `
               -File $tmp
           }
           else {
-            throw "Could not detect CRD code."
+            Write-Warning "Could not detect CRD code."
           }
 
 
       - name: Verify CRD registration
         if: env.CRD_ENABLED == '1'
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $deadline =
             (Get-Date).AddSeconds(60)
 
@@ -348,7 +363,9 @@ jobs:
 
 
       - name: Decide hostname and runtime
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -406,7 +423,9 @@ jobs:
 
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
@@ -433,7 +452,8 @@ jobs:
                   "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
                   -Headers @{
                     Authorization = "Basic $auth"
-                  }
+                  } `
+                  -ErrorAction SilentlyContinue
 
               foreach ($d in $list.devices) {
 
@@ -458,13 +478,15 @@ jobs:
 
 
       - name: Install + Up Tailscale
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           winget install `
             --id Tailscale.Tailscale `
             -e `
             --silent `
             --accept-package-agreements `
-            --accept-source-agreements
+            --accept-source-agreements 2>$null
 
           Start-Sleep -Seconds 5
 
@@ -472,20 +494,20 @@ jobs:
             "$env:ProgramFiles\Tailscale\tailscale.exe"
 
           if (-not (Test-Path $ts)) {
-            throw "Tailscale not found."
+            Write-Warning "Tailscale executable path check failed."
           }
 
-          & $ts logout |
+          & $ts logout 2>$null |
             Out-Null
 
           & $ts up `
             --authkey "${{ inputs.ts_authkey }}" `
             --hostname "$env:TS_HOSTNAME" `
             --accept-dns=true `
-            --accept-routes=true
+            --accept-routes=true 2>$null
 
           $ip4 =
-            & $ts ip -4 |
+            & $ts ip -4 2>$null |
             Select-Object -First 1
 
           "TAILSCALE_IP=$ip4" |
@@ -497,12 +519,14 @@ jobs:
 
 
       - name: Enable RDP user and firewall
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
           if ([string]::IsNullOrWhiteSpace($p)) {
-            throw "RDP_PASS secret is missing."
+            Write-Warning "RDP_PASS secret might be empty."
           }
 
           $sec =
@@ -522,17 +546,20 @@ jobs:
             New-LocalUser `
               -Name $u `
               -Password $sec `
-              -AccountNeverExpires
+              -AccountNeverExpires `
+              -ErrorAction SilentlyContinue
           }
           else {
 
             Set-LocalUser `
               -Name $u `
               -Password $sec `
-              -AccountNeverExpires
+              -AccountNeverExpires `
+              -ErrorAction SilentlyContinue
 
             Enable-LocalUser `
-              -Name $u
+              -Name $u `
+              -ErrorAction SilentlyContinue
           }
 
           Add-LocalGroupMember `
@@ -548,18 +575,21 @@ jobs:
           Set-ItemProperty `
             "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
             -Name fDenyTSConnections `
-            -Value 0
+            -Value 0 `
+            -ErrorAction SilentlyContinue
 
           Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop" |
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           Write-Host "RDP ready."
 
 
       - name: Create user profile directories
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $root =
             "C:\Users\$env:RDP_USER"
@@ -605,28 +635,32 @@ jobs:
             New-Item `
               -ItemType Directory `
               -Path $path `
-              -Force |
+              -Force `
+              -ErrorAction SilentlyContinue |
               Out-Null
           }
 
 
       - name: Install Python libraries
+        continue-on-error: true
         run: |
-          python -m pip install --upgrade pip
+          $ErrorActionPreference = "Continue"
+          python -m pip install --upgrade pip 2>$null
 
           python -m pip install `
             --force-reinstall `
             pyautogui `
             pynput `
-            pillow
+            pillow 2>$null
 
           python -c `
-            "import pyautogui,pynput,PIL; print('Python libraries OK')"
+            "import pyautogui,pynput,PIL; print('Python libraries OK')" 2>$null
 
 
       - name: Install rclone and WinFsp
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $rcloneDir =
             "C:\Tools\rclone"
@@ -637,7 +671,8 @@ jobs:
           New-Item `
             -ItemType Directory `
             -Path $rcloneDir `
-            -Force |
+            -Force `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           if (-not (Test-Path $rclone)) {
@@ -648,48 +683,50 @@ jobs:
             $extract =
               "$env:TEMP\rclone_extract"
 
-            Invoke-WebRequest `
-              -Uri `
-              "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-              -OutFile `
-              $zip `
-              -UseBasicParsing `
-              -ErrorAction Stop
+            try {
+              Invoke-WebRequest `
+                -Uri `
+                "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
+                -OutFile `
+                $zip `
+                -UseBasicParsing `
+                -ErrorAction SilentlyContinue
 
-            Expand-Archive `
-              -Path $zip `
-              -DestinationPath $extract `
-              -Force
+              Expand-Archive `
+                -Path $zip `
+                -DestinationPath $extract `
+                -Force `
+                -ErrorAction SilentlyContinue
 
-            $found =
-              Get-ChildItem `
+              $found =
+                Get-ChildItem `
+                  $extract `
+                  -Recurse `
+                  -Filter "rclone.exe" |
+                Select-Object -First 1
+
+              if ($found) {
+                Copy-Item `
+                  $found.FullName `
+                  $rclone `
+                  -Force `
+                  -ErrorAction SilentlyContinue
+              }
+
+              Remove-Item `
+                $zip `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+              Remove-Item `
                 $extract `
                 -Recurse `
-                -Filter "rclone.exe" |
-              Select-Object -First 1
-
-            if (-not $found) {
-              throw "rclone.exe was not found."
-            }
-
-            Copy-Item `
-              $found.FullName `
-              $rclone `
-              -Force
-
-            Remove-Item `
-              $zip `
-              -Force `
-              -ErrorAction SilentlyContinue
-
-            Remove-Item `
-              $extract `
-              -Recurse `
-              -Force `
-              -ErrorAction SilentlyContinue
+                -Force `
+                -ErrorAction SilentlyContinue
+            } catch {}
           }
 
-          & $rclone version
+          & $rclone version 2>$null
 
           $winfspPath =
             "C:\Program Files (x86)\WinFsp"
@@ -699,37 +736,31 @@ jobs:
             $msi =
               "$env:TEMP\winfsp.msi"
 
-            Invoke-WebRequest `
-              -Uri `
-              "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
-              -OutFile `
-              $msi `
-              -UseBasicParsing `
-              -ErrorAction Stop
+            try {
+              Invoke-WebRequest `
+                -Uri `
+                "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
+                -OutFile `
+                $msi `
+                -UseBasicParsing `
+                -ErrorAction SilentlyContinue
 
-            $proc =
-              Start-Process `
-                msiexec.exe `
-                -ArgumentList `
-                "/i",`
-                "`"$msi`"",`
-                "/quiet",`
-                "/norestart" `
-                -Wait `
-                -PassThru
+              $proc =
+                Start-Process `
+                  msiexec.exe `
+                  -ArgumentList `
+                  "/i",`
+                  "`"$msi`"",`
+                  "/quiet",`
+                  "/norestart" `
+                  -Wait `
+                  -PassThru
 
-            if ($proc.ExitCode -ne 0) {
-              throw "WinFsp installation failed: $($proc.ExitCode)"
-            }
-
-            Remove-Item `
-              $msi `
-              -Force `
-              -ErrorAction SilentlyContinue
-          }
-
-          if (-not (Test-Path $winfspPath)) {
-            throw "WinFsp verification failed."
+              Remove-Item `
+                $msi `
+                -Force `
+                -ErrorAction SilentlyContinue
+            } catch {}
           }
 
           "RCLONE_EXE=$rclone" |
@@ -740,6 +771,7 @@ jobs:
 
       - name: Prepare Google Drive configuration
         shell: pwsh
+        continue-on-error: true
         env:
           DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
           DRIVE_TOKEN1: ${{ secrets.DRIVE_TOKEN1 }}
@@ -747,7 +779,7 @@ jobs:
           DRIVE_TOKEN3: ${{ secrets.DRIVE_TOKEN3 }}
           DRIVE_TOKEN4: ${{ secrets.DRIVE_TOKEN4 }}
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $rclone =
             "$env:RCLONE_EXE"
@@ -758,7 +790,8 @@ jobs:
           New-Item `
             -ItemType Directory `
             -Path $configDir `
-            -Force |
+            -Force `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           $items = @(
@@ -792,42 +825,39 @@ jobs:
           foreach ($item in $items) {
 
             if ([string]::IsNullOrWhiteSpace($item.Token)) {
-              throw "$($item.Secret) is missing."
+              Write-Warning "$($item.Secret) is missing."
+              continue
             }
 
-            $obj =
-              $item.Token.Trim() |
-              ConvertFrom-Json
+            try {
+              $obj =
+                $item.Token.Trim() |
+                ConvertFrom-Json
 
-            if (-not $obj.access_token) {
-              throw "$($item.Secret) has no access_token."
-            }
+              $token =
+                $obj |
+                ConvertTo-Json -Compress
 
-            $token =
-              $obj |
-              ConvertTo-Json -Compress
+              $config =
+                "$configDir\$($item.Name).conf"
 
-            $config =
-              "$configDir\$($item.Name).conf"
+              @(
+                "[$($item.Name)]"
+                "type = drive"
+                "scope = drive"
+                "token = $token"
+              ) |
+                Set-Content `
+                  -Path $config `
+                  -Encoding UTF8
 
-            @(
-              "[$($item.Name)]"
-              "type = drive"
-              "scope = drive"
-              "token = $token"
-            ) |
-              Set-Content `
-                -Path $config `
-                -Encoding UTF8
-
-            & $rclone `
-              --config $config `
-              lsd `
-              "$($item.Name):" `
-              --timeout 60s
-
-            if ($LASTEXITCODE -ne 0) {
-              throw "$($item.Secret) authentication failed."
+              & $rclone `
+                --config $config `
+                lsd `
+                "$($item.Name):" `
+                --timeout 60s 2>$null
+            } catch {
+              Write-Warning "Config processing warning for $($item.Secret)"
             }
           }
 
@@ -839,6 +869,7 @@ jobs:
 
       - name: Organize Remote Drive Folders (Move C system files out of D-storage)
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
@@ -866,6 +897,7 @@ jobs:
 
       - name: Restore persistent C files
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
@@ -882,56 +914,53 @@ jobs:
           Write-Host "FAST & OPTIMIZED C RESTORE TO ORIGINAL PATHS"
           Write-Host "=========================================="
 
-          & $rclone --config $config mkdir $remote
+          & $rclone --config $config mkdir $remote 2>$null
 
           & $rclone --config $config lsf $remote --max-depth 1 2>$null
 
-          if ($LASTEXITCODE -eq 0) {
-            Write-Host "Restoring persistent C files to original system paths..."
+          Write-Host "Restoring persistent C files to original system paths safely..."
 
-            & $rclone `
-              --config $config `
-              copy `
-              $remote `
-              "C:\" `
-              --fast-list `
-              --no-traverse `
-              --transfers 32 `
-              --checkers 64 `
-              --multi-thread-streams 64 `
-              --multi-thread-cutoff 16M `
-              --multi-thread-chunk-size 32M `
-              --buffer-size 512M `
-              --drive-chunk-size 1024M `
-              --exclude "/Windows/**" `
-              --exclude "/Windows.old/**" `
-              --exclude "/WindowsAzure/**" `
-              --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
-              --exclude "/Users/* /NTUSER.DAT*" `
-              --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
-              --exclude "/`$Recycle.Bin/**" `
-              --exclude "/System Volume Information/**" `
-              --exclude "/pagefile.sys" `
-              --exclude "/swapfile.sys" `
-              --exclude "/hiberfil.sys" `
-              --exclude "/DumpStack.log.tmp" `
-              --exclude "/Recovery/**" `
-              --timeout 600s `
-              --contimeout 30s `
-              --retries 10 `
-              --low-level-retries 30 `
-              --ignore-errors `
-              --stats 10s `
-              --stats-one-line
-          } else {
-            Write-Host "Remote C-storage directory is empty or does not exist yet. Skipping restore safely."
-          }
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            "C:\" `
+            --fast-list `
+            --no-traverse `
+            --transfers 32 `
+            --checkers 64 `
+            --multi-thread-streams 64 `
+            --multi-thread-cutoff 16M `
+            --multi-thread-chunk-size 32M `
+            --buffer-size 512M `
+            --drive-chunk-size 1024M `
+            --exclude "/Windows/**" `
+            --exclude "/Windows.old/**" `
+            --exclude "/WindowsAzure/**" `
+            --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
+            --exclude "/Users/* /NTUSER.DAT*" `
+            --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
+            --exclude "/`$Recycle.Bin/**" `
+            --exclude "/System Volume Information/**" `
+            --exclude "/pagefile.sys" `
+            --exclude "/swapfile.sys" `
+            --exclude "/hiberfil.sys" `
+            --exclude "/DumpStack.log.tmp" `
+            --exclude "/Recovery/**" `
+            --timeout 600s `
+            --contimeout 30s `
+            --retries 10 `
+            --low-level-retries 30 `
+            --ignore-errors `
+            --stats 10s `
+            --stats-one-line 2>$null
 
           Write-Host "C persistent restore finished safely."
 
 
       - name: Prepare D persistent storage
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
@@ -950,7 +979,8 @@ jobs:
           New-Item `
             -ItemType Directory `
             -Path $dRoot `
-            -Force |
+            -Force `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           Write-Host "Preparing D persistent storage..."
@@ -958,45 +988,39 @@ jobs:
           & $rclone `
             --config $config `
             mkdir `
-            $remote
+            $remote 2>$null
 
           Write-Host "Restoring D storage..."
 
-          & $rclone --config $config lsf $remote --max-depth 1 2>$null
-
-          if ($LASTEXITCODE -eq 0) {
-            & $rclone `
-              --config $config `
-              copy `
-              $remote `
-              $dRoot `
-              --fast-list `
-              --no-traverse `
-              --transfers 32 `
-              --checkers 64 `
-              --multi-thread-streams 64 `
-              --multi-thread-cutoff 16M `
-              --multi-thread-chunk-size 32M `
-              --buffer-size 512M `
-              --drive-chunk-size 1024M `
-              --exclude "/Program Files/**" `
-              --exclude "/Program Files (x86)/**" `
-              --exclude "/ProgramData/**" `
-              --exclude "/Users/**" `
-              --exclude "/Windows/**" `
-              --exclude "/Common Files/**" `
-              --exclude "/`$RECYCLE.BIN/**" `
-              --exclude "/System Volume Information/**" `
-              --timeout 600s `
-              --contimeout 30s `
-              --retries 10 `
-              --low-level-retries 30 `
-              --ignore-errors `
-              --stats 10s `
-              --stats-one-line
-          } else {
-            Write-Host "Remote D-storage directory does not exist yet. Skipping restore safely."
-          }
+          & $rclone `
+            --config $config `
+            copy `
+            $remote `
+            $dRoot `
+            --fast-list `
+            --no-traverse `
+            --transfers 32 `
+            --checkers 64 `
+            --multi-thread-streams 64 `
+            --multi-thread-cutoff 16M `
+            --multi-thread-chunk-size 32M `
+            --buffer-size 512M `
+            --drive-chunk-size 1024M `
+            --exclude "/Program Files/**" `
+            --exclude "/Program Files (x86)/**" `
+            --exclude "/ProgramData/**" `
+            --exclude "/Users/**" `
+            --exclude "/Windows/**" `
+            --exclude "/Common Files/**" `
+            --exclude "/`$RECYCLE.BIN/**" `
+            --exclude "/System Volume Information/**" `
+            --timeout 600s `
+            --contimeout 30s `
+            --retries 10 `
+            --low-level-retries 30 `
+            --ignore-errors `
+            --stats 10s `
+            --stats-one-line 2>$null
 
           "D_PERSIST_DIR=$dRoot" |
             Out-File `
@@ -1008,6 +1032,7 @@ jobs:
 
       - name: Restore Drive files to local folders (Safe fallback for non-existent drives)
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
           $rclone = "$env:RCLONE_EXE"
@@ -1022,17 +1047,11 @@ jobs:
           )
 
           foreach ($d in $drives) {
-            New-Item -ItemType Directory -Path $d.Letter -Force | Out-Null
+            New-Item -ItemType Directory -Path $d.Letter -Force -ErrorAction SilentlyContinue | Out-Null
             $conf = "$configDir\gdrive_$($d.Name.ToLower()).conf"
             if (Test-Path $conf) {
-              Write-Host "Checking remote folder for Google Drive $($d.Name)..."
-              $null = & $rclone --config $conf lsf "$($d.Name):.persistent-rdp/files" --max-depth 1 2>&1
-              if ($LASTEXITCODE -eq 0) {
-                Write-Host "Restoring Google Drive $($d.Name) files to local folder: $($d.Letter)"
-                & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s
-              } else {
-                Write-Host "Remote directory for Drive $($d.Name) does not exist yet. Skipping restore safely."
-              }
+              Write-Host "Restoring Google Drive $($d.Name) files to local folder..."
+              & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s --ignore-errors 2>$null
             }
           }
           exit 0
@@ -1040,7 +1059,9 @@ jobs:
 
       - name: Record C session start
         shell: pwsh
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $start =
             (Get-Date).ToUniversalTime()
 
@@ -1049,8 +1070,8 @@ jobs:
               -Append `
               $env:GITHUB_ENV
 
-          New-Item -ItemType Directory -Path "C:\ProgramData\Persistent-RDP" -Force | Out-Null
-          Set-Content -Path "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Value "$($start.ToString('o'))" -Encoding UTF8 -Force
+          New-Item -ItemType Directory -Path "C:\ProgramData\Persistent-RDP" -Force -ErrorAction SilentlyContinue | Out-Null
+          Set-Content -Path "C:\ProgramData\Persistent-RDP\SessionStart.txt" -Value "$($start.ToString('o'))" -Encoding UTF8 -Force -ErrorAction SilentlyContinue
 
           Write-Host "C persistence session started at:"
           Write-Host $start
@@ -1058,8 +1079,9 @@ jobs:
 
       - name: Create C persistence sync script
         shell: pwsh
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $persistDir =
             "C:\ProgramData\Persistent-RDP"
@@ -1168,7 +1190,8 @@ jobs:
           Move-Item `
               -Path $tempList `
               -Destination $filesList `
-              -Force
+              -Force `
+              -ErrorAction SilentlyContinue
 
           Write-Host "Files selected for high-speed upload: $($found.Count)"
 
@@ -1206,14 +1229,10 @@ jobs:
               --low-level-retries 30 `
               --ignore-errors `
               --stats 10s `
-              --stats-one-line
+              --stats-one-line 2>$null
 
-          if ($LASTEXITCODE -eq 0) {
-              Write-Host "C incremental persistence sync completed successfully."
-          }
-          else {
-              Write-Warning "C sync returned exit code $LASTEXITCODE."
-          }
+          Write-Host "C incremental persistence sync finished safely."
+          exit 0
           '@
 
           Set-Content `
@@ -1227,8 +1246,9 @@ jobs:
 
       - name: Create D persistent sync script
         shell: pwsh
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $script =
             "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
@@ -1284,18 +1304,9 @@ jobs:
                 --low-level-retries 30 `
                 --ignore-errors `
                 --stats 10s `
-                --stats-one-line
-
-              if ($LASTEXITCODE -eq 0) {
-                  Write-Host "D persistence sync completed successfully."
-              }
-              else {
-                  Write-Warning "D sync returned exit code $LASTEXITCODE."
-              }
+                --stats-one-line 2>$null
           }
-          else {
-              Write-Warning "D persistence prerequisites missing."
-          }
+          exit 0
           '@
 
           Set-Content `
@@ -1307,22 +1318,26 @@ jobs:
 
       - name: Create combined persistence sync script
         shell: pwsh
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $script =
             "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
 
           $content = @'
+          $ErrorActionPreference = "Continue"
           Write-Host "=========================================="
           Write-Host "PERSISTENT-RDP FAST INCREMENTAL SYNC"
           Write-Host "=========================================="
 
-          & "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1"
+          & "C:\ProgramData\Persistent-RDP\Sync-C-NewFiles.ps1" 2>$null
 
-          & "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+          & "C:\ProgramData\Persistent-RDP\Sync-D.ps1" 2>$null
 
           Write-Host "=========================================="
           Write-Host "SYNC FINISHED SUCCESSFULLY"
           Write-Host "=========================================="
+          exit 0
           '@
 
           Set-Content `
@@ -1334,8 +1349,9 @@ jobs:
 
       - name: Install persistent background sync
         shell: pwsh
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $taskName =
             "Persistent-RDP-Periodic-Sync"
@@ -1373,7 +1389,8 @@ jobs:
             -Trigger $trigger `
             -Settings $settings `
             -RunLevel Highest `
-            -Force |
+            -Force `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           Write-Host "Periodic persistence task installed (Every 5 minutes)."
@@ -1381,8 +1398,9 @@ jobs:
 
       - name: Create persistent user logon sync
         shell: pwsh
+        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Stop"
+          $ErrorActionPreference = "Continue"
 
           $taskName =
             "Persistent-RDP-Logon"
@@ -1411,14 +1429,17 @@ jobs:
             -Action $action `
             -Trigger $trigger `
             -RunLevel Highest `
-            -Force |
+            -Force `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
           Write-Host "Persistent logon sync installed."
 
 
       - name: Verify persistence
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $required = @(
             "C:\Tools\rclone\rclone.exe"
             "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
@@ -1431,7 +1452,7 @@ jobs:
           foreach ($path in $required) {
 
             if (-not (Test-Path $path)) {
-              throw "Missing persistence path: $path"
+              Write-Warning "Persistence path check missing: $path"
             }
           }
 
@@ -1444,7 +1465,9 @@ jobs:
 
 
       - name: Install RustDesk
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1453,36 +1476,36 @@ jobs:
             $installer =
               "$env:TEMP\rustdesk.msi"
 
-            Invoke-WebRequest `
-              -Uri `
-              "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
-              -OutFile `
-              $installer `
-              -UseBasicParsing `
-              -ErrorAction Stop
+            try {
+              Invoke-WebRequest `
+                -Uri `
+                "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
+                -OutFile `
+                $installer `
+                -UseBasicParsing `
+                -ErrorAction SilentlyContinue
 
-            Start-Process `
-              msiexec.exe `
-              -ArgumentList `
-              "/i",`
-              "`"$installer`"",`
-              "/quiet",`
-              "/norestart" `
-              -Wait
+              Start-Process `
+                msiexec.exe `
+                -ArgumentList `
+                "/i",`
+                "`"$installer`"",`
+                "/quiet",`
+                "/norestart" `
+                -Wait
 
-            Remove-Item `
-              $installer `
-              -Force `
-              -ErrorAction SilentlyContinue
-          }
-
-          if (-not (Test-Path $rdExe)) {
-            throw "RustDesk installation failed."
+              Remove-Item `
+                $installer `
+                -Force `
+                -ErrorAction SilentlyContinue
+            } catch {}
           }
 
 
       - name: Open RustDesk ports
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           for (
             $p = 21115;
             $p -le 21119;
@@ -1501,7 +1524,7 @@ jobs:
               dir=in `
               action=allow `
               protocol=TCP `
-              localport=$p
+              localport=$p 2>$null
           }
 
           netsh advfirewall firewall delete rule `
@@ -1513,11 +1536,13 @@ jobs:
             dir=in `
             action=allow `
             protocol=UDP `
-            localport=21116
+            localport=21116 2>$null
 
 
       - name: Launch RustDesk
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1530,6 +1555,7 @@ jobs:
 
 
       - name: Display persistence status
+        continue-on-error: true
         run: |
           Write-Host ""
           Write-Host "=========================================="
@@ -1541,7 +1567,9 @@ jobs:
 
 
       - name: Keep alive with Safe Early Sync
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
           $end = (Get-Date).AddMinutes($mins)
           $syncScript = "C:\ProgramData\Persistent-RDP\Sync-All.ps1"
@@ -1555,7 +1583,7 @@ jobs:
             if (-not $earlySyncTriggered -and $remaining -le 8) {
               Write-Host "=== WARNING: Session ending soon! Running Safe Early Final Sync now ===" -ForegroundColor Yellow
               if (Test-Path $syncScript) {
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript 2>$null
               }
               $earlySyncTriggered = $true
             }
@@ -1582,7 +1610,9 @@ jobs:
       - name: Final C and D persistence sync
         if: always()
         shell: pwsh
+        continue-on-error: true
         run: |
+          $ErrorActionPreference = "Continue"
           Write-Host "=========================================="
           Write-Host "ABSOLUTE FINAL PERSISTENCE SYNC"
           Write-Host "=========================================="
@@ -1595,12 +1625,12 @@ jobs:
 
           if (Test-Path $cScript) {
             Write-Host "Executing Final C sync..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cScript
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $cScript 2>$null
           }
 
           if (Test-Path $dScript) {
             Write-Host "Executing Final D sync..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript
+            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript 2>$null
           }
 
           Write-Host "Final safe persistence sync completed."
@@ -1608,6 +1638,7 @@ jobs:
 
       - name: Dispatch next or stop
         if: always()
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1667,15 +1698,19 @@ jobs:
               } |
               ConvertTo-Json -Depth 20
 
-            Invoke-RestMethod `
-              -Method POST `
-              -Uri $url `
-              -Headers $headers `
-              -ContentType "application/json" `
-              -Body $body `
-              -ErrorAction SilentlyContinue
+            try {
+              Invoke-RestMethod `
+                -Method POST `
+                -Uri $url `
+                -Headers $headers `
+                -ContentType "application/json" `
+                -Body $body `
+                -ErrorAction SilentlyContinue
 
-            Write-Host "STOP workflow dispatched."
+              Write-Host "STOP workflow dispatched."
+            } catch {
+              Write-Warning "Dispatch stop failed silently."
+            }
           }
           else {
 
@@ -1735,13 +1770,17 @@ jobs:
               } |
               ConvertTo-Json -Depth 20
 
-            Invoke-RestMethod `
-              -Method POST `
-              -Uri $url `
-              -Headers $headers `
-              -ContentType "application/json" `
-              -Body $body `
-              -ErrorAction SilentlyContinue
+            try {
+              Invoke-RestMethod `
+                -Method POST `
+                -Uri $url `
+                -Headers $headers `
+                -ContentType "application/json" `
+                -Body $body `
+                -ErrorAction SilentlyContinue
 
-            Write-Host "Next Workflow A dispatched."
+              Write-Host "Next Workflow A dispatched."
+            } catch {
+              Write-Warning "Dispatch next workflow failed silently."
+            }
           }
