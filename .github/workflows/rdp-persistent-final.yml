@@ -1,4 +1,4 @@
-name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C-D
+name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C
 
 on:
   schedule:
@@ -77,6 +77,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = "Continue"
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -142,7 +143,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -150,6 +151,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -173,6 +175,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $exe =
             "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
 
@@ -235,7 +238,8 @@ jobs:
                   $msi `
                   -Force `
                   -ErrorAction SilentlyContinue
-              } catch {}
+              }
+              catch {}
             }
           }
 
@@ -245,6 +249,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
@@ -328,6 +333,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $deadline =
             (Get-Date).AddSeconds(60)
 
@@ -366,6 +372,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           if ("${{ inputs.rdp_count }}" -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
@@ -426,6 +433,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           function Yes($v) {
             "$v" -match '^(?i:true|1|yes|on)$'
           }
@@ -481,6 +489,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           winget install `
             --id Tailscale.Tailscale `
             -e `
@@ -522,6 +531,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $u = $env:RDP_USER
           $p = $env:RDP_PASS
 
@@ -590,6 +600,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           python -m pip install --upgrade pip 2>$null
 
           python -m pip install `
@@ -602,7 +613,7 @@ jobs:
             "import pyautogui,pynput,PIL; print('Python libraries OK')" 2>$null
 
 
-      - name: Install rclone and WinFsp
+      - name: Install rclone
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
@@ -629,6 +640,7 @@ jobs:
               "$env:TEMP\rclone_extract"
 
             try {
+
               Invoke-WebRequest `
                 -Uri `
                 "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
@@ -651,6 +663,7 @@ jobs:
                 Select-Object -First 1
 
               if ($found) {
+
                 Copy-Item `
                   $found.FullName `
                   $rclone `
@@ -668,44 +681,15 @@ jobs:
                 -Recurse `
                 -Force `
                 -ErrorAction SilentlyContinue
-            } catch {}
+            }
+            catch {}
           }
 
-          & $rclone version 2>$null
-
-          $winfspPath =
-            "C:\Program Files (x86)\WinFsp"
-
-          if (-not (Test-Path $winfspPath)) {
-
-            $msi =
-              "$env:TEMP\winfsp.msi"
-
-            try {
-              Invoke-WebRequest `
-                -Uri `
-                "https://github.com/winfsp/winfsp/releases/download/v2.1/winfsp-2.1.25156.msi" `
-                -OutFile `
-                $msi `
-                -UseBasicParsing `
-                -ErrorAction SilentlyContinue
-
-              $proc =
-                Start-Process `
-                  msiexec.exe `
-                  -ArgumentList `
-                  "/i",`
-                  "`"$msi`"",`
-                  "/quiet",`
-                  "/norestart" `
-                  -Wait `
-                  -PassThru
-
-              Remove-Item `
-                $msi `
-                -Force `
-                -ErrorAction SilentlyContinue
-            } catch {}
+          if (Test-Path $rclone) {
+            & $rclone version 2>$null
+          }
+          else {
+            Write-Warning "rclone installation failed."
           }
 
           "RCLONE_EXE=$rclone" |
@@ -775,6 +759,7 @@ jobs:
             }
 
             try {
+
               $obj =
                 $item.Token.Trim() |
                 ConvertFrom-Json
@@ -801,8 +786,10 @@ jobs:
                 lsd `
                 "$($item.Name):" `
                 --timeout 60s 2>$null
-            } catch {
-              Write-Warning "Config processing warning for $($item.Secret)"
+            }
+            catch {
+              Write-Warning `
+                "Config processing warning for $($item.Secret)"
             }
           }
 
@@ -812,7 +799,7 @@ jobs:
               $env:GITHUB_ENV
 
 
-      - name: Prepare D persistent storage
+      - name: Restore persistent C data
         shell: pwsh
         continue-on-error: true
         run: |
@@ -824,50 +811,59 @@ jobs:
           $config =
             "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
 
-          $dRoot =
-            "D:\"
-
           $remote =
-            "gdrive_g:.persistent-rdp/D-storage"
+            "gdrive_g:.persistent-rdp/C-storage"
 
-          New-Item `
-            -ItemType Directory `
-            -Path $dRoot `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
+          if (
+            -not (Test-Path $rclone) -or
+            -not (Test-Path $config)
+          ) {
+            Write-Warning "Persistent storage components are unavailable."
+            exit 0
+          }
 
-          Write-Host "Preparing D persistent storage..."
+          Write-Host "=========================================="
+          Write-Host "RESTORING PERSISTENT C DATA"
+          Write-Host "=========================================="
 
           & $rclone `
             --config $config `
             mkdir `
             $remote 2>$null
 
-          Write-Host "Restoring D storage..."
-
           & $rclone `
             --config $config `
             copy `
             $remote `
-            $dRoot `
+            "C:\" `
             --fast-list `
             --no-traverse `
             --transfers 32 `
             --checkers 64 `
-            --multi-thread-streams 64 `
+            --multi-thread-streams 32 `
             --multi-thread-cutoff 16M `
             --multi-thread-chunk-size 32M `
-            --buffer-size 512M `
-            --drive-chunk-size 1024M `
-            --exclude "/Program Files/**" `
-            --exclude "/Program Files (x86)/**" `
-            --exclude "/ProgramData/**" `
-            --exclude "/Users/**" `
+            --buffer-size 256M `
+            --drive-chunk-size 128M `
             --exclude "/Windows/**" `
-            --exclude "/Common Files/**" `
-            --exclude "/`$RECYCLE.BIN/**" `
+            --exclude "/$Recycle.Bin/**" `
             --exclude "/System Volume Information/**" `
+            --exclude "/Recovery/**" `
+            --exclude "/PerfLogs/**" `
+            --exclude "/ProgramData/Microsoft/Windows Defender/**" `
+            --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
+            --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
+            --exclude "/ProgramData/USOShared/**" `
+            --exclude "/ProgramData/Packages/**" `
+            --exclude "/ProgramData/GitHub/**" `
+            --exclude "/ProgramData/actions/**" `
+            --exclude "/ProgramData/chocolatey/**" `
+            --exclude "/ProgramData/ssh/**" `
+            --exclude "/Users/runneradmin/**" `
+            --exclude "/Users/runneradmin.AppData/**" `
+            --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
+            --exclude "/Users/*/AppData/Local/Temp/**" `
+            --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
             --timeout 600s `
             --contimeout 30s `
             --retries 10 `
@@ -876,75 +872,27 @@ jobs:
             --stats 10s `
             --stats-one-line 2>$null
 
-          "D_PERSIST_DIR=$dRoot" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host "D persistent storage is ready."
+          Write-Host "Persistent C data restore completed."
 
 
-      - name: Link Adobe Settings from D to C (Symlink)
+      - name: Create persistent C sync script
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
-          Write-Host "Creating Symlinks for Adobe Settings and Plugins..."
 
-          # إنشاء المجلدات على القرص D إن لم تكن موجودة
-          New-Item -ItemType Directory -Path "D:\Adobe_Data\Roaming_Adobe" -Force -ErrorAction SilentlyContinue | Out-Null
-          New-Item -ItemType Directory -Path "D:\Adobe_Data\Common_Adobe" -Force -ErrorAction SilentlyContinue | Out-Null
-
-          # تنظيف المسارات الافتراضية على C لمنع التعارض
-          Remove-Item -Path "$env:APPDATA\Adobe" -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item -Path "C:\Program Files\Common Files\Adobe" -Recurse -Force -ErrorAction SilentlyContinue
-
-          # إنشاء المجلدات الأب
-          New-Item -ItemType Directory -Path "$env:APPDATA" -Force -ErrorAction SilentlyContinue | Out-Null
-          New-Item -ItemType Directory -Path "C:\Program Files\Common Files" -Force -ErrorAction SilentlyContinue | Out-Null
-
-          # ربط C بـ D باستخدام الوصلات الرمزية
-          cmd /c mklink /D "$env:APPDATA\Adobe" "D:\Adobe_Data\Roaming_Adobe"
-          cmd /c mklink /D "C:\Program Files\Common Files\Adobe" "D:\Adobe_Data\Common_Adobe"
-
-          Write-Host "Adobe Symlinks established successfully."
-
-
-      - name: Restore Drive files to local folders (Safe fallback for non-existent drives)
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-          $rclone = "$env:RCLONE_EXE"
-          $configDir = "$env:RCLONE_CONFIG_DIR"
-
-          $drives = @(
-            @{ Name = "G"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-G"; Remote = "gdrive_g:.persistent-rdp/files" }
-            @{ Name = "H"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-H"; Remote = "gdrive_h:.persistent-rdp/files" }
-            @{ Name = "I"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-I"; Remote = "gdrive_i:.persistent-rdp/files" }
-            @{ Name = "J"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-J"; Remote = "gdrive_j:.persistent-rdp/files" }
-            @{ Name = "K"; Letter = "C:\Users\$env:RDP_USER\Documents\Drive-K"; Remote = "gdrive_k:.persistent-rdp/files" }
-          )
-
-          foreach ($d in $drives) {
-            New-Item -ItemType Directory -Path $d.Letter -Force -ErrorAction SilentlyContinue | Out-Null
-            $conf = "$configDir\gdrive_$($d.Name.ToLower()).conf"
-            if (Test-Path $conf) {
-              Write-Host "Restoring Google Drive $($d.Name) files to local folder..."
-              & $rclone --config $conf copy "$($d.Name):.persistent-rdp/files" "$($d.Letter)" --transfers 16 --timeout 300s --contimeout 20s --ignore-errors 2>$null
-            }
-          }
-          exit 0
-
-
-      - name: Create D persistent sync script
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
+          $base =
+            "C:\ProgramData\Persistent-RDP"
 
           $script =
-            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+            "$base\Sync-C.ps1"
+
+          New-Item `
+            -ItemType Directory `
+            -Path $base `
+            -Force `
+            -ErrorAction SilentlyContinue |
+            Out-Null
 
           $content = @'
           $ErrorActionPreference = "Continue"
@@ -955,51 +903,66 @@ jobs:
           $config =
               "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
 
-          $dRoot =
-              "D:\"
+          $root =
+              "C:\"
 
           $remote =
-              "gdrive_g:.persistent-rdp/D-storage"
+              "gdrive_g:.persistent-rdp/C-storage"
 
           if (
-              (Test-Path $rclone) -and
-              (Test-Path $config) -and
-              (Test-Path $dRoot)
+              -not (Test-Path $rclone) -or
+              -not (Test-Path $config) -or
+              -not (Test-Path $root)
           ) {
-
-              Write-Host "Uploading D:\ with high-speed multi-threading..."
-
-              & $rclone `
-                --config $config `
-                copy `
-                $dRoot `
-                $remote `
-                --fast-list `
-                --transfers 32 `
-                --checkers 64 `
-                --multi-thread-streams 64 `
-                --multi-thread-cutoff 16M `
-                --multi-thread-chunk-size 32M `
-                --buffer-size 512M `
-                --drive-chunk-size 1024M `
-                --exclude "/Program Files/**" `
-                --exclude "/Program Files (x86)/**" `
-                --exclude "/ProgramData/**" `
-                --exclude "/Users/**" `
-                --exclude "/Windows/**" `
-                --exclude "/Common Files/**" `
-                --exclude "/\`$RECYCLE.BIN/**" `
-                --exclude "/System Volume Information/**" `
-                --create-empty-src-dirs `
-                --timeout 600s `
-                --contimeout 30s `
-                --retries 10 `
-                --low-level-retries 30 `
-                --ignore-errors `
-                --stats 10s `
-                --stats-one-line 2>$null
+              exit 0
           }
-          exit 0
+
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT C SYNC"
+          Write-Host "=========================================="
+
+          & $rclone `
+            --config $config `
+            copy `
+            $root `
+            $remote `
+            --fast-list `
+            --transfers 32 `
+            --checkers 64 `
+            --multi-thread-streams 32 `
+            --multi-thread-cutoff 16M `
+            --multi-thread-chunk-size 16M `
+            --buffer-size 256M `
+            --drive-chunk-size 128M `
+            --exclude "/Windows/**" `
+            --exclude "/$Recycle.Bin/**" `
+            --exclude "/System Volume Information/**" `
+            --exclude "/Recovery/**" `
+            --exclude "/PerfLogs/**" `
+            --exclude "/ProgramData/Microsoft/Windows Defender/**" `
+            --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
+            --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
+            --exclude "/ProgramData/USOShared/**" `
+            --exclude "/ProgramData/Packages/**" `
+            --exclude "/ProgramData/GitHub/**" `
+            --exclude "/ProgramData/actions/**" `
+            --exclude "/ProgramData/chocolatey/**" `
+            --exclude "/ProgramData/ssh/**" `
+            --exclude "/Users/runneradmin/**" `
+            --exclude "/Users/runneradmin.AppData/**" `
+            --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
+            --exclude "/Users/*/AppData/Local/Temp/**" `
+            --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
+            --create-empty-src-dirs `
+            --timeout 600s `
+            --contimeout 30s `
+            --retries 10 `
+            --low-level-retries 30 `
+            --ignore-errors `
+            --stats 10s `
+            --stats-one-line 2>$null
+
+          Write-Host "Persistent C sync completed."
           '@
 
           Set-Content `
@@ -1009,17 +972,17 @@ jobs:
             -Force
 
 
-      - name: Install persistent background sync
+      - name: Install persistent C background sync
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
           $taskName =
-            "Persistent-RDP-Periodic-Sync"
+            "Persistent-RDP-C-Sync"
 
           $script =
-            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
 
           Unregister-ScheduledTask `
             -TaskName $taskName `
@@ -1055,31 +1018,56 @@ jobs:
             -ErrorAction SilentlyContinue |
             Out-Null
 
-          Write-Host "Periodic persistence task installed (Every 5 minutes for D:\)."
+          Write-Host "Persistent C background sync installed."
 
 
-      - name: Verify persistence
+      - name: Initial persistent C sync
+        shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
+          $script =
+            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
+
+          if (Test-Path $script) {
+
+            Write-Host "Running initial C persistence sync..."
+
+            & powershell.exe `
+              -NoProfile `
+              -ExecutionPolicy Bypass `
+              -File $script 2>$null
+          }
+
+
+      - name: Verify persistence system
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=========================================="
+          Write-Host "PERSISTENT C SYSTEM"
+          Write-Host "=========================================="
+
           $required = @(
             "C:\Tools\rclone\rclone.exe"
             "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
-            "D:\"
+            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
           )
 
           foreach ($path in $required) {
 
-            if (-not (Test-Path $path)) {
-              Write-Warning "Persistence path check missing: $path"
+            if (Test-Path $path) {
+              Write-Host "OK: $path"
+            }
+            else {
+              Write-Warning "Missing: $path"
             }
           }
 
-          Write-Host "=========================================="
-          Write-Host "PERSISTENCE VERIFIED & OPTIMIZED"
-          Write-Host "D:\ = full persistent workspace"
-          Write-Host "Adobe Configs Symlinked smoothly to D:\"
+          Write-Host "C:\ is the persistent application/data target."
+          Write-Host "Temporary Windows runner system files are excluded."
           Write-Host "=========================================="
 
 
@@ -1087,6 +1075,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1096,6 +1085,7 @@ jobs:
               "$env:TEMP\rustdesk.msi"
 
             try {
+
               Invoke-WebRequest `
                 -Uri `
                 "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
@@ -1117,7 +1107,8 @@ jobs:
                 $installer `
                 -Force `
                 -ErrorAction SilentlyContinue
-            } catch {}
+            }
+            catch {}
           }
 
 
@@ -1125,6 +1116,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           for (
             $p = 21115;
             $p -le 21119;
@@ -1162,6 +1154,7 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           $rdExe =
             "C:\Program Files\RustDesk\rustdesk.exe"
 
@@ -1178,10 +1171,11 @@ jobs:
         run: |
           Write-Host ""
           Write-Host "=========================================="
-          Write-Host "PERSISTENT-RDP OPTIMIZED STORAGE"
+          Write-Host "PERSISTENT C STORAGE ACTIVE"
           Write-Host "=========================================="
-          Write-Host "Periodic safe sync: every 5 minutes"
-          Write-Host "Pre-shutdown sync: safe guarded"
+          Write-Host "C application/data persistence: ACTIVE"
+          Write-Host "Background sync: every 5 minutes"
+          Write-Host "Final sync: enabled"
           Write-Host "=========================================="
 
 
@@ -1189,29 +1183,51 @@ jobs:
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
-          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
-          $end = (Get-Date).AddMinutes($mins)
-          $syncScript = "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
-          
-          $earlySyncTriggered = $false
+
+          $mins =
+            [int]"${{ env.RUNTIME_MINUTES }}"
+
+          $end =
+            (Get-Date).AddMinutes($mins)
+
+          $syncScript =
+            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
+
+          $earlySyncTriggered =
+            $false
 
           while ((Get-Date) -lt $end) {
 
-            $remaining = ($end - (Get-Date)).TotalMinutes
+            $remaining =
+              ($end - (Get-Date)).TotalMinutes
 
-            if (-not $earlySyncTriggered -and $remaining -le 8) {
-              Write-Host "=== WARNING: Session ending soon! Running Safe Early Final Sync now ===" -ForegroundColor Yellow
+            if (
+              -not $earlySyncTriggered -and
+              $remaining -le 8
+            ) {
+
+              Write-Host `
+                "=== WARNING: Session ending soon! Running Safe Early Final C Sync now ==="
+
               if (Test-Path $syncScript) {
-                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $syncScript 2>$null
+
+                & powershell.exe `
+                  -NoProfile `
+                  -ExecutionPolicy Bypass `
+                  -File $syncScript 2>$null
               }
-              $earlySyncTriggered = $true
+
+              $earlySyncTriggered =
+                $true
             }
 
             if ("$env:CRD_ENABLED" -eq '1') {
-              $mode = '[CRD+RustDesk/RDP+Fast-Persistence]'
+              $mode =
+                '[CRD+RustDesk/RDP+C-Persistence]'
             }
             else {
-              $mode = '[RustDesk/RDP+Fast-Persistence]'
+              $mode =
+                '[RustDesk/RDP+C-Persistence]'
             }
 
             Write-Host (
@@ -1226,25 +1242,31 @@ jobs:
           }
 
 
-      - name: Final D persistence sync
+      - name: Final C persistence sync
         if: always()
         shell: pwsh
         continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
+
           Write-Host "=========================================="
-          Write-Host "ABSOLUTE FINAL PERSISTENCE SYNC (D ONLY)"
+          Write-Host "ABSOLUTE FINAL C PERSISTENCE SYNC"
           Write-Host "=========================================="
 
-          $dScript =
-            "C:\ProgramData\Persistent-RDP\Sync-D.ps1"
+          $cScript =
+            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
 
-          if (Test-Path $dScript) {
-            Write-Host "Executing Final D sync..."
-            & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $dScript 2>$null
+          if (Test-Path $cScript) {
+
+            Write-Host "Executing Final C sync..."
+
+            & powershell.exe `
+              -NoProfile `
+              -ExecutionPolicy Bypass `
+              -File $cScript 2>$null
           }
 
-          Write-Host "Final safe persistence sync completed."
+          Write-Host "Final C persistence sync completed."
 
 
       - name: Dispatch next or stop
@@ -1310,6 +1332,7 @@ jobs:
               ConvertTo-Json -Depth 20
 
             try {
+
               Invoke-RestMethod `
                 -Method POST `
                 -Uri $url `
@@ -1319,7 +1342,8 @@ jobs:
                 -ErrorAction SilentlyContinue
 
               Write-Host "STOP workflow dispatched."
-            } catch {
+            }
+            catch {
               Write-Warning "Dispatch stop failed silently."
             }
           }
@@ -1382,6 +1406,7 @@ jobs:
               ConvertTo-Json -Depth 20
 
             try {
+
               Invoke-RestMethod `
                 -Method POST `
                 -Uri $url `
@@ -1391,7 +1416,8 @@ jobs:
                 -ErrorAction SilentlyContinue
 
               Write-Host "Next Workflow A dispatched."
-            } catch {
+            }
+            catch {
               Write-Warning "Dispatch next workflow failed silently."
             }
           }
