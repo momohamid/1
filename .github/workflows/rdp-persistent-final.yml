@@ -86,7 +86,15 @@ jobs:
             $n = 1
           }
           else {
-            $n = [int]"${{ inputs.rdp_count }}"
+            $n = 1
+
+            $rawCount = @'
+          ${{ inputs.rdp_count }}
+          '@.Trim()
+
+            if ($rawCount -match '^\d+$') {
+              $n = [int]$rawCount
+            }
 
             if ($n -lt 1) {
               $n = 1
@@ -143,7 +151,7 @@ jobs:
 
     env:
       RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_PASS: ${{ secrets.RDP_PASS }}
 
     steps:
 
@@ -373,7 +381,25 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
 
-          if ("${{ inputs.rdp_count }}" -gt 1) {
+          $rawCount = @'
+          ${{ inputs.rdp_count }}
+          '@.Trim()
+
+          $count = 1
+
+          if ($rawCount -match '^\d+$') {
+            $count = [int]$rawCount
+          }
+
+          if ($count -lt 1) {
+            $count = 1
+          }
+
+          if ($count -gt 10) {
+            $count = 10
+          }
+
+          if ($count -gt 1) {
             $hn = "bullet${{ matrix.id }}"
           }
           else {
@@ -417,6 +443,10 @@ jobs:
 
           if ($runtime -gt 360) {
             $runtime = 360
+          }
+
+          if ($runtime -lt 1) {
+            $runtime = 300
           }
 
           "RUNTIME_MINUTES=$runtime" |
@@ -838,12 +868,12 @@ jobs:
             "C:\" `
             --fast-list `
             --no-traverse `
-            --transfers 32 `
-            --checkers 64 `
-            --multi-thread-streams 32 `
+            --transfers 16 `
+            --checkers 32 `
+            --multi-thread-streams 16 `
             --multi-thread-cutoff 16M `
             --multi-thread-chunk-size 32M `
-            --buffer-size 256M `
+            --buffer-size 128M `
             --drive-chunk-size 128M `
             --exclude "/Windows/**" `
             --exclude "/$Recycle.Bin/**" `
@@ -859,6 +889,7 @@ jobs:
             --exclude "/ProgramData/actions/**" `
             --exclude "/ProgramData/chocolatey/**" `
             --exclude "/ProgramData/ssh/**" `
+            --exclude "/ProgramData/Persistent-RDP/**" `
             --exclude "/Users/runneradmin/**" `
             --exclude "/Users/runneradmin.AppData/**" `
             --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
@@ -909,60 +940,111 @@ jobs:
           $remote =
               "gdrive_g:.persistent-rdp/C-storage"
 
-          if (
-              -not (Test-Path $rclone) -or
-              -not (Test-Path $config) -or
-              -not (Test-Path $root)
-          ) {
-              exit 0
+          $mutexName =
+              "Global\Persistent-RDP-C-Sync"
+
+          $mutex = $null
+          $hasLock = $false
+
+          try {
+
+              $mutex =
+                  New-Object `
+                    System.Threading.Mutex(
+                      $false,
+                      $mutexName
+                    )
+
+              $hasLock =
+                  $mutex.WaitOne(
+                    0,
+                    $false
+                  )
+
+              if (-not $hasLock) {
+                  Write-Host "Another C sync is already running. Skipping."
+                  exit 0
+              }
+
+              if (
+                  -not (Test-Path $rclone) -or
+                  -not (Test-Path $config) -or
+                  -not (Test-Path $root)
+              ) {
+                  exit 0
+              }
+
+              Write-Host "=========================================="
+              Write-Host "PERSISTENT C SYNC"
+              Write-Host "=========================================="
+
+              & $rclone `
+                --config $config `
+                mkdir `
+                $remote 2>$null
+
+              & $rclone `
+                --config $config `
+                copy `
+                $root `
+                $remote `
+                --fast-list `
+                --transfers 16 `
+                --checkers 32 `
+                --multi-thread-streams 16 `
+                --multi-thread-cutoff 16M `
+                --multi-thread-chunk-size 16M `
+                --buffer-size 128M `
+                --drive-chunk-size 128M `
+                --exclude "/Windows/**" `
+                --exclude "/$Recycle.Bin/**" `
+                --exclude "/System Volume Information/**" `
+                --exclude "/Recovery/**" `
+                --exclude "/PerfLogs/**" `
+                --exclude "/ProgramData/Microsoft/Windows Defender/**" `
+                --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
+                --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
+                --exclude "/ProgramData/USOShared/**" `
+                --exclude "/ProgramData/Packages/**" `
+                --exclude "/ProgramData/GitHub/**" `
+                --exclude "/ProgramData/actions/**" `
+                --exclude "/ProgramData/chocolatey/**" `
+                --exclude "/ProgramData/ssh/**" `
+                --exclude "/ProgramData/Persistent-RDP/**" `
+                --exclude "/Tools/**" `
+                --exclude "/Users/runneradmin/**" `
+                --exclude "/Users/runneradmin.AppData/**" `
+                --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
+                --exclude "/Users/*/AppData/Local/Temp/**" `
+                --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
+                --create-empty-src-dirs `
+                --timeout 600s `
+                --contimeout 30s `
+                --retries 10 `
+                --low-level-retries 30 `
+                --ignore-errors `
+                --stats 10s `
+                --stats-one-line 2>$null
+
+              Write-Host "Persistent C sync completed."
+
           }
+          catch {
+              Write-Warning "C sync warning: $($_.Exception.Message)"
+          }
+          finally {
 
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT C SYNC"
-          Write-Host "=========================================="
+              if ($hasLock -and $mutex) {
+                  try {
+                      $mutex.ReleaseMutex()
+                  }
+                  catch {}
+              }
 
-          & $rclone `
-            --config $config `
-            copy `
-            $root `
-            $remote `
-            --fast-list `
-            --transfers 32 `
-            --checkers 64 `
-            --multi-thread-streams 32 `
-            --multi-thread-cutoff 16M `
-            --multi-thread-chunk-size 16M `
-            --buffer-size 256M `
-            --drive-chunk-size 128M `
-            --exclude "/Windows/**" `
-            --exclude "/$Recycle.Bin/**" `
-            --exclude "/System Volume Information/**" `
-            --exclude "/Recovery/**" `
-            --exclude "/PerfLogs/**" `
-            --exclude "/ProgramData/Microsoft/Windows Defender/**" `
-            --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
-            --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
-            --exclude "/ProgramData/USOShared/**" `
-            --exclude "/ProgramData/Packages/**" `
-            --exclude "/ProgramData/GitHub/**" `
-            --exclude "/ProgramData/actions/**" `
-            --exclude "/ProgramData/chocolatey/**" `
-            --exclude "/ProgramData/ssh/**" `
-            --exclude "/Users/runneradmin/**" `
-            --exclude "/Users/runneradmin.AppData/**" `
-            --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
-            --exclude "/Users/*/AppData/Local/Temp/**" `
-            --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
-            --create-empty-src-dirs `
-            --timeout 600s `
-            --contimeout 30s `
-            --retries 10 `
-            --low-level-retries 30 `
-            --ignore-errors `
-            --stats 10s `
-            --stats-one-line 2>$null
-
-          Write-Host "Persistent C sync completed."
+              if ($mutex) {
+                  $mutex.Dispose()
+              }
+          }
           '@
 
           Set-Content `
@@ -1006,7 +1088,8 @@ jobs:
             New-ScheduledTaskSettingsSet `
               -AllowStartIfOnBatteries `
               -DontStopIfGoingOnBatteries `
-              -ExecutionTimeLimit ([TimeSpan]::Zero)
+              -ExecutionTimeLimit ([TimeSpan]::Zero) `
+              -MultipleInstances IgnoreNew
 
           Register-ScheduledTask `
             -TaskName $taskName `
@@ -1066,8 +1149,9 @@ jobs:
             }
           }
 
-          Write-Host "C:\ is the persistent application/data target."
-          Write-Host "Temporary Windows runner system files are excluded."
+          Write-Host "C:\ persistent application/data synchronization is configured."
+          Write-Host "Windows system files are excluded."
+          Write-Host "rclone credentials/configuration are excluded from C backup."
           Write-Host "=========================================="
 
 
@@ -1175,6 +1259,7 @@ jobs:
           Write-Host "=========================================="
           Write-Host "C application/data persistence: ACTIVE"
           Write-Host "Background sync: every 5 minutes"
+          Write-Host "Early final sync: enabled"
           Write-Host "Final sync: enabled"
           Write-Host "=========================================="
 
@@ -1186,6 +1271,10 @@ jobs:
 
           $mins =
             [int]"${{ env.RUNTIME_MINUTES }}"
+
+          if ($mins -gt 360) {
+            $mins = 360
+          }
 
           $end =
             (Get-Date).AddMinutes($mins)
@@ -1277,8 +1366,15 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
 
-          $cycles =
-            [int]"${{ inputs.cycles }}"
+          $rawCycles = @'
+          ${{ inputs.cycles }}
+          '@.Trim()
+
+          $cycles = 0
+
+          if ($rawCycles -match '^\d+$') {
+            $cycles = [int]$rawCycles
+          }
 
           if ($cycles -le 0) {
             Write-Host "No cycles configured. Done."
