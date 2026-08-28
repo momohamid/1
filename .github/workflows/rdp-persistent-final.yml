@@ -1121,8 +1121,7 @@ jobs:
               -Force `
               -ErrorAction SilentlyContinue
 
-          $found =
-              New-Object System.Collections.Generic.List[string]
+          $found = New-Object System.Collections.Generic.List[string]
 
           Write-Host "Scanning C: for new/modified persistent files (optimized)..."
 
@@ -1145,15 +1144,17 @@ jobs:
                       }
                       if ($skip) { return }
 
-                      if ($_.CreationTimeUtc -ge $sessionStart -or $_.LastWriteTimeUtc -ge $sessionStart) {
-                          $relative = $full.Substring(3).Replace('\','/')
-                          [void]$found.Add($relative)
-                      }
+                      try {
+                          if ($_.CreationTimeUtc -ge $sessionStart -or $_.LastWriteTimeUtc -ge $sessionStart) {
+                              $relative = $full.Substring(3).Replace('\','/')
+                              [void]$found.Add($relative)
+                          }
+                      } catch {}
                   }
               }
           }
 
-          if ($found.Count -eq 0) {
+          if ($null -eq $found -or $found.Count -eq 0) {
               Write-Host "No new or modified C files found."
               exit 0
           }
