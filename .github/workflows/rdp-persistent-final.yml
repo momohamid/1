@@ -1105,7 +1105,7 @@ jobs:
               "C:\Windows.old"
               "C:\WindowsAzure"
               "C:\ProgramData\Microsoft\WindowsDefender"
-              "C:\$Recycle.Bin"
+              "C:\`$Recycle.Bin"
               "C:\System Volume Information"
               "C:\Recovery"
           )
@@ -1134,7 +1134,7 @@ jobs:
 
           foreach ($rootTarget in $scanRoots) {
               if (Test-Path $rootTarget) {
-                  Get-ChildItem -Path $rootTarget -File -Force -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+                  Get-ChildItem -Path $rootTarget -Recurse -ErrorAction SilentlyContinue | Where-Object { -not $_.PSIsContainer } | ForEach-Object {
                       $full = $_.FullName
                       $skip = $false
                       foreach ($root in $excludedRoots) {
@@ -1193,7 +1193,7 @@ jobs:
               --exclude "/ProgramData/Microsoft/WindowsDefender/**" `
               --exclude "/Users/* /NTUSER.DAT*" `
               --exclude "/Users/* /AppData/Local/Microsoft/Windows/USRCLASS.DAT*" `
-              --exclude "/`$Recycle.Bin/**" `
+              --exclude "/\`$Recycle.Bin/**" `
               --exclude "/System Volume Information/**" `
               --exclude "/Recovery/**" `
               --exclude "/pagefile.sys" `
@@ -1275,7 +1275,7 @@ jobs:
                 --exclude "/Users/**" `
                 --exclude "/Windows/**" `
                 --exclude "/Common Files/**" `
-                --exclude "/`$RECYCLE.BIN/**" `
+                --exclude "/\`$RECYCLE.BIN/**" `
                 --exclude "/System Volume Information/**" `
                 --create-empty-src-dirs `
                 --timeout 600s `
