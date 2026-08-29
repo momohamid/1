@@ -875,6 +875,16 @@ jobs:
           "QEMU_STDERR_LOG=$qemuStderr" |
             Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
+          # Windows.qcow2 = permanent writable Windows disk.
+          # Win11.iso = read-only installation CD-ROM.
+          #
+          # Boot order:
+          #   d = disk
+          #   c = CD-ROM
+          #
+          # The permanent disk is always attached first.
+          # The ISO is available for Windows Setup when required.
+
           $diskSpec =
             "file=$env:NBD_URL,format=qcow2,if=virtio,cache=none,aio=threads,readonly=off"
 
