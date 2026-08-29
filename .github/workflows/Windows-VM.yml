@@ -505,7 +505,7 @@ steps:
       $isoExport = "$env:ISO_NBD_EXPORT".Trim()
 
       if ([string]::IsNullOrWhiteSpace($diskExport)) {
-          $diskUrl = "nbd://${hostIp}:${diskPort}/"
+          $diskUrl = "nbd://${hostIp}:${diskPort}"
       }
       else {
           $encodedDiskExport =
@@ -516,7 +516,7 @@ steps:
       }
 
       if ([string]::IsNullOrWhiteSpace($isoExport)) {
-          $isoUrl = "nbd://${hostIp}:${isoPort}/"
+          $isoUrl = "nbd://${hostIp}:${isoPort}"
       }
       else {
           $encodedIsoExport =
@@ -876,20 +876,18 @@ steps:
         Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       # Windows.qcow2 is the permanent writable disk.
-      # nbdkit's file plugin exposes the QCOW2 file bytes over NBD.
-      # QEMU therefore interprets the remote NBD block device as QCOW2.
-      #
-      # Win11.iso is exposed as raw bytes and attached as a read-only CD-ROM.
+      # Win11.iso is a read-only NBD CD-ROM.
       #
       # Boot order:
-      #   d = disk
-      #   c = CD-ROM
+      #   1. Disk
+      #   2. CD-ROM
       #
-      # Therefore an installed Windows disk boots first.
-      # A new/empty disk can fall through to the ISO for installation.
+      # Therefore:
+      # - A new/empty disk falls through to the ISO and starts Windows Setup.
+      # - After Windows is installed, the disk boots first on later runs.
 
       $diskSpec =
-        "file=$env:NBD_URL,format=qcow2,if=ide,cache=none,aio=threads,readonly=off"
+        "file=$env:NBD_URL,format=qcow2,if=virtio,cache=none,aio=threads,readonly=off"
 
       $isoSpec =
         "file=$env:ISO_NBD_URL,format=raw,media=cdrom,readonly=on"
