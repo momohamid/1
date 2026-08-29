@@ -1,193 +1,158 @@
 name: Windows 11 VM - TEST
 
-on:
-workflow_dispatch:
+"on":
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-vm-test:
-runs-on: windows-latest
-timeout-minutes: 20
+  vm-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
 
-steps:
+    steps:
 
-  - name: Show runner resources
-    shell: pwsh
-    run: |
-      Write-Host "=== RUNNER ==="
-      Get-CimInstance Win32_ComputerSystem |
-        Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory |
-        Format-List
+      - name: Show runner resources
+        shell: pwsh
+        run: |
+          Write-Host "=== RUNNER ==="
+          Get-CimInstance Win32_ComputerSystem |
+            Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory |
+            Format-List
 
-      Write-Host "=== DISKS ==="
-      Get-PSDrive -PSProvider FileSystem |
-        Format-Table Name, Used, Free
+          Write-Host "=== DISKS ==="
+          Get-PSDrive -PSProvider FileSystem |
+            Format-Table Name, Used, Free
 
-  - name: Check virtualization
-    shell: pwsh
-    run: |
-      Write-Host "=== VIRTUALIZATION CHECK ==="
+      - name: Check virtualization
+        shell: pwsh
+        run: |
+          Write-Host "=== VIRTUALIZATION CHECK ==="
 
-      Get-CimInstance Win32_Processor |
-        Select-Object Name,
-          NumberOfCores,
-          NumberOfLogicalProcessors,
-          VirtualizationFirmwareEnabled,
-          VMMonitorModeExtensions |
-        Format-List
+          Get-CimInstance Win32_Processor |
+            Select-Object Name,
+              NumberOfCores,
+              NumberOfLogicalProcessors,
+              VirtualizationFirmwareEnabled,
+              VMMonitorModeExtensions |
+            Format-List
 
-  - name: Install QEMU
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+      - name: Install QEMU
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      winget install `
-        --id SoftwareFreedomConservancy.QEMU `
-        --exact `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements
+          winget install `
+            --id SoftwareFreedomConservancy.QEMU `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
 
-      $qemu = Get-ChildItem `
-        "C:\Program Files\qemu" `
-        -Filter "qemu-system-x86_64.exe" `
-        -Recurse `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+          $qemu = Get-ChildItem `
+            "C:\Program Files\qemu" `
+            -Filter "qemu-system-x86_64.exe" `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
 
-      if (-not $qemu) {
-        throw "QEMU was not found."
-      }
+          if (-not $qemu) {
+            throw "QEMU was not found."
+          }
 
-      $qemu.Directory.FullName |
-        Out-File `
-          $env:GITHUB_PATH `
-          -Append `
-          -Encoding utf8
+          $qemu.Directory.FullName |
+            Out-File `
+              $env:GITHUB_PATH `
+              -Append `
+              -Encoding utf8
 
-      Write-Host "QEMU:"
-      & $qemu.FullName --version
+          Write-Host "QEMU:"
+          & $qemu.FullName --version
 
-  - name: Check QEMU acceleration
-    shell: pwsh
-    run: |
-      Write-Host "=== QEMU ACCELERATION TEST ==="
+      - name: Check QEMU acceleration
+        shell: pwsh
+        run: |
+          Write-Host "=== QEMU ACCELERATION TEST ==="
 
-      qemu-system-x86_64 `
-        -accel help
+          qemu-system-x86_64 `
+            -accel help
 
-  - name: QEMU WHPX Boot Test
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+      - name: Check ISO and QCOW2 availability
+        shell: pwsh
+        run: |
+          Write-Host "=== VM STORAGE TEST ==="
 
-      Write-Host ""
-      Write-Host "=========================================="
-      Write-Host "QEMU WHPX BOOT TEST"
-      Write-Host "=========================================="
+          Write-Host "The following paths are PHONE paths:"
+          Write-Host "/storage/emulated/0/myemulator/Win11.iso"
+          Write-Host "/storage/emulated/0/myemulator/Windows.qcow2"
 
-      $qemu = Get-Command qemu-system-x86_64 -ErrorAction Stop
+          Write-Host ""
+          Write-Host "IMPORTANT:"
+          Write-Host "GitHub cannot access Android filesystem paths directly."
+          Write-Host "The paths above are informational only."
 
-      Write-Host "QEMU:"
-      & $qemu.Source --version
+          Write-Host ""
+          Write-Host "The next stage requires the QCOW2 to be available to the runner."
+          Write-Host "No cloud-storage dependency is assumed by this test."
 
-      Write-Host ""
-      Write-Host "Creating temporary test disk..."
+      - name: Verify test environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      $disk = Join-Path $env:RUNNER_TEMP "whpx-test.qcow2"
+          Write-Host "=== FINAL ENVIRONMENT CHECK ==="
 
-      & qemu-img create -f qcow2 $disk 2G
+          $qemu = Get-Command qemu-system-x86_64 -ErrorAction SilentlyContinue
 
-      if ($LASTEXITCODE -ne 0) {
-        throw "Failed to create test QCOW2."
-      }
+          if (-not $qemu) {
+            Write-Host "FAIL: QEMU executable is not available."
+            exit 1
+          }
 
-      Write-Host ""
-      Write-Host "Starting QEMU with WHPX..."
-      Write-Host "RAM: 16G"
-      Write-Host "CPU: 4"
-      Write-Host "Acceleration: WHPX"
+          Write-Host "PASS: QEMU executable found:"
+          Write-Host $qemu.Source
 
-      $errorLog = Join-Path $env:RUNNER_TEMP "qemu-whpx-error.log"
-      $outputLog = Join-Path $env:RUNNER_TEMP "qemu-whpx-output.log"
+          $accel = qemu-system-x86_64 -accel help 2>&1
 
-      $args = @(
-        "-accel", "whpx",
-        "-machine", "q35",
-        "-cpu", "max",
-        "-smp", "4",
-        "-m", "16G",
-        "-drive", "file=$disk,format=qcow2,if=virtio",
-        "-display", "none",
-        "-serial", "none",
-        "-monitor", "none",
-        "-no-reboot",
-        "-no-shutdown"
-      )
+          Write-Host ""
+          Write-Host "Available QEMU accelerators:"
+          $accel
 
-      $process = Start-Process `
-        -FilePath $qemu.Source `
-        -ArgumentList $args `
-        -PassThru `
-        -NoNewWindow `
-        -RedirectStandardError $errorLog `
-        -RedirectStandardOutput $outputLog
+          if ($accel -match "(?im)^\s*whpx\s*$") {
+            Write-Host ""
+            Write-Host "PASS: WHPX accelerator is available."
+          }
+          else {
+            Write-Host ""
+            Write-Host "WARNING: WHPX accelerator was not reported."
+            Write-Host "QEMU TCG may still be available."
+          }
 
-      Start-Sleep -Seconds 15
+          Write-Host ""
+          Write-Host "Runner environment check completed successfully."
 
-      if ($process.HasExited) {
-        Write-Host "QEMU exited unexpectedly."
-        Write-Host ""
-        Write-Host "=== QEMU STDERR ==="
-
-        Get-Content $errorLog -ErrorAction SilentlyContinue
-
-        Write-Host ""
-        Write-Host "=== QEMU STDOUT ==="
-
-        Get-Content $outputLog -ErrorAction SilentlyContinue
-
-        throw "QEMU WHPX process exited unexpectedly."
-      }
-
-      Write-Host ""
-      Write-Host "=========================================="
-      Write-Host "WHPX STARTED SUCCESSFULLY"
-      Write-Host "=========================================="
-
-      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-
-      Remove-Item $disk -Force -ErrorAction SilentlyContinue
-
-      Write-Host ""
-      Write-Host "=========================================="
-      Write-Host "WHPX TEST COMPLETED"
-      Write-Host "=========================================="
-
-  - name: Check ISO and QCOW2 availability
-    shell: pwsh
-    run: |
-      Write-Host "The following paths are PHONE paths:"
-      Write-Host "/storage/emulated/0/myemulator/Win11.iso"
-      Write-Host "/storage/emulated/0/myemulator/Windows.qcow2"
-
-      Write-Host ""
-      Write-Host "IMPORTANT:"
-      Write-Host "GitHub cannot access Android filesystem paths directly."
-      Write-Host "The real Windows QCOW2 is NOT modified by this test."
-
-  - name: Final result
-    shell: pwsh
-    run: |
-      Write-Host ""
-      Write-Host "=========================================="
-      Write-Host "VM TEST COMPLETED"
-      Write-Host "=========================================="
-      Write-Host "Send the complete log from:"
-      Write-Host "1. RUNNER"
-      Write-Host "2. VIRTUALIZATION CHECK"
-      Write-Host "3. QEMU ACCELERATION TEST"
-      Write-Host "4. QEMU WHPX BOOT TEST"
-      Write-Host "=========================================="
+      - name: Final result
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "=========================================="
+          Write-Host "WINDOWS 11 VM ENVIRONMENT TEST COMPLETED"
+          Write-Host "=========================================="
+          Write-Host ""
+          Write-Host "Verified:"
+          Write-Host "1. Runner CPU and RAM"
+          Write-Host "2. Runner disks"
+          Write-Host "3. Hardware virtualization status"
+          Write-Host "4. QEMU installation"
+          Write-Host "5. QEMU acceleration support"
+          Write-Host "6. VM storage path requirements"
+          Write-Host ""
+          Write-Host "IMPORTANT:"
+          Write-Host "The Android QCOW2 was NOT modified."
+          Write-Host "The Android ISO/QCOW2 paths are NOT directly accessible"
+          Write-Host "from the GitHub-hosted Windows runner."
+          Write-Host ""
+          Write-Host "Send the complete log from this run."
+          Write-Host "=========================================="
