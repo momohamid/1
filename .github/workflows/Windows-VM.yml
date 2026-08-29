@@ -1,361 +1,420 @@
 name: Windows 11 VM - WHPX TEST
 
-on: [workflow_dispatch]
+"on":
+  workflow_dispatch:
 
 permissions:
-contents: read
+  contents: read
 
 jobs:
-whpx-test:
-runs-on: windows-latest
-timeout-minutes: 20
+  whpx-test:
+    runs-on: windows-latest
+    timeout-minutes: 20
 
-steps:
-  - name: Show runner resources
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+    steps:
+      - name: Show runner resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host "=== RUNNER RESOURCES ==="
+          Write-Host "=== RUNNER RESOURCES ==="
 
-      $computer = Get-CimInstance Win32_ComputerSystem
+          $computer = Get-CimInstance Win32_ComputerSystem
 
-      Write-Host "Logical processors: $($computer.NumberOfLogicalProcessors)"
-      Write-Host "RAM bytes: $($computer.TotalPhysicalMemory)"
-      Write-Host "RAM GB: $([math]::Round($computer.TotalPhysicalMemory / 1GB, 2))"
+          Write-Host "Logical processors: $($computer.NumberOfLogicalProcessors)"
+          Write-Host "RAM bytes: $($computer.TotalPhysicalMemory)"
+          Write-Host "RAM GB: $([math]::Round($computer.TotalPhysicalMemory / 1GB, 2))"
 
-      Write-Host ""
-      Write-Host "=== DISKS ==="
+          Write-Host ""
+          Write-Host "=== DISKS ==="
 
-      Get-PSDrive -PSProvider FileSystem |
-        Format-Table Name, Used, Free
+          Get-PSDrive -PSProvider FileSystem |
+            Format-Table Name, Used, Free
 
-  - name: Check virtualization
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+      - name: Check virtualization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host "=== VIRTUALIZATION CHECK ==="
+          Write-Host "=== VIRTUALIZATION CHECK ==="
 
-      Get-CimInstance Win32_Processor |
-        Select-Object Name,
-          NumberOfCores,
-          NumberOfLogicalProcessors,
-          VirtualizationFirmwareEnabled,
-          VMMonitorModeExtensions |
-        Format-List
+          Get-CimInstance Win32_Processor |
+            Select-Object Name,
+              NumberOfCores,
+              NumberOfLogicalProcessors,
+              VirtualizationFirmwareEnabled,
+              VMMonitorModeExtensions |
+            Format-List
 
-  - name: Install QEMU
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+      - name: Install QEMU
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host "=== INSTALLING QEMU ==="
+          Write-Host "=== INSTALLING QEMU ==="
 
-      winget install `
-        --id SoftwareFreedomConservancy.QEMU `
-        --exact `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements
+          winget install `
+            --id SoftwareFreedomConservancy.QEMU `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
 
-      $qemu = Get-ChildItem `
-        "C:\Program Files\qemu" `
-        -Filter "qemu-system-x86_64.exe" `
-        -Recurse `
-        -ErrorAction SilentlyContinue |
-        Select-Object -First 1
+          $qemuCandidates = @(
+            "C:\Program Files\qemu\qemu-system-x86_64.exe",
+            "C:\Program Files\QEMU\qemu-system-x86_64.exe"
+          )
 
-      if (-not $qemu) {
-        throw "QEMU was not found after installation."
-      }
+          $qemu = $null
 
-      $qemu.Directory.FullName |
-        Out-File `
-          $env:GITHUB_PATH `
-          -Append `
-          -Encoding utf8
+          foreach ($candidate in $qemuCandidates) {
+            if (Test-Path $candidate) {
+              $qemu = Get-Item $candidate
+              break
+            }
+          }
 
-      Write-Host ""
-      Write-Host "QEMU executable:"
-      Write-Host $qemu.FullName
+          if (-not $qemu) {
+            $qemu = Get-ChildItem `
+              "C:\Program Files" `
+              -Filter "qemu-system-x86_64.exe" `
+              -Recurse `
+              -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+          }
 
-      Write-Host ""
-      Write-Host "QEMU version:"
-      & $qemu.FullName --version
+          if (-not $qemu) {
+            throw "QEMU was not found after installation."
+          }
 
-  - name: Check QEMU accelerators
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          $qemuDir = $qemu.Directory.FullName
 
-      Write-Host "=== QEMU ACCELERATOR CHECK ==="
+          $qemuDir |
+            Out-File `
+              $env:GITHUB_PATH `
+              -Append `
+              -Encoding utf8
 
-      $accelerators = qemu-system-x86_64 -accel help 2>&1
+          Write-Host ""
+          Write-Host "QEMU executable:"
+          Write-Host $qemu.FullName
 
-      Write-Host $accelerators
+          Write-Host ""
+          Write-Host "QEMU version:"
+          & $qemu.FullName --version
 
-      if ($accelerators -match "(?im)^\s*whpx\s*$") {
-        Write-Host ""
-        Write-Host "PASS: WHPX is supported by this QEMU binary."
-      }
-      else {
-        Write-Host ""
-        Write-Host "FAIL: WHPX is not reported by QEMU."
-        exit 1
-      }
+          Write-Host ""
+          Write-Host "QEMU directory added to PATH:"
+          Write-Host $qemuDir
 
-  - name: Create temporary test disk
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+      - name: Check QEMU accelerators
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host "=== TEMPORARY VM DISK TEST ==="
+          Write-Host "=== QEMU ACCELERATOR CHECK ==="
 
-      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
+          $qemu = Get-Command qemu-system-x86_64.exe -ErrorAction Stop
 
-      if (Test-Path $testDir) {
-        Remove-Item `
-          $testDir `
-          -Recurse `
-          -Force
-      }
+          Write-Host "QEMU path:"
+          Write-Host $qemu.Source
 
-      New-Item `
-        -ItemType Directory `
-        -Path $testDir `
-        -Force |
-        Out-Null
+          Write-Host ""
+          Write-Host "Available accelerators:"
 
-      $disk = Join-Path $testDir "whpx-test.qcow2"
+          $accelerators = & qemu-system-x86_64.exe -accel help 2>&1
 
-      Write-Host "Creating temporary QCOW2:"
-      Write-Host $disk
+          $accelerators |
+            ForEach-Object {
+              Write-Host $_
+            }
 
-      qemu-img create `
-        -f qcow2 `
-        $disk `
-        2G
+          $whpxFound = $false
 
-      if (-not (Test-Path $disk)) {
-        throw "Temporary QCOW2 was not created."
-      }
+          foreach ($line in $accelerators) {
+            if ($line -match "(?i)\bwhpx\b") {
+              $whpxFound = $true
+              break
+            }
+          }
 
-      Write-Host ""
-      Write-Host "Temporary QCOW2 created successfully."
+          if ($whpxFound) {
+            Write-Host ""
+            Write-Host "PASS: WHPX is supported by this QEMU binary."
+          }
+          else {
+            Write-Host ""
+            Write-Host "FAIL: WHPX is not reported by QEMU."
+            exit 1
+          }
 
-      qemu-img info $disk
+      - name: Create temporary test disk
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host ""
-      Write-Host "IMPORTANT:"
-      Write-Host "This is a temporary test disk."
-      Write-Host "The real Windows.qcow2 on the phone is NOT being accessed."
+          Write-Host "=== TEMPORARY VM DISK TEST ==="
 
-  - name: Run actual WHPX VM test
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          $testDir = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test"
 
-      Write-Host "=== ACTUAL WHPX VM TEST ==="
+          if (Test-Path $testDir) {
+            Remove-Item `
+              $testDir `
+              -Recurse `
+              -Force
+          }
 
-      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
-      $disk = Join-Path $testDir "whpx-test.qcow2"
+          New-Item `
+            -ItemType Directory `
+            -Path $testDir `
+            -Force |
+            Out-Null
 
-      if (-not (Test-Path $disk)) {
-        throw "Temporary test disk does not exist."
-      }
+          $disk = Join-Path `
+            $testDir `
+            "whpx-test.qcow2"
 
-      Write-Host ""
-      Write-Host "Starting QEMU with WHPX..."
-      Write-Host "No Windows ISO is used."
-      Write-Host "No real Windows QCOW2 is used."
-      Write-Host "No cloud storage is used."
-      Write-Host "QEMU will be terminated automatically after a short test."
+          Write-Host "Creating temporary QCOW2:"
+          Write-Host $disk
 
-      $stdoutFile = Join-Path $testDir "qemu-stdout.log"
-      $stderrFile = Join-Path $testDir "qemu-stderr.log"
+          & qemu-img.exe create `
+            -f qcow2 `
+            $disk `
+            2G
 
-      $qemuArgs = @(
-        "-accel", "whpx",
-        "-machine", "q35",
-        "-cpu", "max",
-        "-smp", "2",
-        "-m", "2048",
-        "-nodefaults",
-        "-display", "none",
-        "-monitor", "none",
-        "-serial", "none",
-        "-drive", "file=$disk,if=virtio,format=qcow2",
-        "-no-reboot"
-      )
+          if ($LASTEXITCODE -ne 0) {
+            throw "qemu-img failed with exit code $LASTEXITCODE."
+          }
 
-      Write-Host ""
-      Write-Host "QEMU command arguments:"
-      $qemuArgs | ForEach-Object {
-        Write-Host "  $_"
-      }
+          if (-not (Test-Path $disk)) {
+            throw "Temporary QCOW2 was not created."
+          }
 
-      Write-Host ""
-      Write-Host "Launching QEMU..."
+          Write-Host ""
+          Write-Host "Temporary QCOW2 created successfully."
 
-      $process = Start-Process `
-        -FilePath "qemu-system-x86_64.exe" `
-        -ArgumentList $qemuArgs `
-        -RedirectStandardOutput $stdoutFile `
-        -RedirectStandardError $stderrFile `
-        -PassThru
+          & qemu-img.exe info $disk
 
-      Write-Host ""
-      Write-Host "QEMU process started."
-      Write-Host "PID: $($process.Id)"
+          Write-Host ""
+          Write-Host "IMPORTANT:"
+          Write-Host "This is a temporary test disk."
+          Write-Host "The real Windows.qcow2 on the phone is NOT being accessed."
 
-      $testSeconds = 30
+      - name: Run actual WHPX VM test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host ""
-      Write-Host "Allowing QEMU to run for $testSeconds seconds..."
+          Write-Host "=== ACTUAL WHPX VM TEST ==="
 
-      $finished = $process.WaitForExit($testSeconds * 1000)
+          $testDir = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test"
 
-      if ($finished) {
-        Write-Host ""
-        Write-Host "QEMU exited by itself."
-        Write-Host "Exit code: $($process.ExitCode)"
-      }
-      else {
-        Write-Host ""
-        Write-Host "QEMU is still running after $testSeconds seconds."
-        Write-Host "This confirms that the WHPX launch remained active."
-        Write-Host "Terminating QEMU now..."
+          $disk = Join-Path `
+            $testDir `
+            "whpx-test.qcow2"
 
-        try {
+          $logFile = Join-Path `
+            $testDir `
+            "qemu-whpx.log"
+
+          if (-not (Test-Path $disk)) {
+            throw "Temporary test disk does not exist."
+          }
+
+          Write-Host ""
+          Write-Host "Starting QEMU with WHPX..."
+          Write-Host "No Windows ISO is used."
+          Write-Host "No real Windows QCOW2 is used."
+          Write-Host "No cloud storage is used."
+
+          $qemuArgs = @(
+            "-accel", "whpx",
+            "-machine", "q35",
+            "-cpu", "max",
+            "-smp", "2",
+            "-m", "2048",
+            "-nodefaults",
+            "-display", "none",
+            "-monitor", "none",
+            "-serial", "none",
+            "-drive", "file=$disk,if=virtio,format=qcow2",
+            "-S"
+          )
+
+          Write-Host ""
+          Write-Host "QEMU command arguments:"
+
+          $qemuArgs |
+            ForEach-Object {
+              Write-Host "  $_"
+            }
+
+          Write-Host ""
+          Write-Host "Launching QEMU..."
+
+          $process = Start-Process `
+            -FilePath "qemu-system-x86_64.exe" `
+            -ArgumentList $qemuArgs `
+            -RedirectStandardOutput $logFile `
+            -RedirectStandardError $logFile `
+            -PassThru
+
+          Write-Host ""
+          Write-Host "QEMU PID: $($process.Id)"
+
+          Start-Sleep -Seconds 5
+
+          if ($process.HasExited) {
+            Write-Host ""
+            Write-Host "QEMU exited during WHPX startup."
+
+            Write-Host ""
+            Write-Host "=== QEMU LOG ==="
+
+            if (Test-Path $logFile) {
+              Get-Content $logFile |
+                ForEach-Object {
+                  Write-Host $_
+                }
+            }
+
+            Write-Host ""
+            Write-Host "QEMU exit code: $($process.ExitCode)"
+
+            throw "WHPX VM process exited before the startup check completed."
+          }
+
+          Write-Host ""
+          Write-Host "PASS: QEMU remained running with WHPX for 5 seconds."
+          Write-Host "WHPX accelerator initialization appears successful."
+
+          Write-Host ""
+          Write-Host "Stopping temporary QEMU process..."
+
           Stop-Process `
             -Id $process.Id `
             -Force `
-            -ErrorAction Stop
+            -ErrorAction SilentlyContinue
 
-          Write-Host "QEMU process terminated successfully."
-        }
-        catch {
-          Write-Host "QEMU process termination message:"
-          Write-Host $_
-        }
+          Wait-Process `
+            -Id $process.Id `
+            -Timeout 10 `
+            -ErrorAction SilentlyContinue
 
-        Start-Sleep -Seconds 2
+          Write-Host ""
+          Write-Host "=== QEMU LOG ==="
 
-        if (-not $process.HasExited) {
-          taskkill /PID $process.Id /T /F 2>&1 |
-            ForEach-Object { Write-Host $_ }
-        }
-      }
+          if (Test-Path $logFile) {
+            Get-Content $logFile |
+              ForEach-Object {
+                Write-Host $_
+              }
+          }
+          else {
+            Write-Host "No QEMU log file was produced."
+          }
 
-      Write-Host ""
-      Write-Host "=== QEMU STDOUT ==="
+          Write-Host ""
+          Write-Host "=== WHPX LAUNCH TEST PASSED ==="
 
-      if (Test-Path $stdoutFile) {
-        Get-Content $stdoutFile -ErrorAction SilentlyContinue |
-          ForEach-Object { Write-Host $_ }
-      }
-      else {
-        Write-Host "(No stdout log.)"
-      }
+      - name: Inspect temporary VM disk
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "=== TEMPORARY DISK INSPECTION ==="
 
-      Write-Host ""
-      Write-Host "=== QEMU STDERR ==="
+          $disk = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test\whpx-test.qcow2"
 
-      if (Test-Path $stderrFile) {
-        Get-Content $stderrFile -ErrorAction SilentlyContinue |
-          ForEach-Object { Write-Host $_ }
-      }
-      else {
-        Write-Host "(No stderr log.)"
-      }
+          if (Test-Path $disk) {
+            Write-Host "Temporary QCOW2 exists:"
+            Write-Host $disk
 
-      Write-Host ""
-      Write-Host "=== WHPX LAUNCH RESULT ==="
+            & qemu-img.exe info $disk
+          }
+          else {
+            Write-Host "Temporary QCOW2 was not found."
+          }
 
-      if ($finished) {
-        if ($process.ExitCode -eq 0) {
-          Write-Host "PASS: QEMU launched and exited normally using WHPX."
-        }
-        else {
-          Write-Host "INFO: QEMU launched using WHPX but exited with code $($process.ExitCode)."
-          Write-Host "Review QEMU STDERR above."
-        }
-      }
-      else {
-        Write-Host "PASS: QEMU remained active for the full 30-second WHPX launch test."
-        Write-Host "QEMU was then terminated intentionally."
-      }
+          $logFile = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test\qemu-whpx.log"
 
-      Write-Host ""
-      Write-Host "=== WHPX TEST FINISHED ==="
+          if (Test-Path $logFile) {
+            Write-Host ""
+            Write-Host "=== SAVED QEMU LOG ==="
+            Get-Content $logFile |
+              ForEach-Object {
+                Write-Host $_
+              }
+          }
 
-  - name: Inspect temporary VM disk
-    if: always()
-    shell: pwsh
-    run: |
-      Write-Host "=== TEMPORARY DISK INSPECTION ==="
+      - name: Cleanup temporary VM files
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "=== CLEANUP ==="
 
-      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
-      $disk = Join-Path $testDir "whpx-test.qcow2"
+          $testDir = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test"
 
-      if (Test-Path $disk) {
-        Write-Host "Temporary QCOW2 exists:"
-        Write-Host $disk
+          if (Test-Path $testDir) {
+            Remove-Item `
+              $testDir `
+              -Recurse `
+              -Force `
+              -ErrorAction SilentlyContinue
 
-        qemu-img info $disk
-      }
-      else {
-        Write-Host "Temporary QCOW2 was not found."
-      }
+            Write-Host "Temporary WHPX test files removed."
+          }
+          else {
+            Write-Host "Nothing to clean."
+          }
 
-  - name: Cleanup temporary VM files
-    if: always()
-    shell: pwsh
-    run: |
-      Write-Host "=== CLEANUP ==="
+          Write-Host ""
+          Write-Host "Real phone files were not modified."
 
-      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
+      - name: Final result
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "      WINDOWS 11 WHPX VM TEST COMPLETED"
+          Write-Host "=============================================="
+          Write-Host ""
 
-      if (Test-Path $testDir) {
-        Remove-Item `
-          $testDir `
-          -Recurse `
-          -Force `
-          -ErrorAction SilentlyContinue
+          Write-Host "Tested:"
+          Write-Host "1. Runner RAM and CPU"
+          Write-Host "2. Hardware virtualization information"
+          Write-Host "3. QEMU installation"
+          Write-Host "4. QEMU WHPX support"
+          Write-Host "5. Temporary QCOW2 creation"
+          Write-Host "6. Actual QEMU WHPX process startup"
+          Write-Host "7. WHPX process stability check"
+          Write-Host ""
 
-        Write-Host "Temporary WHPX test files removed."
-      }
-      else {
-        Write-Host "Nothing to clean."
-      }
+          Write-Host "IMPORTANT:"
+          Write-Host "- The phone Windows.qcow2 was NOT accessed."
+          Write-Host "- The phone Win11.iso was NOT accessed."
+          Write-Host "- No cloud storage was used."
+          Write-Host "- No persistent storage was modified."
+          Write-Host "- The temporary QCOW2 existed only inside this runner."
+          Write-Host ""
 
-      Write-Host ""
-      Write-Host "Real phone files were not modified."
+          Write-Host "Send the complete log from:"
+          Write-Host "1. RUNNER RESOURCES"
+          Write-Host "2. VIRTUALIZATION CHECK"
+          Write-Host "3. QEMU ACCELERATOR CHECK"
+          Write-Host "4. TEMPORARY VM DISK TEST"
+          Write-Host "5. ACTUAL WHPX VM TEST"
+          Write-Host "6. FINAL RESULT"
+          Write-Host ""
 
-  - name: Final result
-    if: always()
-    shell: pwsh
-    run: |
-      Write-Host ""
-      Write-Host "=============================================="
-      Write-Host "      WINDOWS 11 WHPX VM TEST COMPLETED"
-      Write-Host "=============================================="
-      Write-Host ""
-      Write-Host "Tested:"
-      Write-Host "1. Runner RAM and CPU"
-      Write-Host "2. Hardware virtualization information"
-      Write-Host "3. QEMU installation"
-      Write-Host "4. QEMU WHPX support"
-      Write-Host "5. Temporary QCOW2 creation"
-      Write-Host "6. Actual QEMU WHPX launch"
-      Write-Host "7. Automatic QEMU termination"
-      Write-Host "8. QEMU diagnostics"
-      Write-Host ""
-      Write-Host "IMPORTANT:"
-      Write-Host "- The phone Windows.qcow2 was NOT accessed."
-      Write-Host "- The phone Win11.iso was NOT accessed."
-      Write-Host "- No cloud storage was used."
-      Write-Host "- The temporary QCOW2 exists only inside this runner."
-      Write-Host ""
-      Write-Host "=============================================="
+          Write-Host "=============================================="
