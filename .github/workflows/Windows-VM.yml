@@ -1,7 +1,6 @@
 name: Windows 11 VM - WHPX TEST
 
-"on":
-workflow_dispatch: {}
+on: [workflow_dispatch]
 
 permissions:
 contents: read
@@ -12,7 +11,6 @@ runs-on: windows-latest
 timeout-minutes: 20
 
 steps:
-
   - name: Show runner resources
     shell: pwsh
     run: |
@@ -254,9 +252,7 @@ steps:
       Write-Host "=== QEMU STDOUT ==="
 
       if (Test-Path $stdoutFile) {
-        Get-Content `
-          $stdoutFile `
-          -ErrorAction SilentlyContinue |
+        Get-Content $stdoutFile -ErrorAction SilentlyContinue |
           ForEach-Object { Write-Host $_ }
       }
       else {
@@ -267,9 +263,7 @@ steps:
       Write-Host "=== QEMU STDERR ==="
 
       if (Test-Path $stderrFile) {
-        Get-Content `
-          $stderrFile `
-          -ErrorAction SilentlyContinue |
+        Get-Content $stderrFile -ErrorAction SilentlyContinue |
           ForEach-Object { Write-Host $_ }
       }
       else {
@@ -315,22 +309,13 @@ steps:
         Write-Host "Temporary QCOW2 was not found."
       }
 
-      $stdoutFile = Join-Path $testDir "qemu-stdout.log"
-      $stderrFile = Join-Path $testDir "qemu-stderr.log"
-
-      Write-Host ""
-      Write-Host "QEMU stdout log exists: $(Test-Path $stdoutFile)"
-      Write-Host "QEMU stderr log exists: $(Test-Path $stderrFile)"
-
   - name: Cleanup temporary VM files
     if: always()
     shell: pwsh
     run: |
       Write-Host "=== CLEANUP ==="
 
-      $testDir = Join-Path `
-        $env:RUNNER_TEMP `
-        "whpx-vm-test"
+      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
 
       if (Test-Path $testDir) {
         Remove-Item `
@@ -364,8 +349,8 @@ steps:
       Write-Host "4. QEMU WHPX support"
       Write-Host "5. Temporary QCOW2 creation"
       Write-Host "6. Actual QEMU WHPX launch"
-      Write-Host "7. QEMU timeout/termination"
-      Write-Host "8. QEMU stdout/stderr diagnostics"
+      Write-Host "7. Automatic QEMU termination"
+      Write-Host "8. QEMU diagnostics"
       Write-Host ""
       Write-Host "IMPORTANT:"
       Write-Host "- The phone Windows.qcow2 was NOT accessed."
