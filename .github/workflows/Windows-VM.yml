@@ -1,1256 +1,1255 @@
 name: Windows 11 VM - WHPX + NBD + Tailscale + RustDesk
 
 on:
-workflow_dispatch:
-inputs:
-ts_tailnet:
-description: "Tailscale tailnet"
-required: true
-type: string
+  workflow_dispatch:
+    inputs:
+      ts_tailnet:
+        description: "Tailscale tailnet"
+        required: true
+        type: string
 
-  ts_authkey:
-    description: "Tailscale Auth key"
-    required: true
-    type: string
+      ts_authkey:
+        description: "Tailscale Auth key"
+        required: true
+        type: string
 
-  ts_api_key:
-    description: "Tailscale API key (optional, only for cleanup)"
-    required: false
-    default: ""
-    type: string
+      ts_api_key:
+        description: "Tailscale API key (optional, only for cleanup)"
+        required: false
+        default: ""
+        type: string
 
-  phone_tailscale_ip:
-    description: "Tailscale IPv4 address of the phone running the NBD server"
-    required: true
-    default: "100.93.194.9"
-    type: string
+      phone_tailscale_ip:
+        description: "Tailscale IPv4 address of the phone running the NBD server"
+        required: true
+        default: "100.93.194.9"
+        type: string
 
-  nbd_port:
-    description: "NBD TCP port for Windows.qcow2"
-    required: false
-    default: "10809"
-    type: string
+      nbd_port:
+        description: "NBD TCP port for Windows.qcow2"
+        required: false
+        default: "10809"
+        type: string
 
-  iso_nbd_port:
-    description: "NBD TCP port for Win11.iso"
-    required: false
-    default: "10810"
-    type: string
+      iso_nbd_port:
+        description: "NBD TCP port for Win11.iso"
+        required: false
+        default: "10810"
+        type: string
 
-  nbd_export:
-    description: "NBD export name for Windows.qcow2 (leave empty for default)"
-    required: false
-    default: ""
-    type: string
+      nbd_export:
+        description: "NBD export name for Windows.qcow2 (leave empty for default)"
+        required: false
+        default: ""
+        type: string
 
-  iso_nbd_export:
-    description: "NBD export name for Win11.iso (leave empty for default)"
-    required: false
-    default: ""
-    type: string
+      iso_nbd_export:
+        description: "NBD export name for Win11.iso (leave empty for default)"
+        required: false
+        default: ""
+        type: string
 
-  rdp_user:
-    description: "RDP username"
-    required: false
-    default: "Yousif190"
-    type: string
+      rdp_user:
+        description: "RDP username"
+        required: false
+        default: "Yousif190"
+        type: string
 
-  runtime_minutes:
-    description: "Runtime in minutes (maximum 360)"
-    required: false
-    default: "360"
-    type: string
+      runtime_minutes:
+        description: "Runtime in minutes (maximum 360)"
+        required: false
+        default: "360"
+        type: string
 
-  vm_ram_mb:
-    description: "VM RAM in MB"
-    required: false
-    default: "16384"
-    type: string
+      vm_ram_mb:
+        description: "VM RAM in MB"
+        required: false
+        default: "16384"
+        type: string
 
-  vm_cpus:
-    description: "VM CPU threads"
-    required: false
-    default: "4"
-    type: string
+      vm_cpus:
+        description: "VM CPU threads"
+        required: false
+        default: "4"
+        type: string
 
-  nbd_readonly:
-    description: "NBD read-only mode (must be false for Windows disk)"
-    required: false
-    default: false
-    type: boolean
+      nbd_readonly:
+        description: "NBD read-only mode (must be false for Windows disk)"
+        required: false
+        default: false
+        type: boolean
 
-  cleanup_bullet_devices:
-    description: "Remove old bullet Tailscale devices"
-    required: false
-    default: false
-    type: boolean
+      cleanup_bullet_devices:
+        description: "Remove old bullet Tailscale devices"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
-contents: read
+  contents: read
 
 defaults:
-run:
-shell: pwsh
+  run:
+    shell: pwsh
 
 jobs:
-setup:
-runs-on: windows-latest
+  setup:
+    runs-on: windows-latest
 
-outputs:
-  runtime: ${{ steps.settings.outputs.runtime }}
-  cpus: ${{ steps.settings.outputs.cpus }}
-  ram: ${{ steps.settings.outputs.ram }}
-  nbd_port: ${{ steps.settings.outputs.nbd_port }}
-  iso_nbd_port: ${{ steps.settings.outputs.iso_nbd_port }}
+    outputs:
+      runtime: ${{ steps.settings.outputs.runtime }}
+      cpus: ${{ steps.settings.outputs.cpus }}
+      ram: ${{ steps.settings.outputs.ram }}
+      nbd_port: ${{ steps.settings.outputs.nbd_port }}
+      iso_nbd_port: ${{ steps.settings.outputs.iso_nbd_port }}
 
-steps:
-  - name: Validate VM settings
-    id: settings
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+    steps:
+      - name: Validate VM settings
+        id: settings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host "=============================================="
-      Write-Host "WINDOWS VM SETTINGS"
-      Write-Host "=============================================="
+          Write-Host "=============================================="
+          Write-Host "WINDOWS VM SETTINGS"
+          Write-Host "=============================================="
 
-      $runtimeRaw = "${{ inputs.runtime_minutes }}".Trim()
-      $cpusRaw = "${{ inputs.vm_cpus }}".Trim()
-      $ramRaw = "${{ inputs.vm_ram_mb }}".Trim()
-      $portRaw = "${{ inputs.nbd_port }}".Trim()
-      $isoPortRaw = "${{ inputs.iso_nbd_port }}".Trim()
+          $runtimeRaw = "${{ inputs.runtime_minutes }}".Trim()
+          $cpusRaw = "${{ inputs.vm_cpus }}".Trim()
+          $ramRaw = "${{ inputs.vm_ram_mb }}".Trim()
+          $portRaw = "${{ inputs.nbd_port }}".Trim()
+          $isoPortRaw = "${{ inputs.iso_nbd_port }}".Trim()
 
-      if ($runtimeRaw -match '^\d+$') {
-          $runtime = [int]$runtimeRaw
-      }
-      else {
-          $runtime = 360
-      }
+          if ($runtimeRaw -match '^\d+$') {
+              $runtime = [int]$runtimeRaw
+          }
+          else {
+              $runtime = 360
+          }
 
-      $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
+          $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
 
-      if ($cpusRaw -match '^\d+$') {
-          $cpus = [int]$cpusRaw
-      }
-      else {
-          $cpus = 4
-      }
+          if ($cpusRaw -match '^\d+$') {
+              $cpus = [int]$cpusRaw
+          }
+          else {
+              $cpus = 4
+          }
 
-      $cpus = [Math]::Max(1, [Math]::Min(16, $cpus))
+          $cpus = [Math]::Max(1, [Math]::Min(16, $cpus))
 
-      if ($ramRaw -match '^\d+$') {
-          $ram = [int]$ramRaw
-      }
-      else {
-          $ram = 16384
-      }
+          if ($ramRaw -match '^\d+$') {
+              $ram = [int]$ramRaw
+          }
+          else {
+              $ram = 16384
+          }
 
-      $ram = [Math]::Max(1024, [Math]::Min(16384, $ram))
+          $ram = [Math]::Max(1024, [Math]::Min(16384, $ram))
 
-      if ($portRaw -match '^\d+$') {
-          $port = [int]$portRaw
-      }
-      else {
-          $port = 10809
-      }
+          if ($portRaw -match '^\d+$') {
+              $port = [int]$portRaw
+          }
+          else {
+              $port = 10809
+          }
 
-      if ($port -lt 1 -or $port -gt 65535) {
-          throw "Invalid NBD port."
-      }
+          if ($port -lt 1 -or $port -gt 65535) {
+              throw "Invalid NBD port."
+          }
 
-      if ($isoPortRaw -match '^\d+$') {
-          $isoPort = [int]$isoPortRaw
-      }
-      else {
-          $isoPort = 10810
-      }
+          if ($isoPortRaw -match '^\d+$') {
+              $isoPort = [int]$isoPortRaw
+          }
+          else {
+              $isoPort = 10810
+          }
 
-      if ($isoPort -lt 1 -or $isoPort -gt 65535) {
-          throw "Invalid ISO NBD port."
-      }
+          if ($isoPort -lt 1 -or $isoPort -gt 65535) {
+              throw "Invalid ISO NBD port."
+          }
 
-      if ($port -eq $isoPort) {
-          throw "Windows disk NBD port and ISO NBD port must be different."
-      }
+          if ($port -eq $isoPort) {
+              throw "Windows disk NBD port and ISO NBD port must be different."
+          }
 
-      "runtime=$runtime" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-      "cpus=$cpus" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-      "ram=$ram" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-      "nbd_port=$port" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
-      "iso_nbd_port=$isoPort" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "runtime=$runtime" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "cpus=$cpus" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "ram=$ram" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "nbd_port=$port" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "iso_nbd_port=$isoPort" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-      Write-Host "Runtime: $runtime minutes"
-      Write-Host "CPU: $cpus"
-      Write-Host "RAM: $ram MB"
-      Write-Host "Windows disk NBD port: $port"
-      Write-Host "ISO NBD port: $isoPort"
-      Write-Host "Phone: ${{ inputs.phone_tailscale_ip }}"
-      Write-Host ""
-      Write-Host "Settings validated."
+          Write-Host "Runtime: $runtime minutes"
+          Write-Host "CPU: $cpus"
+          Write-Host "RAM: $ram MB"
+          Write-Host "Windows disk NBD port: $port"
+          Write-Host "ISO NBD port: $isoPort"
+          Write-Host "Phone: ${{ inputs.phone_tailscale_ip }}"
+          Write-Host ""
+          Write-Host "Settings validated."
 
-vm:
-needs: setup
-runs-on: windows-latest
-timeout-minutes: 370
+  vm:
+    needs: setup
+    runs-on: windows-latest
+    timeout-minutes: 370
 
-env:
-  RDP_USER: ${{ inputs.rdp_user }}
-  RDP_PASS: ${{ secrets.RDP_PASSWORD }}
+    env:
+      RDP_USER: ${{ inputs.rdp_user }}
+      RDP_PASS: ${{ secrets.RDP_PASSWORD }}
 
-  PHONE_TS_IP: ${{ inputs.phone_tailscale_ip }}
+      PHONE_TS_IP: ${{ inputs.phone_tailscale_ip }}
 
-  NBD_PORT: ${{ needs.setup.outputs.nbd_port }}
-  ISO_NBD_PORT: ${{ needs.setup.outputs.iso_nbd_port }}
+      NBD_PORT: ${{ needs.setup.outputs.nbd_port }}
+      ISO_NBD_PORT: ${{ needs.setup.outputs.iso_nbd_port }}
 
-  NBD_EXPORT: ${{ inputs.nbd_export }}
-  ISO_NBD_EXPORT: ${{ inputs.iso_nbd_export }}
+      NBD_EXPORT: ${{ inputs.nbd_export }}
+      ISO_NBD_EXPORT: ${{ inputs.iso_nbd_export }}
 
-  VM_RUNTIME: ${{ needs.setup.outputs.runtime }}
-  VM_CPUS: ${{ needs.setup.outputs.cpus }}
-  VM_RAM: ${{ needs.setup.outputs.ram }}
+      VM_RUNTIME: ${{ needs.setup.outputs.runtime }}
+      VM_CPUS: ${{ needs.setup.outputs.cpus }}
+      VM_RAM: ${{ needs.setup.outputs.ram }}
 
-steps:
+    steps:
+      - name: Runner resources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-  - name: Runner resources
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          Write-Host "=============================================="
+          Write-Host "RUNNER RESOURCES"
+          Write-Host "=============================================="
 
-      Write-Host "=============================================="
-      Write-Host "RUNNER RESOURCES"
-      Write-Host "=============================================="
+          $computer = Get-CimInstance Win32_ComputerSystem
+          $processor = Get-CimInstance Win32_Processor | Select-Object -First 1
 
-      $computer = Get-CimInstance Win32_ComputerSystem
-      $processor = Get-CimInstance Win32_Processor | Select-Object -First 1
+          Write-Host "Computer: $($computer.Manufacturer) $($computer.Model)"
+          Write-Host "Logical processors: $($computer.NumberOfLogicalProcessors)"
+          Write-Host "CPU: $($processor.Name)"
+          Write-Host "RAM GB: $([math]::Round($computer.TotalPhysicalMemory / 1GB, 2))"
 
-      Write-Host "Computer: $($computer.Manufacturer) $($computer.Model)"
-      Write-Host "Logical processors: $($computer.NumberOfLogicalProcessors)"
-      Write-Host "CPU: $($processor.Name)"
-      Write-Host "RAM GB: $([math]::Round($computer.TotalPhysicalMemory / 1GB, 2))"
+          Write-Host ""
+          Write-Host "Disks:"
 
-      Write-Host ""
-      Write-Host "Disks:"
+          Get-PSDrive -PSProvider FileSystem |
+            Format-Table Name, Used, Free
 
-      Get-PSDrive -PSProvider FileSystem |
-        Format-Table Name, Used, Free
+      - name: Check hardware virtualization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-  - name: Check hardware virtualization
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          Write-Host "=============================================="
+          Write-Host "HARDWARE VIRTUALIZATION CHECK"
+          Write-Host "=============================================="
 
-      Write-Host "=============================================="
-      Write-Host "HARDWARE VIRTUALIZATION CHECK"
-      Write-Host "=============================================="
+          Get-CimInstance Win32_Processor |
+            Select-Object `
+              Name,
+              NumberOfCores,
+              NumberOfLogicalProcessors,
+              VirtualizationFirmwareEnabled,
+              VMMonitorModeExtensions |
+            Format-List
 
-      Get-CimInstance Win32_Processor |
-        Select-Object `
-          Name,
-          NumberOfCores,
-          NumberOfLogicalProcessors,
-          VirtualizationFirmwareEnabled,
-          VMMonitorModeExtensions |
-        Format-List
+      - name: Install QEMU
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-  - name: Install QEMU
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          Write-Host "=============================================="
+          Write-Host "INSTALLING QEMU"
+          Write-Host "=============================================="
 
-      Write-Host "=============================================="
-      Write-Host "INSTALLING QEMU"
-      Write-Host "=============================================="
+          winget install `
+            --id SoftwareFreedomConservancy.QEMU `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
 
-      winget install `
-        --id SoftwareFreedomConservancy.QEMU `
-        --exact `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements
+          Start-Sleep -Seconds 5
 
-      Start-Sleep -Seconds 5
+          $qemuCommand = Get-Command qemu-system-x86_64.exe -ErrorAction SilentlyContinue
 
-      $qemuCommand = Get-Command qemu-system-x86_64.exe -ErrorAction SilentlyContinue
+          if (-not $qemuCommand) {
+              $candidates = @(
+                  "C:\Program Files\qemu",
+                  "C:\Program Files\QEMU",
+                  "$env:LOCALAPPDATA\Programs"
+              )
 
-      if (-not $qemuCommand) {
-          $candidates = @(
-              "C:\Program Files\qemu",
-              "C:\Program Files\QEMU",
-              "$env:LOCALAPPDATA\Programs"
-          )
+              foreach ($dir in $candidates) {
+                  if (Test-Path $dir) {
+                      $found = Get-ChildItem `
+                        -Path $dir `
+                        -Recurse `
+                        -Filter "qemu-system-x86_64.exe" `
+                        -ErrorAction SilentlyContinue |
+                        Select-Object -First 1
 
-          foreach ($dir in $candidates) {
-              if (Test-Path $dir) {
-                  $found = Get-ChildItem `
-                    -Path $dir `
-                    -Recurse `
-                    -Filter "qemu-system-x86_64.exe" `
-                    -ErrorAction SilentlyContinue |
-                    Select-Object -First 1
-
-                  if ($found) {
-                      $qemuCommand = $found
-                      break
+                      if ($found) {
+                          $qemuCommand = $found
+                          break
+                      }
                   }
               }
           }
-      }
 
-      if (-not $qemuCommand) {
-          throw "QEMU was not found after installation."
-      }
+          if (-not $qemuCommand) {
+              throw "QEMU was not found after installation."
+          }
 
-      $qemuPath = if ($qemuCommand.Path) {
-          $qemuCommand.Path
-      }
-      else {
-          $qemuCommand.FullName
-      }
+          $qemuPath = if ($qemuCommand.Path) {
+              $qemuCommand.Path
+          }
+          else {
+              $qemuCommand.FullName
+          }
 
-      $qemuDir = Split-Path $qemuPath -Parent
-      $qemuImg = Join-Path $qemuDir "qemu-img.exe"
+          $qemuDir = Split-Path $qemuPath -Parent
+          $qemuImg = Join-Path $qemuDir "qemu-img.exe"
 
-      $qemuDir |
-        Out-File $env:GITHUB_PATH -Append -Encoding utf8
+          $qemuDir |
+            Out-File $env:GITHUB_PATH -Append -Encoding utf8
 
-      "QEMU_EXE=$qemuPath" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "QEMU_EXE=$qemuPath" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      if (-not (Test-Path $qemuImg)) {
-          throw "qemu-img.exe was not found."
-      }
+          if (-not (Test-Path $qemuImg)) {
+              throw "qemu-img.exe was not found."
+          }
 
-      "QEMU_IMG=$qemuImg" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          "QEMU_IMG=$qemuImg" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      Write-Host "QEMU executable:"
-      Write-Host $qemuPath
+          Write-Host "QEMU executable:"
+          Write-Host $qemuPath
 
-      Write-Host ""
-      & $qemuPath --version
-
-      Write-Host ""
-      Write-Host "qemu-img:"
-      & $qemuImg --version
-
-  - name: Verify WHPX
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "WHPX CHECK"
-      Write-Host "=============================================="
-
-      $output = & "$env:QEMU_EXE" -accel help 2>&1 | Out-String
-
-      Write-Host $output
-
-      if ($output -match "(?im)^\s*whpx\s*$") {
           Write-Host ""
-          Write-Host "PASS: WHPX is available."
-      }
-      else {
-          throw "WHPX is not reported by this QEMU installation."
-      }
+          & $qemuPath --version
 
-  - name: Install Tailscale
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          Write-Host ""
+          Write-Host "qemu-img:"
+          & $qemuImg --version
 
-      Write-Host "=============================================="
-      Write-Host "INSTALLING TAILSCALE"
-      Write-Host "=============================================="
+      - name: Verify WHPX
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      winget install `
-        --id Tailscale.Tailscale `
-        --exact `
-        --silent `
-        --accept-package-agreements `
-        --accept-source-agreements
+          Write-Host "=============================================="
+          Write-Host "WHPX CHECK"
+          Write-Host "=============================================="
 
-      Start-Sleep -Seconds 8
+          $output = & "$env:QEMU_EXE" -accel help 2>&1 | Out-String
 
-      $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          Write-Host $output
 
-      if (-not (Test-Path $ts)) {
-          $ts = "C:\Program Files\Tailscale\tailscale.exe"
-      }
+          if ($output -match "(?im)^\s*whpx\s*$") {
+              Write-Host ""
+              Write-Host "PASS: WHPX is available."
+          }
+          else {
+              throw "WHPX is not reported by this QEMU installation."
+          }
 
-      if (-not (Test-Path $ts)) {
-          throw "Tailscale executable was not found."
-      }
+      - name: Install Tailscale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      "TAILSCALE_EXE=$ts" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "=============================================="
+          Write-Host "INSTALLING TAILSCALE"
+          Write-Host "=============================================="
 
-      Write-Host "Tailscale executable:"
-      Write-Host $ts
+          winget install `
+            --id Tailscale.Tailscale `
+            --exact `
+            --silent `
+            --accept-package-agreements `
+            --accept-source-agreements
 
-  - name: Connect runner to Tailscale
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          Start-Sleep -Seconds 8
 
-      Write-Host "=============================================="
-      Write-Host "CONNECTING RUNNER TO TAILSCALE"
-      Write-Host "=============================================="
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
 
-      & "$env:TAILSCALE_EXE" logout 2>$null |
-        Out-Null
+          if (-not (Test-Path $ts)) {
+              $ts = "C:\Program Files\Tailscale\tailscale.exe"
+          }
 
-      & "$env:TAILSCALE_EXE" up `
-        --authkey "${{ inputs.ts_authkey }}" `
-        --hostname "windows-vm-runner" `
-        --accept-dns=true `
-        --accept-routes=true
+          if (-not (Test-Path $ts)) {
+              throw "Tailscale executable was not found."
+          }
 
-      Start-Sleep -Seconds 5
+          "TAILSCALE_EXE=$ts" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      Write-Host ""
-      Write-Host "Tailscale status:"
-      & "$env:TAILSCALE_EXE" status
+          Write-Host "Tailscale executable:"
+          Write-Host $ts
 
-      $runnerIp = & "$env:TAILSCALE_EXE" ip -4 |
-        Select-Object -First 1
+      - name: Connect runner to Tailscale
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      if ([string]::IsNullOrWhiteSpace("$runnerIp")) {
-          throw "Runner did not receive a Tailscale IPv4 address."
-      }
+          Write-Host "=============================================="
+          Write-Host "CONNECTING RUNNER TO TAILSCALE"
+          Write-Host "=============================================="
 
-      Write-Host ""
-      Write-Host "Runner Tailscale IPv4:"
-      Write-Host $runnerIp
-
-      "RUNNER_TS_IP=$runnerIp" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-  - name: Check Windows disk NBD
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "WINDOWS QCOW2 NBD CONNECTIVITY"
-      Write-Host "=============================================="
-
-      $phone = "$env:PHONE_TS_IP".Trim()
-      $port = [int]$env:NBD_PORT
-
-      Write-Host "Phone: $phone"
-      Write-Host "Port: $port"
-
-      $result = Test-NetConnection `
-        -ComputerName $phone `
-        -Port $port `
-        -WarningAction SilentlyContinue
-
-      $result | Format-List
-
-      if (-not $result.TcpTestSucceeded) {
-          throw "Windows.qcow2 NBD endpoint is not reachable."
-      }
-
-      Write-Host ""
-      Write-Host "PASS: Windows.qcow2 NBD endpoint is reachable."
-
-  - name: Check ISO NBD
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "WIN11 ISO NBD CONNECTIVITY"
-      Write-Host "=============================================="
-
-      $phone = "$env:PHONE_TS_IP".Trim()
-      $port = [int]$env:ISO_NBD_PORT
-
-      Write-Host "Phone: $phone"
-      Write-Host "Port: $port"
-
-      $result = Test-NetConnection `
-        -ComputerName $phone `
-        -Port $port `
-        -WarningAction SilentlyContinue
-
-      $result | Format-List
-
-      if (-not $result.TcpTestSucceeded) {
-          throw "Win11.iso NBD endpoint is not reachable."
-      }
-
-      Write-Host ""
-      Write-Host "PASS: Win11.iso NBD endpoint is reachable."
-
-  - name: Build NBD URLs
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "BUILDING NBD URLS"
-      Write-Host "=============================================="
-
-      $hostIp = "$env:PHONE_TS_IP".Trim()
-
-      if ([string]::IsNullOrWhiteSpace($hostIp)) {
-          throw "PHONE_TS_IP is empty."
-      }
-
-      $diskPort = [int]$env:NBD_PORT
-      $isoPort = [int]$env:ISO_NBD_PORT
-
-      $diskExport = "$env:NBD_EXPORT".Trim()
-      $isoExport = "$env:ISO_NBD_EXPORT".Trim()
-
-      if ([string]::IsNullOrWhiteSpace($diskExport)) {
-          $diskUrl = "nbd://${hostIp}:${diskPort}"
-      }
-      else {
-          $encodedDiskExport =
-            [uri]::EscapeDataString($diskExport)
-
-          $diskUrl =
-            "nbd://${hostIp}:${diskPort}/${encodedDiskExport}"
-      }
-
-      if ([string]::IsNullOrWhiteSpace($isoExport)) {
-          $isoUrl = "nbd://${hostIp}:${isoPort}"
-      }
-      else {
-          $encodedIsoExport =
-            [uri]::EscapeDataString($isoExport)
-
-          $isoUrl =
-            "nbd://${hostIp}:${isoPort}/${encodedIsoExport}"
-      }
-
-      Write-Host ""
-      Write-Host "Windows disk NBD:"
-      Write-Host $diskUrl
-
-      Write-Host ""
-      Write-Host "Windows ISO NBD:"
-      Write-Host $isoUrl
-
-      "NBD_URL=$diskUrl" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-      "ISO_NBD_URL=$isoUrl" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
-
-  - name: Verify NBD disk with qemu-img
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "QCOW2 NBD IMAGE TEST"
-      Write-Host "=============================================="
-
-      Write-Host "NBD URL:"
-      Write-Host $env:NBD_URL
-
-      $infoOutput = & "$env:QEMU_IMG" info "$env:NBD_URL" 2>&1
-      $exitCode = $LASTEXITCODE
-
-      $infoOutput | ForEach-Object {
-          Write-Host $_
-      }
-
-      Write-Host ""
-      Write-Host "qemu-img exit code: $exitCode"
-
-      if ($exitCode -eq 0) {
-          Write-Host "PASS: QEMU can inspect the Windows disk."
-      }
-      else {
-          Write-Warning "qemu-img could not fully inspect the disk."
-          Write-Warning "The disk may be a new/empty QCOW2. QEMU startup will perform the final test."
-      }
-
-  - name: Verify ISO NBD with qemu-img
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "WIN11 ISO NBD IMAGE TEST"
-      Write-Host "=============================================="
-
-      Write-Host "ISO NBD URL:"
-      Write-Host $env:ISO_NBD_URL
-
-      $infoOutput = & "$env:QEMU_IMG" info `
-        --force-share `
-        "$env:ISO_NBD_URL" 2>&1
-
-      $exitCode = $LASTEXITCODE
-
-      $infoOutput | ForEach-Object {
-          Write-Host $_
-      }
-
-      Write-Host ""
-      Write-Host "qemu-img exit code: $exitCode"
-
-      if ($exitCode -eq 0) {
-          Write-Host "PASS: ISO NBD endpoint is readable."
-      }
-      else {
-          Write-Warning "qemu-img did not identify the ISO as a normal disk image."
-          Write-Warning "This is not necessarily fatal because the ISO is attached as a raw CD-ROM."
-      }
-
-  - name: Check NBD write mode
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "NBD ACCESS MODE"
-      Write-Host "=============================================="
-
-      $readonly = "${{ inputs.nbd_readonly }}"
-
-      Write-Host "Read-only requested: $readonly"
-
-      if ("$readonly" -eq "true") {
-          throw "The Windows.qcow2 NBD must be writable."
-      }
-
-      Write-Host ""
-      Write-Host "PASS: Writable Windows disk requested."
-      Write-Host ""
-      Write-Host "The phone-side Windows.qcow2 NBD server must allow writes."
-
-  - name: Configure Windows RDP
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
-
-      Write-Host "=============================================="
-      Write-Host "CONFIGURING RUNNER RDP"
-      Write-Host "=============================================="
-
-      $user = "$env:RDP_USER"
-      $pass = "$env:RDP_PASS"
-
-      if ([string]::IsNullOrWhiteSpace($pass)) {
-          throw "RDP_PASSWORD GitHub Secret is empty or missing."
-      }
-
-      $secure = ConvertTo-SecureString `
-        $pass `
-        -AsPlainText `
-        -Force
-
-      $existing = Get-LocalUser `
-        -Name $user `
-        -ErrorAction SilentlyContinue
-
-      if (-not $existing) {
-          New-LocalUser `
-            -Name $user `
-            -Password $secure `
-            -AccountNeverExpires `
-            -PasswordNeverExpires `
-            -ErrorAction Stop |
+          & "$env:TAILSCALE_EXE" logout 2>$null |
             Out-Null
-      }
-      else {
-          Set-LocalUser `
-            -Name $user `
-            -Password $secure `
-            -AccountNeverExpires `
-            -PasswordNeverExpires `
-            -ErrorAction Stop
 
-          Enable-LocalUser `
+          & "$env:TAILSCALE_EXE" up `
+            --authkey "${{ inputs.ts_authkey }}" `
+            --hostname "windows-vm-runner" `
+            --accept-dns=true `
+            --accept-routes=true
+
+          Start-Sleep -Seconds 5
+
+          Write-Host ""
+          Write-Host "Tailscale status:"
+          & "$env:TAILSCALE_EXE" status
+
+          $runnerIp = & "$env:TAILSCALE_EXE" ip -4 |
+            Select-Object -First 1
+
+          if ([string]::IsNullOrWhiteSpace("$runnerIp")) {
+              throw "Runner did not receive a Tailscale IPv4 address."
+          }
+
+          Write-Host ""
+          Write-Host "Runner Tailscale IPv4:"
+          Write-Host $runnerIp
+
+          "RUNNER_TS_IP=$runnerIp" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Check Windows disk NBD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=============================================="
+          Write-Host "WINDOWS QCOW2 NBD CONNECTIVITY"
+          Write-Host "=============================================="
+
+          $phone = "$env:PHONE_TS_IP".Trim()
+          $port = [int]$env:NBD_PORT
+
+          Write-Host "Phone: $phone"
+          Write-Host "Port: $port"
+
+          $result = Test-NetConnection `
+            -ComputerName $phone `
+            -Port $port `
+            -WarningAction SilentlyContinue
+
+          $result | Format-List
+
+          if (-not $result.TcpTestSucceeded) {
+              throw "Windows.qcow2 NBD endpoint is not reachable."
+          }
+
+          Write-Host ""
+          Write-Host "PASS: Windows.qcow2 NBD endpoint is reachable."
+
+      - name: Check ISO NBD
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=============================================="
+          Write-Host "WIN11 ISO NBD CONNECTIVITY"
+          Write-Host "=============================================="
+
+          $phone = "$env:PHONE_TS_IP".Trim()
+          $port = [int]$env:ISO_NBD_PORT
+
+          Write-Host "Phone: $phone"
+          Write-Host "Port: $port"
+
+          $result = Test-NetConnection `
+            -ComputerName $phone `
+            -Port $port `
+            -WarningAction SilentlyContinue
+
+          $result | Format-List
+
+          if (-not $result.TcpTestSucceeded) {
+              throw "Win11.iso NBD endpoint is not reachable."
+          }
+
+          Write-Host ""
+          Write-Host "PASS: Win11.iso NBD endpoint is reachable."
+
+      - name: Build NBD URLs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=============================================="
+          Write-Host "BUILDING NBD URLS"
+          Write-Host "=============================================="
+
+          $hostIp = "$env:PHONE_TS_IP".Trim()
+
+          if ([string]::IsNullOrWhiteSpace($hostIp)) {
+              throw "PHONE_TS_IP is empty."
+          }
+
+          $diskPort = [int]$env:NBD_PORT
+          $isoPort = [int]$env:ISO_NBD_PORT
+
+          $diskExport = "$env:NBD_EXPORT".Trim()
+          $isoExport = "$env:ISO_NBD_EXPORT".Trim()
+
+          if ([string]::IsNullOrWhiteSpace($diskExport)) {
+              $diskUrl = "nbd://${hostIp}:${diskPort}"
+          }
+          else {
+              $encodedDiskExport =
+                [uri]::EscapeDataString($diskExport)
+
+              $diskUrl =
+                "nbd://${hostIp}:${diskPort}/${encodedDiskExport}"
+          }
+
+          if ([string]::IsNullOrWhiteSpace($isoExport)) {
+              $isoUrl = "nbd://${hostIp}:${isoPort}"
+          }
+          else {
+              $encodedIsoExport =
+                [uri]::EscapeDataString($isoExport)
+
+              $isoUrl =
+                "nbd://${hostIp}:${isoPort}/${encodedIsoExport}"
+          }
+
+          Write-Host ""
+          Write-Host "Windows disk NBD:"
+          Write-Host $diskUrl
+
+          Write-Host ""
+          Write-Host "Windows ISO NBD:"
+          Write-Host $isoUrl
+
+          "NBD_URL=$diskUrl" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          "ISO_NBD_URL=$isoUrl" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify NBD disk with qemu-img
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "QCOW2 NBD IMAGE TEST"
+          Write-Host "=============================================="
+
+          Write-Host "NBD URL:"
+          Write-Host $env:NBD_URL
+
+          $infoOutput = & "$env:QEMU_IMG" info "$env:NBD_URL" 2>&1
+          $exitCode = $LASTEXITCODE
+
+          $infoOutput | ForEach-Object {
+              Write-Host $_
+          }
+
+          Write-Host ""
+          Write-Host "qemu-img exit code: $exitCode"
+
+          if ($exitCode -eq 0) {
+              Write-Host "PASS: QEMU can inspect the Windows disk."
+          }
+          else {
+              Write-Warning "qemu-img could not fully inspect the disk."
+              Write-Warning "The disk may be a new/empty QCOW2. QEMU startup will perform the final test."
+          }
+
+      - name: Verify ISO NBD with qemu-img
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "WIN11 ISO NBD IMAGE TEST"
+          Write-Host "=============================================="
+
+          Write-Host "ISO NBD URL:"
+          Write-Host $env:ISO_NBD_URL
+
+          $infoOutput = & "$env:QEMU_IMG" info `
+            --force-share `
+            "$env:ISO_NBD_URL" 2>&1
+
+          $exitCode = $LASTEXITCODE
+
+          $infoOutput | ForEach-Object {
+              Write-Host $_
+          }
+
+          Write-Host ""
+          Write-Host "qemu-img exit code: $exitCode"
+
+          if ($exitCode -eq 0) {
+              Write-Host "PASS: ISO NBD endpoint is readable."
+          }
+          else {
+              Write-Warning "qemu-img did not identify the ISO as a normal disk image."
+              Write-Warning "This is not necessarily fatal because the ISO is attached as a raw CD-ROM."
+          }
+
+      - name: Check NBD write mode
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=============================================="
+          Write-Host "NBD ACCESS MODE"
+          Write-Host "=============================================="
+
+          $readonly = "${{ inputs.nbd_readonly }}"
+
+          Write-Host "Read-only requested: $readonly"
+
+          if ("$readonly" -eq "true") {
+              throw "The Windows.qcow2 NBD must be writable."
+          }
+
+          Write-Host ""
+          Write-Host "PASS: Writable Windows disk requested."
+          Write-Host ""
+          Write-Host "The phone-side Windows.qcow2 NBD server must allow writes."
+
+      - name: Configure Windows RDP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "=============================================="
+          Write-Host "CONFIGURING RUNNER RDP"
+          Write-Host "=============================================="
+
+          $user = "$env:RDP_USER"
+          $pass = "$env:RDP_PASS"
+
+          if ([string]::IsNullOrWhiteSpace($pass)) {
+              throw "RDP_PASSWORD GitHub Secret is empty or missing."
+          }
+
+          $secure = ConvertTo-SecureString `
+            $pass `
+            -AsPlainText `
+            -Force
+
+          $existing = Get-LocalUser `
             -Name $user `
             -ErrorAction SilentlyContinue
-      }
 
-      Add-LocalGroupMember `
-        -Group "Administrators" `
-        -Member $user `
-        -ErrorAction SilentlyContinue
+          if (-not $existing) {
+              New-LocalUser `
+                -Name $user `
+                -Password $secure `
+                -AccountNeverExpires `
+                -PasswordNeverExpires `
+                -ErrorAction Stop |
+                Out-Null
+          }
+          else {
+              Set-LocalUser `
+                -Name $user `
+                -Password $secure `
+                -AccountNeverExpires `
+                -PasswordNeverExpires `
+                -ErrorAction Stop
 
-      Add-LocalGroupMember `
-        -Group "Remote Desktop Users" `
-        -Member $user `
-        -ErrorAction SilentlyContinue
-
-      Set-ItemProperty `
-        "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-        -Name "fDenyTSConnections" `
-        -Value 0
-
-      Enable-NetFirewallRule `
-        -DisplayGroup "Remote Desktop" `
-        -ErrorAction SilentlyContinue |
-        Out-Null
-
-      Write-Host "Runner RDP configuration completed."
-
-  - name: Install RustDesk
-    shell: pwsh
-    continue-on-error: true
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "INSTALLING RUSTDESK"
-      Write-Host "=============================================="
-
-      $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
-
-      if (-not (Test-Path $rdExe)) {
-          $installer = "$env:TEMP\rustdesk.msi"
-
-          try {
-              Invoke-WebRequest `
-                -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
-                -OutFile $installer `
-                -UseBasicParsing
-
-              Start-Process `
-                -FilePath "msiexec.exe" `
-                -ArgumentList @(
-                  "/i",
-                  "`"$installer`"",
-                  "/quiet",
-                  "/norestart"
-                ) `
-                -Wait
-
-              Remove-Item `
-                $installer `
-                -Force `
+              Enable-LocalUser `
+                -Name $user `
                 -ErrorAction SilentlyContinue
           }
-          catch {
-              Write-Warning (
-                "RustDesk installation warning: " +
-                $_.Exception.Message
-              )
-          }
-      }
 
-      if (Test-Path $rdExe) {
-          Write-Host "RustDesk installed."
-
-          Start-Process `
-            -FilePath $rdExe `
+          Add-LocalGroupMember `
+            -Group "Administrators" `
+            -Member $user `
             -ErrorAction SilentlyContinue
-      }
-      else {
-          Write-Warning "RustDesk executable was not found."
-      }
 
-  - name: Open remote access firewall
-    shell: pwsh
-    continue-on-error: true
-    run: |
-      $ErrorActionPreference = "Continue"
+          Add-LocalGroupMember `
+            -Group "Remote Desktop Users" `
+            -Member $user `
+            -ErrorAction SilentlyContinue
 
-      Write-Host "=============================================="
-      Write-Host "REMOTE ACCESS FIREWALL"
-      Write-Host "=============================================="
+          Set-ItemProperty `
+            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+            -Name "fDenyTSConnections" `
+            -Value 0
 
-      Enable-NetFirewallRule `
-        -DisplayGroup "Remote Desktop" `
-        -ErrorAction SilentlyContinue |
-        Out-Null
-
-      for ($p = 21115; $p -le 21119; $p++) {
-          $name = "Persistent-RDP-RustDesk-TCP-$p"
-
-          netsh advfirewall firewall delete rule `
-            name="$name" 2>$null |
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue |
             Out-Null
 
-          netsh advfirewall firewall add rule `
-            name="$name" `
-            dir=in `
-            action=allow `
-            protocol=TCP `
-            localport=$p 2>$null |
+          Write-Host "Runner RDP configuration completed."
+
+      - name: Install RustDesk
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "INSTALLING RUSTDESK"
+          Write-Host "=============================================="
+
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
+
+          if (-not (Test-Path $rdExe)) {
+              $installer = "$env:TEMP\rustdesk.msi"
+
+              try {
+                  Invoke-WebRequest `
+                    -Uri "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
+                    -OutFile $installer `
+                    -UseBasicParsing
+
+                  Start-Process `
+                    -FilePath "msiexec.exe" `
+                    -ArgumentList @(
+                      "/i",
+                      "`"$installer`"",
+                      "/quiet",
+                      "/norestart"
+                    ) `
+                    -Wait
+
+                  Remove-Item `
+                    $installer `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+              }
+              catch {
+                  Write-Warning (
+                    "RustDesk installation warning: " +
+                    $_.Exception.Message
+                  )
+              }
+          }
+
+          if (Test-Path $rdExe) {
+              Write-Host "RustDesk installed."
+
+              Start-Process `
+                -FilePath $rdExe `
+                -ErrorAction SilentlyContinue
+          }
+          else {
+              Write-Warning "RustDesk executable was not found."
+          }
+
+      - name: Open remote access firewall
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "REMOTE ACCESS FIREWALL"
+          Write-Host "=============================================="
+
+          Enable-NetFirewallRule `
+            -DisplayGroup "Remote Desktop" `
+            -ErrorAction SilentlyContinue |
             Out-Null
-      }
 
-      Write-Host "Firewall configuration completed."
+          for ($p = 21115; $p -le 21119; $p++) {
+              $name = "Persistent-RDP-RustDesk-TCP-$p"
 
-  - name: Final NBD preflight
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+              netsh advfirewall firewall delete rule `
+                name="$name" 2>$null |
+                Out-Null
 
-      Write-Host "=============================================="
-      Write-Host "FINAL NBD PREFLIGHT"
-      Write-Host "=============================================="
+              netsh advfirewall firewall add rule `
+                name="$name" `
+                dir=in `
+                action=allow `
+                protocol=TCP `
+                localport=$p 2>$null |
+                Out-Null
+          }
 
-      Write-Host ""
-      Write-Host "Windows disk:"
-      Write-Host $env:NBD_URL
+          Write-Host "Firewall configuration completed."
 
-      Write-Host ""
-      Write-Host "Windows ISO:"
-      Write-Host $env:ISO_NBD_URL
+      - name: Final NBD preflight
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Start-Sleep -Seconds 3
+          Write-Host "=============================================="
+          Write-Host "FINAL NBD PREFLIGHT"
+          Write-Host "=============================================="
 
-      $diskTest = Test-NetConnection `
-        -ComputerName $env:PHONE_TS_IP `
-        -Port ([int]$env:NBD_PORT) `
-        -WarningAction SilentlyContinue
+          Write-Host ""
+          Write-Host "Windows disk:"
+          Write-Host $env:NBD_URL
 
-      $isoTest = Test-NetConnection `
-        -ComputerName $env:PHONE_TS_IP `
-        -Port ([int]$env:ISO_NBD_PORT) `
-        -WarningAction SilentlyContinue
+          Write-Host ""
+          Write-Host "Windows ISO:"
+          Write-Host $env:ISO_NBD_URL
 
-      Write-Host ""
-      Write-Host "Windows disk connectivity:"
-      $diskTest | Format-List
+          Start-Sleep -Seconds 3
 
-      Write-Host ""
-      Write-Host "ISO connectivity:"
-      $isoTest | Format-List
+          $diskTest = Test-NetConnection `
+            -ComputerName $env:PHONE_TS_IP `
+            -Port ([int]$env:NBD_PORT) `
+            -WarningAction SilentlyContinue
 
-      if (-not $diskTest.TcpTestSucceeded) {
-          throw "Windows.qcow2 NBD endpoint is not reachable before QEMU startup."
-      }
+          $isoTest = Test-NetConnection `
+            -ComputerName $env:PHONE_TS_IP `
+            -Port ([int]$env:ISO_NBD_PORT) `
+            -WarningAction SilentlyContinue
 
-      if (-not $isoTest.TcpTestSucceeded) {
-          throw "Win11.iso NBD endpoint is not reachable before QEMU startup."
-      }
+          Write-Host ""
+          Write-Host "Windows disk connectivity:"
+          $diskTest | Format-List
 
-      Write-Host ""
-      Write-Host "PASS: Both NBD endpoints are ready."
+          Write-Host ""
+          Write-Host "ISO connectivity:"
+          $isoTest | Format-List
 
-  - name: Start Windows VM
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Stop"
+          if (-not $diskTest.TcpTestSucceeded) {
+              throw "Windows.qcow2 NBD endpoint is not reachable before QEMU startup."
+          }
 
-      Write-Host "=============================================="
-      Write-Host "STARTING WINDOWS 11 VM"
-      Write-Host "=============================================="
+          if (-not $isoTest.TcpTestSucceeded) {
+              throw "Win11.iso NBD endpoint is not reachable before QEMU startup."
+          }
 
-      Write-Host ""
-      Write-Host "Windows disk:"
-      Write-Host $env:NBD_URL
+          Write-Host ""
+          Write-Host "PASS: Both NBD endpoints are ready."
 
-      Write-Host ""
-      Write-Host "Windows ISO:"
-      Write-Host $env:ISO_NBD_URL
+      - name: Start Windows VM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
 
-      Write-Host ""
-      Write-Host "CPU:"
-      Write-Host $env:VM_CPUS
+          Write-Host "=============================================="
+          Write-Host "STARTING WINDOWS 11 VM"
+          Write-Host "=============================================="
 
-      Write-Host ""
-      Write-Host "RAM:"
-      Write-Host "$env:VM_RAM MB"
+          Write-Host ""
+          Write-Host "Windows disk:"
+          Write-Host $env:NBD_URL
 
-      $qemuLog = Join-Path $env:RUNNER_TEMP "qemu.log"
-      $qemuStdout = Join-Path $env:RUNNER_TEMP "qemu.stdout.log"
-      $qemuStderr = Join-Path $env:RUNNER_TEMP "qemu.stderr.log"
+          Write-Host ""
+          Write-Host "Windows ISO:"
+          Write-Host $env:ISO_NBD_URL
 
-      Remove-Item `
-        $qemuLog,
-        $qemuStdout,
-        $qemuStderr `
-        -Force `
-        -ErrorAction SilentlyContinue
+          Write-Host ""
+          Write-Host "CPU:"
+          Write-Host $env:VM_CPUS
 
-      "QEMU_LOG=$qemuLog" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ""
+          Write-Host "RAM:"
+          Write-Host "$env:VM_RAM MB"
 
-      "QEMU_STDOUT_LOG=$qemuStdout" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $qemuLog = Join-Path $env:RUNNER_TEMP "qemu.log"
+          $qemuStdout = Join-Path $env:RUNNER_TEMP "qemu.stdout.log"
+          $qemuStderr = Join-Path $env:RUNNER_TEMP "qemu.stderr.log"
 
-      "QEMU_STDERR_LOG=$qemuStderr" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          Remove-Item `
+            $qemuLog,
+            $qemuStdout,
+            $qemuStderr `
+            -Force `
+            -ErrorAction SilentlyContinue
 
-      $diskSpec =
-        "file=$env:NBD_URL,format=qcow2,if=virtio,cache=none,aio=threads,readonly=off"
+          "QEMU_LOG=$qemuLog" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      $isoSpec =
-        "file=$env:ISO_NBD_URL,format=raw,media=cdrom,readonly=on"
+          "QEMU_STDOUT_LOG=$qemuStdout" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-      $qemuArgs = @(
-          "-accel", "whpx",
-          "-machine", "q35",
-          "-cpu", "max",
-          "-smp", "$env:VM_CPUS",
-          "-m", "$env:VM_RAM",
+          "QEMU_STDERR_LOG=$qemuStderr" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
-          "-drive", $diskSpec,
-          "-drive", $isoSpec,
+          $diskSpec =
+            "file=$env:NBD_URL,format=qcow2,if=virtio,cache=none,aio=threads,readonly=off"
 
-          "-boot", "order=dc",
+          $isoSpec =
+            "file=$env:ISO_NBD_URL,format=raw,media=cdrom,readonly=on"
 
-          "-device", "virtio-balloon",
+          $qemuArgs = @(
+              "-accel", "whpx",
+              "-machine", "q35",
+              "-cpu", "max",
+              "-smp", "$env:VM_CPUS",
+              "-m", "$env:VM_RAM",
 
-          "-netdev", "user,id=net0",
-          "-device", "virtio-net-pci,netdev=net0",
+              "-drive", $diskSpec,
+              "-drive", $isoSpec,
 
-          "-display", "none",
-          "-monitor", "none",
-          "-serial", "none",
+              "-boot", "order=dc",
 
-          "-D", "$qemuLog",
-          "-d", "guest_errors"
-      )
+              "-device", "virtio-balloon",
 
-      Write-Host ""
-      Write-Host "QEMU arguments:"
-      $qemuArgs | ForEach-Object {
-          Write-Host "  $_"
-      }
+              "-netdev", "user,id=net0",
+              "-device", "virtio-net-pci,netdev=net0",
 
-      Write-Host ""
-      Write-Host "Launching QEMU..."
+              "-display", "none",
+              "-monitor", "none",
+              "-serial", "none",
 
-      $process = Start-Process `
-        -FilePath "$env:QEMU_EXE" `
-        -ArgumentList $qemuArgs `
-        -PassThru `
-        -RedirectStandardOutput $qemuStdout `
-        -RedirectStandardError $qemuStderr `
-        -WindowStyle Hidden
+              "-D", "$qemuLog",
+              "-d", "guest_errors"
+          )
 
-      if (-not $process) {
-          throw "Failed to create the QEMU process."
-      }
+          Write-Host ""
+          Write-Host "QEMU arguments:"
+          $qemuArgs | ForEach-Object {
+              Write-Host "  $_"
+          }
 
-      $processId = $process.Id
+          Write-Host ""
+          Write-Host "Launching QEMU..."
 
-      "QEMU_PID=$processId" |
-        Out-File $env:GITHUB_ENV -Append -Encoding utf8
+          $process = Start-Process `
+            -FilePath "$env:QEMU_EXE" `
+            -ArgumentList $qemuArgs `
+            -PassThru `
+            -RedirectStandardOutput $qemuStdout `
+            -RedirectStandardError $qemuStderr `
+            -WindowStyle Hidden
 
-      Write-Host ""
-      Write-Host "QEMU PID: $processId"
+          if (-not $process) {
+              throw "Failed to create the QEMU process."
+          }
 
-      Write-Host ""
-      Write-Host "Waiting for QEMU initialization..."
+          $processId = $process.Id
 
-      for ($i = 1; $i -le 12; $i++) {
-          Start-Sleep -Seconds 5
+          "QEMU_PID=$processId" |
+            Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+          Write-Host ""
+          Write-Host "QEMU PID: $processId"
+
+          Write-Host ""
+          Write-Host "Waiting for QEMU initialization..."
+
+          for ($i = 1; $i -le 12; $i++) {
+              Start-Sleep -Seconds 5
+              $process.Refresh()
+
+              if ($process.HasExited) {
+                  Write-Host ""
+                  Write-Host "=============================================="
+                  Write-Host "QEMU EXITED DURING STARTUP"
+                  Write-Host "=============================================="
+
+                  Write-Host ""
+                  Write-Host "Exit code:"
+                  Write-Host $process.ExitCode
+
+                  if (Test-Path $qemuStderr) {
+                      Write-Host ""
+                      Write-Host "QEMU STDERR:"
+                      Get-Content $qemuStderr -Tail 300
+                  }
+
+                  if (Test-Path $qemuLog) {
+                      Write-Host ""
+                      Write-Host "QEMU INTERNAL LOG:"
+                      Get-Content $qemuLog -Tail 500
+                  }
+
+                  throw "QEMU exited during startup."
+              }
+
+              Write-Host "QEMU startup check $i/12: process is still running."
+          }
+
           $process.Refresh()
 
           if ($process.HasExited) {
-              Write-Host ""
-              Write-Host "=============================================="
-              Write-Host "QEMU EXITED DURING STARTUP"
-              Write-Host "=============================================="
-
-              Write-Host ""
-              Write-Host "Exit code:"
-              Write-Host $process.ExitCode
-
-              if (Test-Path $qemuStderr) {
-                  Write-Host ""
-                  Write-Host "QEMU STDERR:"
-                  Get-Content $qemuStderr -Tail 300
-              }
-
-              if (Test-Path $qemuLog) {
-                  Write-Host ""
-                  Write-Host "QEMU INTERNAL LOG:"
-                  Get-Content $qemuLog -Tail 500
-              }
-
-              throw "QEMU exited during startup."
+              throw "QEMU exited after the startup checks."
           }
-
-          Write-Host "QEMU startup check $i/12: process is still running."
-      }
-
-      $process.Refresh()
-
-      if ($process.HasExited) {
-          throw "QEMU exited after the startup checks."
-      }
-
-      Write-Host ""
-      Write-Host "=============================================="
-      Write-Host "PASS: QEMU IS RUNNING"
-      Write-Host "=============================================="
-
-      Write-Host ""
-      Write-Host "The VM is now running."
-      Write-Host "The keep-alive runtime will remain active for the configured duration."
-
-  - name: Keep Windows VM alive
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "WINDOWS VM KEEP-ALIVE"
-      Write-Host "=============================================="
-
-      $runtime = [int]$env:VM_RUNTIME
-      $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
-
-      $start = Get-Date
-      $end = $start.AddMinutes($runtime)
-
-      Write-Host "VM runtime: $runtime minutes"
-      Write-Host "Started: $($start.ToString('yyyy-MM-dd HH:mm:ss'))"
-      Write-Host "Scheduled end: $($end.ToString('yyyy-MM-dd HH:mm:ss'))"
-      Write-Host ""
-      Write-Host "KEEP-ALIVE STARTED."
-
-      $lastWarning = $false
-
-      while ((Get-Date) -lt $end) {
-
-          $now = Get-Date
-          $remainingSeconds = [Math]::Max(
-              0,
-              ($end - $now).TotalSeconds
-          )
-
-          $remainingMinutes = $remainingSeconds / 60
-
-          $qemu = $null
-
-          if ($env:QEMU_PID) {
-              $qemu = Get-Process `
-                -Id ([int]$env:QEMU_PID) `
-                -ErrorAction SilentlyContinue
-          }
-
-          if ($qemu) {
-
-              $lastWarning = $false
-
-              Write-Host (
-                "VM KEEP-ALIVE | " +
-                "QEMU PID=" +
-                $env:QEMU_PID +
-                " | Remaining=" +
-                ([math]::Round($remainingMinutes, 1)) +
-                "m | " +
-                (Get-Date).ToString("HH:mm:ss")
-              )
-
-          }
-          else {
-
-              if (-not $lastWarning) {
-                  Write-Warning "QEMU process is not currently detected."
-                  Write-Warning "The workflow keep-alive will continue until the configured end time."
-                  $lastWarning = $true
-              }
-
-              if ($env:QEMU_STDERR_LOG -and
-                  (Test-Path $env:QEMU_STDERR_LOG)) {
-
-                  Write-Host ""
-                  Write-Host "Latest QEMU STDERR:"
-                  Get-Content `
-                    $env:QEMU_STDERR_LOG `
-                    -Tail 40 `
-                    -ErrorAction SilentlyContinue
-              }
-          }
-
-          # Keep this step alive continuously.
-          # This prevents the workflow from reaching the cleanup
-          # steps before the configured runtime expires.
-          $sleepSeconds = [Math]::Min(60, [Math]::Max(1, [int]$remainingSeconds))
-
-          Start-Sleep -Seconds $sleepSeconds
-      }
-
-      Write-Host ""
-      Write-Host "=============================================="
-      Write-Host "KEEP-ALIVE PERIOD FINISHED"
-      Write-Host "=============================================="
-
-      Write-Host ""
-      Write-Host "The configured VM runtime has elapsed."
-      Write-Host "QEMU will now be stopped by the normal cleanup step."
-
-  - name: Stop QEMU safely
-    if: always()
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "STOPPING WINDOWS VM"
-      Write-Host "=============================================="
-
-      if ($env:QEMU_PID) {
-
-          $process = Get-Process `
-            -Id ([int]$env:QEMU_PID) `
-            -ErrorAction SilentlyContinue
-
-          if ($process) {
-
-              Write-Host "Stopping QEMU PID $env:QEMU_PID"
-
-              Stop-Process `
-                -Id ([int]$env:QEMU_PID) `
-                -Force `
-                -ErrorAction SilentlyContinue
-
-              Start-Sleep -Seconds 3
-
-              $stillRunning = Get-Process `
-                -Id ([int]$env:QEMU_PID) `
-                -ErrorAction SilentlyContinue
-
-              if ($stillRunning) {
-                  Write-Warning "QEMU is still running after PID stop attempt."
-              }
-              else {
-                  Write-Host "QEMU stopped successfully."
-              }
-
-          }
-          else {
-              Write-Host "QEMU process already stopped."
-          }
-      }
-      else {
-          Write-Host "QEMU PID is not available."
-      }
-
-      Write-Host ""
-      Write-Host "QEMU shutdown completed."
-
-  - name: Upload QEMU diagnostics
-    if: always()
-    uses: actions/upload-artifact@v4
-    with:
-      name: qemu-diagnostics
-      path: |
-        ${{ runner.temp }}/qemu.log
-        ${{ runner.temp }}/qemu.stdout.log
-        ${{ runner.temp }}/qemu.stderr.log
-      if-no-files-found: ignore
-      retention-days: 3
-
-  - name: Tailscale final status
-    if: always()
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
-
-      Write-Host "=============================================="
-      Write-Host "FINAL TAILSCALE STATUS"
-      Write-Host "=============================================="
-
-      if ($env:TAILSCALE_EXE -and (Test-Path $env:TAILSCALE_EXE)) {
-
-          & "$env:TAILSCALE_EXE" status
 
           Write-Host ""
-          Write-Host "Runner IPv4:"
+          Write-Host "=============================================="
+          Write-Host "PASS: QEMU IS RUNNING"
+          Write-Host "=============================================="
 
-          & "$env:TAILSCALE_EXE" ip -4
-      }
+          Write-Host ""
+          Write-Host "The VM is now running."
+          Write-Host "The keep-alive runtime will remain active for the configured duration."
 
-  - name: Final diagnostics
-    if: always()
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
+      - name: Keep Windows VM alive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
 
-      Write-Host ""
-      Write-Host "=============================================="
-      Write-Host "WINDOWS VM FINAL DIAGNOSTICS"
-      Write-Host "=============================================="
+          Write-Host "=============================================="
+          Write-Host "WINDOWS VM KEEP-ALIVE"
+          Write-Host "=============================================="
 
-      Write-Host ""
-      Write-Host "QEMU:"
-      Write-Host $env:QEMU_EXE
+          $runtime = [int]$env:VM_RUNTIME
+          $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
 
-      Write-Host ""
-      Write-Host "WHPX:"
+          $start = Get-Date
+          $end = $start.AddMinutes($runtime)
 
-      try {
-          & "$env:QEMU_EXE" -accel help 2>&1
-      }
-      catch {
-      }
+          Write-Host "VM runtime: $runtime minutes"
+          Write-Host "Started: $($start.ToString('yyyy-MM-dd HH:mm:ss'))"
+          Write-Host "Scheduled end: $($end.ToString('yyyy-MM-dd HH:mm:ss'))"
+          Write-Host ""
+          Write-Host "KEEP-ALIVE STARTED."
 
-      Write-Host ""
-      Write-Host "QEMU PID:"
-      Write-Host $env:QEMU_PID
+          $lastWarning = $false
 
-      Write-Host ""
-      Write-Host "QEMU log:"
-      Write-Host $env:QEMU_LOG
+          while ((Get-Date) -lt $end) {
 
-      Write-Host ""
-      Write-Host "Phone Tailscale IP:"
-      Write-Host $env:PHONE_TS_IP
+              $now = Get-Date
+              $remainingSeconds = [Math]::Max(
+                  0,
+                  ($end - $now).TotalSeconds
+              )
 
-      Write-Host ""
-      Write-Host "Windows disk NBD port:"
-      Write-Host $env:NBD_PORT
+              $remainingMinutes = $remainingSeconds / 60
 
-      Write-Host ""
-      Write-Host "ISO NBD port:"
-      Write-Host $env:ISO_NBD_PORT
+              $qemu = $null
 
-      Write-Host ""
-      Write-Host "Windows disk NBD URL:"
-      Write-Host $env:NBD_URL
+              if ($env:QEMU_PID) {
+                  $qemu = Get-Process `
+                    -Id ([int]$env:QEMU_PID) `
+                    -ErrorAction SilentlyContinue
+              }
 
-      Write-Host ""
-      Write-Host "ISO NBD URL:"
-      Write-Host $env:ISO_NBD_URL
+              if ($qemu) {
 
-      Write-Host ""
-      Write-Host "Windows disk connectivity:"
+                  $lastWarning = $false
 
-      Test-NetConnection `
-        -ComputerName $env:PHONE_TS_IP `
-        -Port ([int]$env:NBD_PORT) `
-        -WarningAction SilentlyContinue |
-        Format-List
+                  Write-Host (
+                    "VM KEEP-ALIVE | " +
+                    "QEMU PID=" +
+                    $env:QEMU_PID +
+                    " | Remaining=" +
+                    ([math]::Round($remainingMinutes, 1)) +
+                    "m | " +
+                    (Get-Date).ToString("HH:mm:ss")
+                  )
 
-      Write-Host ""
-      Write-Host "ISO connectivity:"
+              }
+              else {
 
-      Test-NetConnection `
-        -ComputerName $env:PHONE_TS_IP `
-        -Port ([int]$env:ISO_NBD_PORT) `
-        -WarningAction SilentlyContinue |
-        Format-List
+                  if (-not $lastWarning) {
+                      Write-Warning "QEMU process is not currently detected."
+                      Write-Warning "The workflow keep-alive will continue until the configured end time."
+                      $lastWarning = $true
+                  }
 
-      Write-Host ""
-      Write-Host "=============================================="
-      Write-Host "END"
-      Write-Host "=============================================="
+                  if ($env:QEMU_STDERR_LOG -and
+                      (Test-Path $env:QEMU_STDERR_LOG)) {
 
-  - name: Final cleanup
-    if: always()
-    shell: pwsh
-    run: |
-      $ErrorActionPreference = "Continue"
+                      Write-Host ""
+                      Write-Host "Latest QEMU STDERR:"
+                      Get-Content `
+                        $env:QEMU_STDERR_LOG `
+                        -Tail 40 `
+                        -ErrorAction SilentlyContinue
+                  }
+              }
 
-      Write-Host "=============================================="
-      Write-Host "FINAL CLEANUP"
-      Write-Host "=============================================="
+              $sleepSeconds = [Math]::Min(
+                  60,
+                  [Math]::Max(1, [int]$remainingSeconds)
+              )
 
-      Get-Process `
-        -Name "qemu-system-x86_64" `
-        -ErrorAction SilentlyContinue |
-        Stop-Process `
-          -Force `
-          -ErrorAction SilentlyContinue
+              Start-Sleep -Seconds $sleepSeconds
+          }
 
-      Write-Host "QEMU cleanup completed."
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "KEEP-ALIVE PERIOD FINISHED"
+          Write-Host "=============================================="
+
+          Write-Host ""
+          Write-Host "The configured VM runtime has elapsed."
+          Write-Host "QEMU will now be stopped by the normal cleanup step."
+
+      - name: Stop QEMU safely
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "STOPPING WINDOWS VM"
+          Write-Host "=============================================="
+
+          if ($env:QEMU_PID) {
+
+              $process = Get-Process `
+                -Id ([int]$env:QEMU_PID) `
+                -ErrorAction SilentlyContinue
+
+              if ($process) {
+
+                  Write-Host "Stopping QEMU PID $env:QEMU_PID"
+
+                  Stop-Process `
+                    -Id ([int]$env:QEMU_PID) `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                  Start-Sleep -Seconds 3
+
+                  $stillRunning = Get-Process `
+                    -Id ([int]$env:QEMU_PID) `
+                    -ErrorAction SilentlyContinue
+
+                  if ($stillRunning) {
+                      Write-Warning "QEMU is still running after PID stop attempt."
+                  }
+                  else {
+                      Write-Host "QEMU stopped successfully."
+                  }
+
+              }
+              else {
+                  Write-Host "QEMU process already stopped."
+              }
+          }
+          else {
+              Write-Host "QEMU PID is not available."
+          }
+
+          Write-Host ""
+          Write-Host "QEMU shutdown completed."
+
+      - name: Upload QEMU diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-diagnostics
+          path: |
+            ${{ runner.temp }}/qemu.log
+            ${{ runner.temp }}/qemu.stdout.log
+            ${{ runner.temp }}/qemu.stderr.log
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Tailscale final status
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "FINAL TAILSCALE STATUS"
+          Write-Host "=============================================="
+
+          if ($env:TAILSCALE_EXE -and (Test-Path $env:TAILSCALE_EXE)) {
+
+              & "$env:TAILSCALE_EXE" status
+
+              Write-Host ""
+              Write-Host "Runner IPv4:"
+
+              & "$env:TAILSCALE_EXE" ip -4
+          }
+
+      - name: Final diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "WINDOWS VM FINAL DIAGNOSTICS"
+          Write-Host "=============================================="
+
+          Write-Host ""
+          Write-Host "QEMU:"
+          Write-Host $env:QEMU_EXE
+
+          Write-Host ""
+          Write-Host "WHPX:"
+
+          try {
+              & "$env:QEMU_EXE" -accel help 2>&1
+          }
+          catch {
+          }
+
+          Write-Host ""
+          Write-Host "QEMU PID:"
+          Write-Host $env:QEMU_PID
+
+          Write-Host ""
+          Write-Host "QEMU log:"
+          Write-Host $env:QEMU_LOG
+
+          Write-Host ""
+          Write-Host "Phone Tailscale IP:"
+          Write-Host $env:PHONE_TS_IP
+
+          Write-Host ""
+          Write-Host "Windows disk NBD port:"
+          Write-Host $env:NBD_PORT
+
+          Write-Host ""
+          Write-Host "ISO NBD port:"
+          Write-Host $env:ISO_NBD_PORT
+
+          Write-Host ""
+          Write-Host "Windows disk NBD URL:"
+          Write-Host $env:NBD_URL
+
+          Write-Host ""
+          Write-Host "ISO NBD URL:"
+          Write-Host $env:ISO_NBD_URL
+
+          Write-Host ""
+          Write-Host "Windows disk connectivity:"
+
+          Test-NetConnection `
+            -ComputerName $env:PHONE_TS_IP `
+            -Port ([int]$env:NBD_PORT) `
+            -WarningAction SilentlyContinue |
+            Format-List
+
+          Write-Host ""
+          Write-Host "ISO connectivity:"
+
+          Test-NetConnection `
+            -ComputerName $env:PHONE_TS_IP `
+            -Port ([int]$env:ISO_NBD_PORT) `
+            -WarningAction SilentlyContinue |
+            Format-List
+
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "END"
+          Write-Host "=============================================="
+
+      - name: Final cleanup
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          Write-Host "=============================================="
+          Write-Host "FINAL CLEANUP"
+          Write-Host "=============================================="
+
+          Get-Process `
+            -Name "qemu-system-x86_64" `
+            -ErrorAction SilentlyContinue |
+            Stop-Process `
+              -Force `
+              -ErrorAction SilentlyContinue
+
+          Write-Host "QEMU cleanup completed."
