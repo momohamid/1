@@ -1,104 +1,193 @@
 name: Windows 11 VM - TEST
 
 on:
-  workflow_dispatch:
+workflow_dispatch:
 
 permissions:
-  contents: read
+contents: read
 
 jobs:
-  vm-test:
-    runs-on: windows-latest
-    timeout-minutes: 20
+vm-test:
+runs-on: windows-latest
+timeout-minutes: 20
 
-    steps:
+steps:
 
-      - name: Show runner resources
-        shell: pwsh
-        run: |
-          Write-Host "=== RUNNER ==="
-          Get-CimInstance Win32_ComputerSystem |
-            Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory |
-            Format-List
+  - name: Show runner resources
+    shell: pwsh
+    run: |
+      Write-Host "=== RUNNER ==="
+      Get-CimInstance Win32_ComputerSystem |
+        Select-Object NumberOfLogicalProcessors, TotalPhysicalMemory |
+        Format-List
 
-          Write-Host "=== DISKS ==="
-          Get-PSDrive -PSProvider FileSystem |
-            Format-Table Name, Used, Free
+      Write-Host "=== DISKS ==="
+      Get-PSDrive -PSProvider FileSystem |
+        Format-Table Name, Used, Free
 
-      - name: Check virtualization
-        shell: pwsh
-        run: |
-          Write-Host "=== VIRTUALIZATION CHECK ==="
+  - name: Check virtualization
+    shell: pwsh
+    run: |
+      Write-Host "=== VIRTUALIZATION CHECK ==="
 
-          Get-CimInstance Win32_Processor |
-            Select-Object Name,
-              NumberOfCores,
-              NumberOfLogicalProcessors,
-              VirtualizationFirmwareEnabled,
-              VMMonitorModeExtensions |
-            Format-List
+      Get-CimInstance Win32_Processor |
+        Select-Object Name,
+          NumberOfCores,
+          NumberOfLogicalProcessors,
+          VirtualizationFirmwareEnabled,
+          VMMonitorModeExtensions |
+        Format-List
 
-      - name: Install QEMU
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
+  - name: Install QEMU
+    shell: pwsh
+    run: |
+      $ErrorActionPreference = "Stop"
 
-          winget install `
-            --id SoftwareFreedomConservancy.QEMU `
-            --exact `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements
+      winget install `
+        --id SoftwareFreedomConservancy.QEMU `
+        --exact `
+        --silent `
+        --accept-package-agreements `
+        --accept-source-agreements
 
-          $qemu = Get-ChildItem `
-            "C:\Program Files\qemu" `
-            -Filter "qemu-system-x86_64.exe" `
-            -Recurse `
-            -ErrorAction SilentlyContinue |
-            Select-Object -First 1
+      $qemu = Get-ChildItem `
+        "C:\Program Files\qemu" `
+        -Filter "qemu-system-x86_64.exe" `
+        -Recurse `
+        -ErrorAction SilentlyContinue |
+        Select-Object -First 1
 
-          if (-not $qemu) {
-            throw "QEMU was not found."
-          }
+      if (-not $qemu) {
+        throw "QEMU was not found."
+      }
 
-          $qemu.Directory.FullName |
-            Out-File `
-              $env:GITHUB_PATH `
-              -Append `
-              -Encoding utf8
+      $qemu.Directory.FullName |
+        Out-File `
+          $env:GITHUB_PATH `
+          -Append `
+          -Encoding utf8
 
-          Write-Host "QEMU:"
-          & $qemu.FullName --version
+      Write-Host "QEMU:"
+      & $qemu.FullName --version
 
-      - name: Check QEMU acceleration
-        shell: pwsh
-        run: |
-          Write-Host "=== QEMU ACCELERATION TEST ==="
+  - name: Check QEMU acceleration
+    shell: pwsh
+    run: |
+      Write-Host "=== QEMU ACCELERATION TEST ==="
 
-          qemu-system-x86_64 `
-            -accel help
+      qemu-system-x86_64 `
+        -accel help
 
-      - name: Check ISO and QCOW2 availability
-        shell: pwsh
-        run: |
-          Write-Host "The following paths are PHONE paths:"
-          Write-Host "/storage/emulated/0/myemulator/Win11.iso"
-          Write-Host "/storage/emulated/0/myemulator/Windows.qcow2"
+  - name: QEMU WHPX Boot Test
+    shell: pwsh
+    run: |
+      $ErrorActionPreference = "Stop"
 
-          Write-Host ""
-          Write-Host "IMPORTANT:"
-          Write-Host "GitHub cannot access Android filesystem paths directly."
-          Write-Host "This test intentionally does NOT copy or upload the QCOW2."
+      Write-Host ""
+      Write-Host "=========================================="
+      Write-Host "QEMU WHPX BOOT TEST"
+      Write-Host "=========================================="
 
-      - name: Final result
-        shell: pwsh
-        run: |
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "VM TEST COMPLETED"
-          Write-Host "=========================================="
-          Write-Host "Send the complete log from:"
-          Write-Host "1. RUNNER"
-          Write-Host "2. VIRTUALIZATION CHECK"
-          Write-Host "3. QEMU ACCELERATION TEST"
-          Write-Host "=========================================="
+      $qemu = Get-Command qemu-system-x86_64 -ErrorAction Stop
+
+      Write-Host "QEMU:"
+      & $qemu.Source --version
+
+      Write-Host ""
+      Write-Host "Creating temporary test disk..."
+
+      $disk = Join-Path $env:RUNNER_TEMP "whpx-test.qcow2"
+
+      & qemu-img create -f qcow2 $disk 2G
+
+      if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create test QCOW2."
+      }
+
+      Write-Host ""
+      Write-Host "Starting QEMU with WHPX..."
+      Write-Host "RAM: 16G"
+      Write-Host "CPU: 4"
+      Write-Host "Acceleration: WHPX"
+
+      $errorLog = Join-Path $env:RUNNER_TEMP "qemu-whpx-error.log"
+      $outputLog = Join-Path $env:RUNNER_TEMP "qemu-whpx-output.log"
+
+      $args = @(
+        "-accel", "whpx",
+        "-machine", "q35",
+        "-cpu", "max",
+        "-smp", "4",
+        "-m", "16G",
+        "-drive", "file=$disk,format=qcow2,if=virtio",
+        "-display", "none",
+        "-serial", "none",
+        "-monitor", "none",
+        "-no-reboot",
+        "-no-shutdown"
+      )
+
+      $process = Start-Process `
+        -FilePath $qemu.Source `
+        -ArgumentList $args `
+        -PassThru `
+        -NoNewWindow `
+        -RedirectStandardError $errorLog `
+        -RedirectStandardOutput $outputLog
+
+      Start-Sleep -Seconds 15
+
+      if ($process.HasExited) {
+        Write-Host "QEMU exited unexpectedly."
+        Write-Host ""
+        Write-Host "=== QEMU STDERR ==="
+
+        Get-Content $errorLog -ErrorAction SilentlyContinue
+
+        Write-Host ""
+        Write-Host "=== QEMU STDOUT ==="
+
+        Get-Content $outputLog -ErrorAction SilentlyContinue
+
+        throw "QEMU WHPX process exited unexpectedly."
+      }
+
+      Write-Host ""
+      Write-Host "=========================================="
+      Write-Host "WHPX STARTED SUCCESSFULLY"
+      Write-Host "=========================================="
+
+      Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+
+      Remove-Item $disk -Force -ErrorAction SilentlyContinue
+
+      Write-Host ""
+      Write-Host "=========================================="
+      Write-Host "WHPX TEST COMPLETED"
+      Write-Host "=========================================="
+
+  - name: Check ISO and QCOW2 availability
+    shell: pwsh
+    run: |
+      Write-Host "The following paths are PHONE paths:"
+      Write-Host "/storage/emulated/0/myemulator/Win11.iso"
+      Write-Host "/storage/emulated/0/myemulator/Windows.qcow2"
+
+      Write-Host ""
+      Write-Host "IMPORTANT:"
+      Write-Host "GitHub cannot access Android filesystem paths directly."
+      Write-Host "The real Windows QCOW2 is NOT modified by this test."
+
+  - name: Final result
+    shell: pwsh
+    run: |
+      Write-Host ""
+      Write-Host "=========================================="
+      Write-Host "VM TEST COMPLETED"
+      Write-Host "=========================================="
+      Write-Host "Send the complete log from:"
+      Write-Host "1. RUNNER"
+      Write-Host "2. VIRTUALIZATION CHECK"
+      Write-Host "3. QEMU ACCELERATION TEST"
+      Write-Host "4. QEMU WHPX BOOT TEST"
+      Write-Host "=========================================="
