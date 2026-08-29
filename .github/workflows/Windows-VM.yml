@@ -217,9 +217,13 @@ jobs:
             $testDir `
             "whpx-test.qcow2"
 
-          $logFile = Join-Path `
+          $stdoutFile = Join-Path `
             $testDir `
-            "qemu-whpx.log"
+            "qemu-whpx.stdout.log"
+
+          $stderrFile = Join-Path `
+            $testDir `
+            "qemu-whpx.stderr.log"
 
           if (-not (Test-Path $disk)) {
             throw "Temporary test disk does not exist."
@@ -259,8 +263,8 @@ jobs:
           $process = Start-Process `
             -FilePath "qemu-system-x86_64.exe" `
             -ArgumentList $qemuArgs `
-            -RedirectStandardOutput $logFile `
-            -RedirectStandardError $logFile `
+            -RedirectStandardOutput $stdoutFile `
+            -RedirectStandardError $stderrFile `
             -PassThru
 
           Write-Host ""
@@ -273,13 +277,29 @@ jobs:
             Write-Host "QEMU exited during WHPX startup."
 
             Write-Host ""
-            Write-Host "=== QEMU LOG ==="
+            Write-Host "=== QEMU STDOUT ==="
 
-            if (Test-Path $logFile) {
-              Get-Content $logFile |
+            if (Test-Path $stdoutFile) {
+              Get-Content $stdoutFile |
                 ForEach-Object {
                   Write-Host $_
                 }
+            }
+            else {
+              Write-Host "No QEMU stdout log was produced."
+            }
+
+            Write-Host ""
+            Write-Host "=== QEMU STDERR ==="
+
+            if (Test-Path $stderrFile) {
+              Get-Content $stderrFile |
+                ForEach-Object {
+                  Write-Host $_
+                }
+            }
+            else {
+              Write-Host "No QEMU stderr log was produced."
             }
 
             Write-Host ""
@@ -306,16 +326,29 @@ jobs:
             -ErrorAction SilentlyContinue
 
           Write-Host ""
-          Write-Host "=== QEMU LOG ==="
+          Write-Host "=== QEMU STDOUT ==="
 
-          if (Test-Path $logFile) {
-            Get-Content $logFile |
+          if (Test-Path $stdoutFile) {
+            Get-Content $stdoutFile |
               ForEach-Object {
                 Write-Host $_
               }
           }
           else {
-            Write-Host "No QEMU log file was produced."
+            Write-Host "No QEMU stdout log was produced."
+          }
+
+          Write-Host ""
+          Write-Host "=== QEMU STDERR ==="
+
+          if (Test-Path $stderrFile) {
+            Get-Content $stderrFile |
+              ForEach-Object {
+                Write-Host $_
+              }
+          }
+          else {
+            Write-Host "No QEMU stderr log was produced."
           }
 
           Write-Host ""
@@ -341,14 +374,29 @@ jobs:
             Write-Host "Temporary QCOW2 was not found."
           }
 
-          $logFile = Join-Path `
+          $stdoutFile = Join-Path `
             $env:RUNNER_TEMP `
-            "whpx-vm-test\qemu-whpx.log"
+            "whpx-vm-test\qemu-whpx.stdout.log"
 
-          if (Test-Path $logFile) {
+          if (Test-Path $stdoutFile) {
             Write-Host ""
-            Write-Host "=== SAVED QEMU LOG ==="
-            Get-Content $logFile |
+            Write-Host "=== SAVED QEMU STDOUT ==="
+
+            Get-Content $stdoutFile |
+              ForEach-Object {
+                Write-Host $_
+              }
+          }
+
+          $stderrFile = Join-Path `
+            $env:RUNNER_TEMP `
+            "whpx-vm-test\qemu-whpx.stderr.log"
+
+          if (Test-Path $stderrFile) {
+            Write-Host ""
+            Write-Host "=== SAVED QEMU STDERR ==="
+
+            Get-Content $stderrFile |
               ForEach-Object {
                 Write-Host $_
               }
