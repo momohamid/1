@@ -1,7 +1,7 @@
 name: Windows 11 VM - WHPX TEST
 
-on:
-workflow_dispatch:
+"on":
+workflow_dispatch: {}
 
 permissions:
 contents: read
@@ -226,7 +226,7 @@ steps:
       else {
         Write-Host ""
         Write-Host "QEMU is still running after $testSeconds seconds."
-        Write-Host "This is acceptable for this launch test."
+        Write-Host "This confirms that the WHPX launch remained active."
         Write-Host "Terminating QEMU now..."
 
         try {
@@ -245,7 +245,6 @@ steps:
         Start-Sleep -Seconds 2
 
         if (-not $process.HasExited) {
-          Write-Host "QEMU still appears to be running."
           taskkill /PID $process.Id /T /F 2>&1 |
             ForEach-Object { Write-Host $_ }
         }
@@ -286,13 +285,12 @@ steps:
         }
         else {
           Write-Host "INFO: QEMU launched using WHPX but exited with code $($process.ExitCode)."
-          Write-Host "The stderr output above is the important diagnostic information."
+          Write-Host "Review QEMU STDERR above."
         }
       }
       else {
-        Write-Host "PASS: QEMU remained running for the full $testSeconds-second WHPX launch test."
-        Write-Host "The process was then terminated intentionally."
-        Write-Host "This confirms that QEMU successfully remained active under WHPX."
+        Write-Host "PASS: QEMU remained active for the full 30-second WHPX launch test."
+        Write-Host "QEMU was then terminated intentionally."
       }
 
       Write-Host ""
@@ -304,9 +302,8 @@ steps:
     run: |
       Write-Host "=== TEMPORARY DISK INSPECTION ==="
 
-      $disk = Join-Path `
-        $env:RUNNER_TEMP `
-        "whpx-vm-test\whpx-test.qcow2"
+      $testDir = Join-Path $env:RUNNER_TEMP "whpx-vm-test"
+      $disk = Join-Path $testDir "whpx-test.qcow2"
 
       if (Test-Path $disk) {
         Write-Host "Temporary QCOW2 exists:"
@@ -318,13 +315,8 @@ steps:
         Write-Host "Temporary QCOW2 was not found."
       }
 
-      $stdoutFile = Join-Path `
-        $env:RUNNER_TEMP `
-        "whpx-vm-test\qemu-stdout.log"
-
-      $stderrFile = Join-Path `
-        $env:RUNNER_TEMP `
-        "whpx-vm-test\qemu-stderr.log"
+      $stdoutFile = Join-Path $testDir "qemu-stdout.log"
+      $stderrFile = Join-Path $testDir "qemu-stderr.log"
 
       Write-Host ""
       Write-Host "QEMU stdout log exists: $(Test-Path $stdoutFile)"
@@ -372,7 +364,7 @@ steps:
       Write-Host "4. QEMU WHPX support"
       Write-Host "5. Temporary QCOW2 creation"
       Write-Host "6. Actual QEMU WHPX launch"
-      Write-Host "7. Automatic QEMU timeout/termination"
+      Write-Host "7. QEMU timeout/termination"
       Write-Host "8. QEMU stdout/stderr diagnostics"
       Write-Host ""
       Write-Host "IMPORTANT:"
@@ -380,14 +372,5 @@ steps:
       Write-Host "- The phone Win11.iso was NOT accessed."
       Write-Host "- No cloud storage was used."
       Write-Host "- The temporary QCOW2 exists only inside this runner."
-      Write-Host "- QEMU is automatically terminated after the short launch test."
-      Write-Host ""
-      Write-Host "Send the complete log from:"
-      Write-Host "1. RUNNER RESOURCES"
-      Write-Host "2. VIRTUALIZATION CHECK"
-      Write-Host "3. QEMU ACCELERATOR CHECK"
-      Write-Host "4. TEMPORARY VM DISK TEST"
-      Write-Host "5. ACTUAL WHPX VM TEST"
-      Write-Host "6. FINAL RESULT"
       Write-Host ""
       Write-Host "=============================================="
