@@ -184,8 +184,7 @@ jobs:
             "-monitor", "none",
             "-serial", "none",
             "-drive", "file=$disk,if=virtio,format=qcow2",
-            "-no-reboot",
-            "-no-hpet"
+            "-no-reboot"
           )
 
           Write-Host ""
