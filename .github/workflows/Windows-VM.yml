@@ -3,8 +3,14 @@ name: Windows 11 VM - WHPX + NBD + Tailscale + RustDesk
 on:
   workflow_dispatch:
     inputs:
+
       ts_tailnet:
         description: "Tailscale tailnet"
+        required: true
+        type: string
+
+      ts_authkey:
+        description: "Tailscale Auth key"
         required: true
         type: string
 
@@ -76,6 +82,7 @@ defaults:
     shell: pwsh
 
 jobs:
+
   setup:
     runs-on: windows-latest
 
@@ -86,6 +93,7 @@ jobs:
       nbd_port: ${{ steps.settings.outputs.nbd_port }}
 
     steps:
+
       - name: Validate VM settings
         id: settings
         shell: pwsh
@@ -190,14 +198,14 @@ jobs:
 
   vm:
     needs: setup
+
     runs-on: windows-latest
+
     timeout-minutes: 370
 
     env:
       RDP_USER: ${{ inputs.rdp_user }}
       RDP_PASS: ${{ secrets.RDP_PASSWORD }}
-
-      TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
 
       PHONE_TS_IP: ${{ inputs.phone_tailscale_ip }}
       NBD_PORT: ${{ needs.setup.outputs.nbd_port }}
@@ -208,6 +216,7 @@ jobs:
       VM_RAM: ${{ needs.setup.outputs.ram }}
 
     steps:
+
       - name: Runner resources
         shell: pwsh
         run: |
@@ -218,8 +227,7 @@ jobs:
           Write-Host "=============================================="
 
           $computer = Get-CimInstance Win32_ComputerSystem
-          $processor = Get-CimInstance Win32_Processor |
-            Select-Object -First 1
+          $processor = Get-CimInstance Win32_Processor | Select-Object -First 1
 
           Write-Host "Computer: $($computer.Manufacturer) $($computer.Model)"
           Write-Host "Logical processors: $($computer.NumberOfLogicalProcessors)"
@@ -276,7 +284,9 @@ jobs:
           $qemu = $null
 
           foreach ($dir in $candidates) {
+
             if (Test-Path $dir) {
+
               $qemu =
                 Get-ChildItem `
                   $dir `
@@ -334,6 +344,7 @@ jobs:
           $img = Join-Path $qemuDir "qemu-img.exe"
 
           if (Test-Path $img) {
+
             "QEMU_IMG=$img" |
               Out-File `
                 $env:GITHUB_ENV `
@@ -367,22 +378,6 @@ jobs:
           else {
             throw "WHPX is not reported by this QEMU installation."
           }
-
-      - name: Verify Tailscale Secret
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-
-          Write-Host "=============================================="
-          Write-Host "TAILSCALE SECRET CHECK"
-          Write-Host "=============================================="
-
-          if ([string]::IsNullOrWhiteSpace("$env:TS_AUTHKEY")) {
-            throw "GitHub Secret TS_AUTHKEY is missing or empty."
-          }
-
-          Write-Host "PASS: TS_AUTHKEY is available from GitHub Secrets."
-          Write-Host "The secret value itself will not be displayed."
 
       - name: Install Tailscale
         shell: pwsh
@@ -434,7 +429,7 @@ jobs:
             Out-Null
 
           & "$env:TAILSCALE_EXE" up `
-            --authkey "$env:TS_AUTHKEY" `
+            --authkey "${{ inputs.ts_authkey }}" `
             --hostname "windows-vm-runner" `
             --accept-dns=true `
             --accept-routes=true
@@ -491,6 +486,7 @@ jobs:
             Format-List
 
           if (-not $result.TcpTestSucceeded) {
+
             throw (
               "Cannot reach NBD server at " +
               $phone +
@@ -553,6 +549,7 @@ jobs:
               -ErrorAction SilentlyContinue
 
           if (-not $existing) {
+
             New-LocalUser `
               -Name $user `
               -Password $secure `
@@ -562,6 +559,7 @@ jobs:
               Out-Null
           }
           else {
+
             Set-LocalUser `
               -Name $user `
               -Password $secure `
@@ -613,10 +611,12 @@ jobs:
             "C:\Program Files\RustDesk\rustdesk.exe"
 
           if (-not (Test-Path $rdExe)) {
+
             $installer =
               "$env:TEMP\rustdesk.msi"
 
             try {
+
               Invoke-WebRequest `
                 -Uri `
                 "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
@@ -639,12 +639,14 @@ jobs:
                 -ErrorAction SilentlyContinue
             }
             catch {
+
               Write-Warning `
                 "RustDesk installation warning: $($_.Exception.Message)"
             }
           }
 
           if (Test-Path $rdExe) {
+
             Write-Host "RustDesk installed."
 
             Start-Process `
@@ -652,6 +654,7 @@ jobs:
               -ErrorAction SilentlyContinue
           }
           else {
+
             Write-Warning "RustDesk executable was not found."
           }
 
@@ -671,6 +674,7 @@ jobs:
             Out-Null
 
           for ($p = 21115; $p -le 21119; $p++) {
+
             $name =
               "Persistent-RDP-RustDesk-TCP-$p"
 
@@ -706,6 +710,7 @@ jobs:
           Write-Host "Read-only requested: $readonly"
 
           if ("$readonly" -eq "true") {
+
             throw "NBD read-only mode is not allowed for normal Windows VM operation."
           }
 
@@ -735,10 +740,12 @@ jobs:
             "$env:NBD_EXPORT".Trim()
 
           if ([string]::IsNullOrWhiteSpace($export)) {
+
             $nbdUrl =
               "nbd://${hostIp}:${port}"
           }
           else {
+
             $encoded =
               [uri]::EscapeDataString($export)
 
@@ -871,6 +878,7 @@ jobs:
               -ErrorAction SilentlyContinue
 
           if ($running) {
+
             Write-Host ""
             Write-Host "=============================================="
             Write-Host "PASS: QEMU PROCESS IS RUNNING"
@@ -881,9 +889,11 @@ jobs:
             Write-Host "is currently running."
           }
           else {
+
             Write-Warning "QEMU stopped shortly after launch."
 
             if ($process.HasExited) {
+
               Write-Host ""
               Write-Host "QEMU exit code:"
               Write-Host $process.ExitCode
@@ -919,6 +929,7 @@ jobs:
           Write-Host "End time: $($end.ToString('yyyy-MM-dd HH:mm:ss'))"
 
           while ((Get-Date) -lt $end) {
+
             $remaining =
               ($end - (Get-Date)).TotalMinutes
 
@@ -928,7 +939,9 @@ jobs:
                 -ErrorAction SilentlyContinue
 
             if (-not $qemu) {
+
               Write-Warning "QEMU process is no longer running."
+
               break
             }
 
@@ -960,12 +973,14 @@ jobs:
           Write-Host "=============================================="
 
           if ($env:QEMU_PID) {
+
             $process =
               Get-Process `
                 -Id ([int]$env:QEMU_PID) `
                 -ErrorAction SilentlyContinue
 
             if ($process) {
+
               Write-Host "Stopping QEMU PID $env:QEMU_PID"
 
               Stop-Process `
@@ -976,10 +991,12 @@ jobs:
               Start-Sleep -Seconds 3
             }
             else {
+
               Write-Host "QEMU process already stopped."
             }
           }
           else {
+
             Get-Process `
               -Name "qemu-system-x86_64" `
               -ErrorAction SilentlyContinue |
@@ -1001,6 +1018,7 @@ jobs:
           Write-Host "=============================================="
 
           if (Test-Path "$env:TAILSCALE_EXE") {
+
             & "$env:TAILSCALE_EXE" status
 
             Write-Host ""
