@@ -64,13 +64,13 @@ on:
       vm_ram_mb:
         description: "VM RAM in MB"
         required: false
-        default: "32768"
+        default: "16384"
         type: string
 
       vm_cpus:
         description: "VM CPU threads"
         required: false
-        default: "6"
+        default: "4"
         type: string
 
       nbd_readonly:
@@ -835,7 +835,10 @@ jobs:
           Write-Host ""
           Write-Host "PASS: Both NBD endpoints are ready."
 
-      - name: Start Windows VM
+      # IMPORTANT:
+      # QEMU and its keep-alive loop are intentionally in ONE STEP.
+      # This prevents the GitHub Actions step boundary from killing QEMU.
+      - name: Start Windows VM and keep QEMU alive
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -942,18 +945,26 @@ jobs:
           }
 
           Write-Host ""
-          Write-Host "Launching QEMU..."
+          Write-Host "Launching QEMU in foreground process..."
 
-          $process = Start-Process `
-            -FilePath "$env:QEMU_EXE" `
-            -ArgumentList $qemuArgs `
-            -PassThru `
-            -RedirectStandardOutput $qemuStdout `
-            -RedirectStandardError $qemuStderr `
-            -WindowStyle Hidden
+          $process = New-Object System.Diagnostics.Process
 
-          if (-not $process) {
-              throw "Failed to create the QEMU process."
+          $process.StartInfo = New-Object System.Diagnostics.ProcessStartInfo
+
+          $process.StartInfo.FileName = "$env:QEMU_EXE"
+
+          $process.StartInfo.UseShellExecute = $false
+          $process.StartInfo.CreateNoWindow = $true
+
+          $process.StartInfo.RedirectStandardOutput = $true
+          $process.StartInfo.RedirectStandardError = $true
+
+          foreach ($arg in $qemuArgs) {
+              [void]$process.StartInfo.ArgumentList.Add([string]$arg)
+          }
+
+          if (-not $process.Start()) {
+              throw "Failed to start QEMU."
           }
 
           $processId = $process.Id
@@ -976,13 +987,13 @@ jobs:
           Write-Host "Profile: $profile"
 
           Write-Host ""
-          Write-Host "Waiting for QEMU initialization..."
+          Write-Host "=============================================="
+          Write-Host "WAITING FOR QEMU INITIALIZATION"
+          Write-Host "=============================================="
 
           for ($i = 1; $i -le 12; $i++) {
 
               Start-Sleep -Seconds 5
-
-              $process.Refresh()
 
               if ($process.HasExited) {
 
@@ -995,23 +1006,40 @@ jobs:
                   Write-Host "Exit code:"
                   Write-Host $process.ExitCode
 
-                  if (Test-Path $qemuStderr) {
+                  try {
+                      $stdoutText =
+                        $process.StandardOutput.ReadToEnd()
 
-                      Write-Host ""
-                      Write-Host "QEMU STDERR:"
-                      Get-Content `
-                        $qemuStderr `
-                        -Tail 500 `
-                        -ErrorAction SilentlyContinue
+                      if ($stdoutText) {
+                          Write-Host ""
+                          Write-Host "QEMU STDOUT:"
+                          Write-Host $stdoutText
+                      }
+                  }
+                  catch {
+                  }
+
+                  try {
+                      $stderrText =
+                        $process.StandardError.ReadToEnd()
+
+                      if ($stderrText) {
+                          Write-Host ""
+                          Write-Host "QEMU STDERR:"
+                          Write-Host $stderrText
+                      }
+                  }
+                  catch {
                   }
 
                   if (Test-Path $qemuLog) {
 
                       Write-Host ""
                       Write-Host "QEMU INTERNAL LOG:"
+
                       Get-Content `
                         $qemuLog `
-                        -Tail 800 `
+                        -Tail 1000 `
                         -ErrorAction SilentlyContinue
                   }
 
@@ -1023,8 +1051,6 @@ jobs:
                 "$i/12: process is still running."
               )
           }
-
-          $process.Refresh()
 
           if ($process.HasExited) {
               throw "QEMU exited after startup checks."
@@ -1047,8 +1073,176 @@ jobs:
           Write-Host "Use port 3390."
           Write-Host "Port 3389 is NOT the QEMU forwarded VM port."
 
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "QEMU KEEP-ALIVE STARTED"
+          Write-Host "=============================================="
+
+          $runtime = [int]$env:VM_RUNTIME
+          $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
+
+          $start = Get-Date
+          $end = $start.AddMinutes($runtime)
+
+          Write-Host "VM runtime: $runtime minutes"
+          Write-Host "Started: $($start.ToString('yyyy-MM-dd HH:mm:ss'))"
+          Write-Host "Scheduled end: $($end.ToString('yyyy-MM-dd HH:mm:ss'))"
+
+          $lastRdpStatus = $null
+          $lastStatusOutput = $null
+
+          while ((Get-Date) -lt $end) {
+
+              if ($process.HasExited) {
+
+                  Write-Host ""
+                  Write-Host "=============================================="
+                  Write-Host "QEMU STOPPED UNEXPECTEDLY"
+                  Write-Host "=============================================="
+
+                  Write-Host ""
+                  Write-Host "Expected PID:"
+                  Write-Host $processId
+
+                  Write-Host ""
+                  Write-Host "Exit code:"
+                  Write-Host $process.ExitCode
+
+                  Write-Host ""
+                  Write-Host "Expected profile:"
+                  Write-Host $profile
+
+                  try {
+                      $stdoutText =
+                        $process.StandardOutput.ReadToEnd()
+
+                      if ($stdoutText) {
+                          Write-Host ""
+                          Write-Host "LATEST QEMU STDOUT:"
+                          Write-Host $stdoutText
+                      }
+                  }
+                  catch {
+                  }
+
+                  try {
+                      $stderrText =
+                        $process.StandardError.ReadToEnd()
+
+                      if ($stderrText) {
+                          Write-Host ""
+                          Write-Host "LATEST QEMU STDERR:"
+                          Write-Host $stderrText
+                      }
+                  }
+                  catch {
+                  }
+
+                  if (Test-Path $qemuLog) {
+
+                      Write-Host ""
+                      Write-Host "LATEST QEMU INTERNAL LOG:"
+
+                      Get-Content `
+                        $qemuLog `
+                        -Tail 1200 `
+                        -ErrorAction SilentlyContinue
+                  }
+
+                  throw "QEMU stopped unexpectedly during VM runtime."
+              }
+
+              $now = Get-Date
+
+              $remainingSeconds =
+                [Math]::Max(
+                  0,
+                  ($end - $now).TotalSeconds
+                )
+
+              $remainingMinutes =
+                $remainingSeconds / 60
+
+              $rdpTest =
+                Test-NetConnection `
+                  -ComputerName "127.0.0.1" `
+                  -Port ([int]$env:VM_RDP_HOST_PORT) `
+                  -WarningAction SilentlyContinue
+
+              $rdpState =
+                [bool]$rdpTest.TcpTestSucceeded
+
+              if ($lastRdpStatus -ne $rdpState) {
+
+                  if ($rdpState) {
+
+                      Write-Host ""
+                      Write-Host "RDP FORWARDING: ONLINE"
+
+                  }
+                  else {
+
+                      Write-Host ""
+                      Write-Host "RDP FORWARDING: NOT READY / TEMPORARILY OFFLINE"
+
+                  }
+
+                  $lastRdpStatus = $rdpState
+              }
+
+              $statusOutput = (
+                "VM KEEP-ALIVE | " +
+                "QEMU PID=" +
+                $processId +
+                " | Profile=" +
+                $profile +
+                " | RDP=" +
+                $rdpState +
+                " | Remaining=" +
+                ([math]::Round($remainingMinutes, 1)) +
+                "m | " +
+                (Get-Date).ToString("HH:mm:ss")
+              )
+
+              Write-Host $statusOutput
+
+              $sleepSeconds =
+                [Math]::Min(
+                  30,
+                  [Math]::Max(
+                    1,
+                    [int]$remainingSeconds
+                  )
+                )
+
+              Start-Sleep -Seconds $sleepSeconds
+          }
+
+          Write-Host ""
+          Write-Host "=============================================="
+          Write-Host "KEEP-ALIVE PERIOD FINISHED"
+          Write-Host "=============================================="
+
+          Write-Host ""
+          Write-Host "The configured VM runtime has elapsed."
+
+          if (-not $process.HasExited) {
+
+              Write-Host ""
+              Write-Host "FINAL CHECK: QEMU is still running."
+
+          }
+          else {
+
+              Write-Warning "QEMU exited before the scheduled end."
+          }
+
+          Write-Host ""
+          Write-Host "The next cleanup step will stop QEMU."
+
       - name: Verify VM RDP forwarding
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
@@ -1080,11 +1274,12 @@ jobs:
           else {
 
               Write-Warning "The VM RDP forwarding port is not accepting connections yet."
-              Write-Warning "QEMU may still be booting Windows."
+              Write-Warning "Windows may still be booting."
           }
 
       - name: VM connection information
         shell: pwsh
+        continue-on-error: true
         run: |
           $ErrorActionPreference = "Continue"
 
@@ -1120,307 +1315,6 @@ jobs:
           }
           else {
               Write-Warning "QEMU PID file is missing."
-          }
-
-      - name: KEEP-ALIVE - Protect QEMU until runtime ends
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          Write-Host "=============================================="
-          Write-Host "WINDOWS VM KEEP-ALIVE"
-          Write-Host "=============================================="
-
-          $runtime = [int]$env:VM_RUNTIME
-          $runtime = [Math]::Max(1, [Math]::Min(360, $runtime))
-
-          $start = Get-Date
-          $end = $start.AddMinutes($runtime)
-
-          $qemuPidFile = $env:QEMU_PID_FILE
-          $qemuProfileFile = $env:QEMU_PROFILE_FILE
-          $qemuStderr = $env:QEMU_STDERR_LOG
-          $qemuLog = $env:QEMU_LOG
-
-          Write-Host "VM runtime: $runtime minutes"
-          Write-Host "Started: $($start.ToString('yyyy-MM-dd HH:mm:ss'))"
-          Write-Host "Scheduled end: $($end.ToString('yyyy-MM-dd HH:mm:ss'))"
-
-          Write-Host ""
-          Write-Host "PID file:"
-          Write-Host $qemuPidFile
-
-          Write-Host ""
-          Write-Host "Profile file:"
-          Write-Host $qemuProfileFile
-
-          $qemuPid = $null
-
-          if ($qemuPidFile -and (Test-Path $qemuPidFile)) {
-
-              $rawPid =
-                (Get-Content $qemuPidFile -Raw).Trim()
-
-              if ($rawPid -match '^\d+$') {
-                  $qemuPid = [int]$rawPid
-              }
-          }
-
-          if (-not $qemuPid) {
-
-              Write-Host ""
-              Write-Host "WARNING: PID file did not contain a valid PID."
-
-              $allQemu =
-                @(Get-Process `
-                  -Name "qemu-system-x86_64" `
-                  -ErrorAction SilentlyContinue)
-
-              if ($allQemu.Count -eq 1) {
-                  $qemuPid = $allQemu[0].Id
-
-                  Write-Host ""
-                  Write-Host "Recovered QEMU PID from process list:"
-                  Write-Host $qemuPid
-
-                  $qemuPid |
-                    Out-File $qemuPidFile -Encoding ascii -Force
-              }
-          }
-
-          if (-not $qemuPid) {
-
-              Write-Host ""
-              Write-Host "=============================================="
-              Write-Host "FATAL: QEMU PID COULD NOT BE RECOVERED"
-              Write-Host "=============================================="
-
-              if (Test-Path $qemuStderr) {
-                  Write-Host ""
-                  Write-Host "QEMU STDERR:"
-                  Get-Content `
-                    $qemuStderr `
-                    -Tail 500 `
-                    -ErrorAction SilentlyContinue
-              }
-
-              if (Test-Path $qemuLog) {
-                  Write-Host ""
-                  Write-Host "QEMU INTERNAL LOG:"
-                  Get-Content `
-                    $qemuLog `
-                    -Tail 800 `
-                    -ErrorAction SilentlyContinue
-              }
-
-              throw "QEMU PID could not be recovered."
-          }
-
-          $qemuProfile = "UNKNOWN"
-
-          if ($qemuProfileFile -and
-              (Test-Path $qemuProfileFile)) {
-
-              $qemuProfile =
-                (Get-Content $qemuProfileFile -Raw).Trim()
-          }
-
-          Write-Host ""
-          Write-Host "QEMU PID: $qemuPid"
-          Write-Host "QEMU profile: $qemuProfile"
-          Write-Host "VM endpoint: $env:RUNNER_TS_IP`:$env:VM_RDP_HOST_PORT"
-
-          Write-Host ""
-          Write-Host "=============================================="
-          Write-Host "KEEP-ALIVE STARTED"
-          Write-Host "=============================================="
-
-          $lastRdpStatus = $null
-
-          while ((Get-Date) -lt $end) {
-
-              $now = Get-Date
-
-              $remainingSeconds =
-                [Math]::Max(
-                  0,
-                  ($end - $now).TotalSeconds
-                )
-
-              $remainingMinutes =
-                $remainingSeconds / 60
-
-              $qemu =
-                Get-Process `
-                  -Id $qemuPid `
-                  -ErrorAction SilentlyContinue
-
-              if (-not $qemu) {
-
-                  Write-Host ""
-                  Write-Host "=============================================="
-                  Write-Host "QEMU STOPPED UNEXPECTEDLY"
-                  Write-Host "=============================================="
-
-                  Write-Host ""
-                  Write-Host "Expected PID:"
-                  Write-Host $qemuPid
-
-                  Write-Host ""
-                  Write-Host "Expected profile:"
-                  Write-Host $qemuProfile
-
-                  if (Test-Path $qemuStderr) {
-
-                      Write-Host ""
-                      Write-Host "LATEST QEMU STDERR:"
-
-                      $stderrContent = Get-Content `
-                        $qemuStderr `
-                        -Tail 1000 `
-                        -ErrorAction SilentlyContinue
-
-                      if ($stderrContent) {
-                          $stderrContent | ForEach-Object {
-                              Write-Host $_
-                          }
-                      }
-                      else {
-                          Write-Host "(QEMU stderr is empty)"
-                      }
-                  }
-
-                  if (Test-Path $qemuLog) {
-
-                      Write-Host ""
-                      Write-Host "LATEST QEMU INTERNAL LOG:"
-
-                      $logContent = Get-Content `
-                        $qemuLog `
-                        -Tail 1500 `
-                        -ErrorAction SilentlyContinue
-
-                      if ($logContent) {
-                          $logContent | ForEach-Object {
-                              Write-Host $_
-                          }
-                      }
-                      else {
-                          Write-Host "(QEMU internal log is empty)"
-                      }
-                  }
-
-                  Write-Host ""
-                  Write-Host "QEMU process is confirmed terminated."
-
-                  throw "QEMU stopped unexpectedly during VM runtime."
-              }
-
-              try {
-
-                  $procInfo =
-                    Get-CimInstance Win32_Process `
-                      -Filter "ProcessId = $qemuPid" `
-                      -ErrorAction SilentlyContinue
-
-                  if ($procInfo) {
-
-                      $imageName =
-                        [string]$procInfo.Name
-
-                      if ($imageName -ne "qemu-system-x86_64.exe") {
-
-                          throw (
-                            "PID $qemuPid is no longer " +
-                            "qemu-system-x86_64.exe."
-                          )
-                      }
-                  }
-
-              }
-              catch {
-
-                  Write-Host ""
-                  Write-Host "WARNING: QEMU process identity check failed."
-                  Write-Host $_.Exception.Message
-              }
-
-              $rdpTest =
-                Test-NetConnection `
-                  -ComputerName "127.0.0.1" `
-                  -Port ([int]$env:VM_RDP_HOST_PORT) `
-                  -WarningAction SilentlyContinue
-
-              $rdpState =
-                [bool]$rdpTest.TcpTestSucceeded
-
-              if ($lastRdpStatus -ne $rdpState) {
-
-                  if ($rdpState) {
-
-                      Write-Host ""
-                      Write-Host "RDP FORWARDING: ONLINE"
-
-                  }
-                  else {
-
-                      Write-Host ""
-                      Write-Host "RDP FORWARDING: NOT READY / TEMPORARILY OFFLINE"
-
-                  }
-
-                  $lastRdpStatus = $rdpState
-              }
-
-              Write-Host (
-                "VM KEEP-ALIVE | " +
-                "QEMU PID=" +
-                $qemuPid +
-                " | Profile=" +
-                $qemuProfile +
-                " | RDP=" +
-                $rdpState +
-                " | Remaining=" +
-                ([math]::Round($remainingMinutes, 1)) +
-                "m | " +
-                (Get-Date).ToString("HH:mm:ss")
-              )
-
-              $sleepSeconds =
-                [Math]::Min(
-                  30,
-                  [Math]::Max(
-                    1,
-                    [int]$remainingSeconds
-                  )
-                )
-
-              Start-Sleep -Seconds $sleepSeconds
-          }
-
-          Write-Host ""
-          Write-Host "=============================================="
-          Write-Host "KEEP-ALIVE PERIOD FINISHED"
-          Write-Host "=============================================="
-
-          Write-Host ""
-          Write-Host "The configured VM runtime has elapsed."
-          Write-Host "QEMU will now be stopped by cleanup."
-
-          $finalQemu =
-            Get-Process `
-              -Id $qemuPid `
-              -ErrorAction SilentlyContinue
-
-          if ($finalQemu) {
-
-              Write-Host ""
-              Write-Host "FINAL CHECK: QEMU is still running."
-
-          }
-          else {
-
-              Write-Warning "QEMU is no longer running at scheduled end."
           }
 
       - name: Stop QEMU safely
