@@ -925,8 +925,6 @@ jobs:
               "-monitor", "none",
               "-serial", "none",
 
-              "-no-reboot",
-
               "-D", "$qemuLog",
               "-d", "guest_errors"
           )
@@ -1238,7 +1236,6 @@ jobs:
           Write-Host "=============================================="
 
           $lastRdpStatus = $null
-          $lastPid = $qemuPid
 
           while ((Get-Date) -lt $end) {
 
@@ -1278,10 +1275,19 @@ jobs:
                       Write-Host ""
                       Write-Host "LATEST QEMU STDERR:"
 
-                      Get-Content `
+                      $stderrContent = Get-Content `
                         $qemuStderr `
-                        -Tail 500 `
+                        -Tail 1000 `
                         -ErrorAction SilentlyContinue
+
+                      if ($stderrContent) {
+                          $stderrContent | ForEach-Object {
+                              Write-Host $_
+                          }
+                      }
+                      else {
+                          Write-Host "(QEMU stderr is empty)"
+                      }
                   }
 
                   if (Test-Path $qemuLog) {
@@ -1289,11 +1295,23 @@ jobs:
                       Write-Host ""
                       Write-Host "LATEST QEMU INTERNAL LOG:"
 
-                      Get-Content `
+                      $logContent = Get-Content `
                         $qemuLog `
-                        -Tail 800 `
+                        -Tail 1500 `
                         -ErrorAction SilentlyContinue
+
+                      if ($logContent) {
+                          $logContent | ForEach-Object {
+                              Write-Host $_
+                          }
+                      }
+                      else {
+                          Write-Host "(QEMU internal log is empty)"
+                      }
                   }
+
+                  Write-Host ""
+                  Write-Host "QEMU process is confirmed terminated."
 
                   throw "QEMU stopped unexpectedly during VM runtime."
               }
