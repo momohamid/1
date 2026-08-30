@@ -58,7 +58,7 @@ on:
       rdp_password:
         description: "RDP password"
         required: false
-        deafault: "Yousif1990"
+        default: "Yousif1990"
         type: string
 
       runtime_minutes:
@@ -213,7 +213,7 @@ jobs:
 
     env:
       RDP_USER: ${{ inputs.rdp_user }}
-      RDP_PASS: ${{ inputs.rdp_pass }}
+      RDP_PASS: ${{ inputs.rdp_password }}
 
       PHONE_TS_IP: ${{ inputs.phone_tailscale_ip }}
 
