@@ -55,12 +55,6 @@ on:
         default: "Yousif190"
         type: string
 
-      rdp_password:
-        description: "RDP password"
-        required: false
-        default: "Yousif1990"
-        type: string
-      
       runtime_minutes:
         description: "Runtime in minutes (maximum 360)"
         required: false
@@ -70,13 +64,13 @@ on:
       vm_ram_mb:
         description: "VM RAM in MB"
         required: false
-        default: "32768"
+        default: "16384"
         type: string
 
       vm_cpus:
         description: "VM CPU threads"
         required: false
-        default: "6"
+        default: "4"
         type: string
 
       nbd_readonly:
@@ -913,11 +907,11 @@ jobs:
           $netSpec =
             "user,id=net0,hostfwd=tcp:0.0.0.0:$env:VM_RDP_HOST_PORT-:$env:VM_RDP_GUEST_PORT"
 
-          $profile = "PRIMARY-q35-pit-off-cpu-max"
+          $profile = "PRIMARY-q35-cpu-max"
 
           $qemuArgs = @(
               "-accel", "whpx",
-              "-machine", "q35,pit=off",
+              "-machine", "q35",
               "-cpu", "max",
               "-smp", "$env:VM_CPUS",
               "-m", "$env:VM_RAM",
