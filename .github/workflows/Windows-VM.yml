@@ -207,7 +207,7 @@ jobs:
 
     env:
       RDP_USER: ${{ inputs.rdp_user }}
-      RDP_PASS: ${{ secrets.RDP_PASSWORD }}
+      RDP_PASS: ${{ inputs.rdp_pass }}
 
       PHONE_TS_IP: ${{ inputs.phone_tailscale_ip }}
 
