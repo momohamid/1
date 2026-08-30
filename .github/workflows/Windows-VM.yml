@@ -64,7 +64,7 @@ type: string
   vm_ram_mb:
     description: "VM RAM in MB"
     required: false
-    default: "16384"
+    default: "32768"
     type: string
 
   vm_cpus:
