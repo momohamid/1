@@ -55,6 +55,12 @@ on:
         default: "Yousif190"
         type: string
 
+      rdp_password:
+        description: "RDP password"
+        required: false
+        deafault: "Yousif1990"
+        type: string
+
       runtime_minutes:
         description: "Runtime in minutes (maximum 360)"
         required: false
