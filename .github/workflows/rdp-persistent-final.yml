@@ -74,7 +74,7 @@ jobs:
           if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      - name: Create 10 Storage Repositories
+      - name: Create Missing Storage Repositories
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
