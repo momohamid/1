@@ -196,11 +196,11 @@ jobs:
               $source = "C:\$folder"
               if (Test-Path $source) {
                 $diskIndex = 1
-                Get-ChildItem -Path $source -Recurse -File | ForEach-Object {
+                Get-ChildItem -Path $source -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
                   $dest = "$backupPath\disk_$("{0:D2}" -f $diskIndex)\$folder\$($_.FullName.Substring($source.Length))"
                   $destDir = Split-Path $dest -Parent
-                  New-Item -ItemType Directory -Path $destDir -Force
-                  Copy-Item -Path $_.FullName -Destination $dest -Force
+                  New-Item -ItemType Directory -Path $destDir -Force -ErrorAction SilentlyContinue | Out-Null
+                  Copy-Item -Path $_.FullName -Destination $dest -Force -ErrorAction SilentlyContinue
                   $diskIndex = ($diskIndex % 10) + 1
                 }
               }
@@ -208,13 +208,17 @@ jobs:
 
             for ($i=1; $i -le 10; $i++) {
               $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
-              cd $repoPath
-              git add .
-              $changes = git status --porcelain
-              if ($changes) {
-                Write-Host "Changes detected in disk_$("{0:D2}" -f $i)"
-                git commit -m "Auto-sync C: drive $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-                git push
+              if (Test-Path $repoPath) {
+                cd $repoPath
+                git add . -ErrorAction SilentlyContinue
+                $changes = git status --porcelain
+                if ($changes) {
+                  Write-Host "Changes detected in disk_$("{0:D2}" -f $i)"
+                  git commit -m "Auto-sync C: drive $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ErrorAction SilentlyContinue
+                  git push -u origin main -ErrorAction SilentlyContinue
+                }
+              } else {
+                Write-Host "Warning: $repoPath does not exist, skipping..."
               }
             }
 
@@ -444,11 +448,12 @@ jobs:
           Write-Host "Final sync before exit..."
 
           $backupPath = "C:\persistent_backup"
-          reg export HKLM "$backupPath\HKLM.reg"
-          reg export HKCU "$backupPath\HKCU.reg"
-          reg export HKCR "$backupPath\HKCR.reg"
-          reg export HKU "$backupPath\HKU.reg"
-          reg export HKCC "$backupPath\HKCC.reg"
+          
+          reg export HKLM "$backupPath\HKLM.reg" -ErrorAction SilentlyContinue
+          reg export HKCU "$backupPath\HKCU.reg" -ErrorAction SilentlyContinue
+          reg export HKCR "$backupPath\HKCR.reg" -ErrorAction SilentlyContinue
+          reg export HKU "$backupPath\HKU.reg" -ErrorAction SilentlyContinue
+          reg export HKCC "$backupPath\HKCC.reg" -ErrorAction SilentlyContinue
 
           Copy-Item -Path "C:\Users\$env:RDP_USER\Desktop\*" -Destination "$backupPath\Desktop\" -Recurse -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu\*" -Destination "$backupPath\Start Menu\" -Recurse -Force -ErrorAction SilentlyContinue
@@ -458,13 +463,17 @@ jobs:
 
           for ($i=1; $i -le 10; $i++) {
             $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
-            cd $repoPath
-            git add .
-            $changes = git status --porcelain
-            if ($changes) {
-              Write-Host "Syncing disk_$("{0:D2}" -f $i)"
-              git commit -m "Final sync before exit $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-              git push
+            if (Test-Path $repoPath) {
+              cd $repoPath
+              git add . -ErrorAction SilentlyContinue
+              $changes = git status --porcelain
+              if ($changes) {
+                Write-Host "Syncing disk_$("{0:D2}" -f $i)"
+                git commit -m "Final sync before exit $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" -ErrorAction SilentlyContinue
+                git push -u origin main -ErrorAction SilentlyContinue
+              }
+            } else {
+              Write-Host "Warning: $repoPath does not exist, skipping..."
             }
           }
 
