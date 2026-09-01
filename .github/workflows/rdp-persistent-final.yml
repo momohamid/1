@@ -76,7 +76,7 @@ jobs:
 
       - name: Create 10 Storage Repositories
         run: |
-          $token = "${{ github.token }}"
+          $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
 
           for ($i=1; $i -le 10; $i++) {
@@ -99,7 +99,7 @@ jobs:
 
       - name: Restore 1TB Persistent C Drive from GitHub
         run: |
-          $token = "${{ github.token }}"
+          $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
 
           $backupPath = "C:\persistent_backup"
@@ -184,7 +184,7 @@ jobs:
 
       - name: Sync C Drive to GitHub
         run: |
-          $token = "${{ github.token }}"
+          $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
           $backupPath = "C:\persistent_backup"
 
@@ -453,7 +453,7 @@ jobs:
           Copy-Item -Path "C:\Users\$env:RDP_USER\Desktop\*" -Destination "$backupPath\Desktop\" -Recurse -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu\*" -Destination "$backupPath\Start Menu\" -Recurse -Force -ErrorAction SilentlyContinue
 
-          $token = "${{ github.token }}"
+          $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
 
           for ($i=1; $i -le 10; $i++) {
