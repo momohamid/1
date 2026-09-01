@@ -66,10 +66,10 @@ jobs:
       RDP_PASS: Bullet@12345
 
     steps:
-      # ============================================================
-      # 1. تعيين متغير CRD (للاستخدام في الخطوات الشرطية)
-      # ============================================================
-      - name: Set CRD flag early (safe read)
+      # --------------------------------------------
+      # 1. CRD Flag
+      # --------------------------------------------
+      - name: Set CRD flag early
         run: |
           $crd = @'
           ${{ inputs.crd_code }}
@@ -77,10 +77,10 @@ jobs:
           if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      # ============================================================
-      # 2. إنشاء المستودعات (إذا لم تكن موجودة)
-      # ============================================================
-      - name: Create Missing Storage Repositories
+      # --------------------------------------------
+      # 2. Create Storage Repositories
+      # --------------------------------------------
+      - name: Create Storage Repositories
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
@@ -103,19 +103,17 @@ jobs:
             }
           }
 
-      # ============================================================
-      # 3. تحميل وتثبيت القرص الدائم 1TB
-      # ============================================================
+      # --------------------------------------------
+      # 3. Mount 1TB Persistent Storage
+      # --------------------------------------------
       - name: Mount 1TB Persistent Storage
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
 
-          # إنشاء مجلد التخزين الدائم
           $storagePath = "C:\persistent_storage"
           New-Item -ItemType Directory -Path $storagePath -Force
 
-          # استنساخ المستودعات (10 × 100GB = 1TB)
           for ($i=1; $i -le 10; $i++) {
             $repoName = "storage-$("{0:D2}" -f $i)"
             $repoPath = "$storagePath\disk_$("{0:D2}" -f $i)"
@@ -133,14 +131,13 @@ jobs:
 
           Write-Host "1TB persistent storage mounted at C:\persistent_storage"
 
-      # ============================================================
-      # 4. ربط C:\ بالمجلد الدائم (باستخدام Junction Points)
-      # ============================================================
-      - name: Link C:\ to Persistent Storage
+      # --------------------------------------------
+      # 4. Link C:\ to Persistent Storage
+      # --------------------------------------------
+      - name: Link C Drive to Persistent Storage
         run: |
           $storagePath = "C:\persistent_storage"
 
-          # المجلدات التي سنربطها
           $foldersToLink = @(
             "Program Files",
             "Program Files (x86)",
@@ -152,13 +149,11 @@ jobs:
             $source = "$storagePath\$folder"
             $target = "C:\$folder"
 
-            # إذا كان المجلد موجوداً في C:\، انقله إلى التخزين الدائم
             if (Test-Path $target) {
               Write-Host "Moving $target to $source..."
               Move-Item -Path $target -Destination $source -Force -ErrorAction SilentlyContinue
             }
 
-            # إنشاء رابط (Junction) من C:\ إلى التخزين الدائم
             if (-not (Test-Path $target)) {
               Write-Host "Creating junction from $target to $source..."
               New-Item -ItemType Junction -Path $target -Target $source -Force
@@ -167,14 +162,13 @@ jobs:
 
           Write-Host "C: drive is now linked to persistent storage!"
 
-      # ============================================================
-      # 5. استعادة الإعدادات والريجستري
-      # ============================================================
-      - name: Restore Registry & Settings
+      # --------------------------------------------
+      # 5. Restore Registry and Settings
+      # --------------------------------------------
+      - name: Restore Registry and Settings
         run: |
           $storagePath = "C:\persistent_storage"
 
-          # استعادة الريجستري
           $regFiles = @(
             "$storagePath\HKLM.reg",
             "$storagePath\HKCU.reg",
@@ -190,7 +184,6 @@ jobs:
             }
           }
 
-          # استعادة الاختصارات
           $desktopSource = "$storagePath\Desktop"
           $desktopDest = "C:\Users\$env:RDP_USER\Desktop"
           if (Test-Path $desktopSource) {
@@ -199,9 +192,9 @@ jobs:
 
           Write-Host "Registry and shortcuts restored!"
 
-      # ============================================================
-      # 6. مزامنة التغييرات (كل 10 دقائق)
-      # ============================================================
+      # --------------------------------------------
+      # 6. Sync Changes to GitHub
+      # --------------------------------------------
       - name: Sync Changes to GitHub
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -228,15 +221,15 @@ jobs:
             Start-Sleep -Seconds 600
           }
 
-      # ============================================================
-      # 7. CRD (اختياري)
-      # ============================================================
+      # --------------------------------------------
+      # 7. CRD Steps (Optional)
+      # --------------------------------------------
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         run: |
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           if (-not (Test-Path $exe)) {
-            Write-Host "CRD host not found, attempting install (EXE -> MSI fallback)..."
+            Write-Host "CRD host not found, attempting install..."
             $exePath = "$env:TEMP\chromeremotedesktophost.exe"
             $ok = $false
             try {
@@ -245,7 +238,7 @@ jobs:
               Remove-Item $exePath -Force
               $ok = $true
             } catch {
-              Write-Host "EXE installer failed or missing: $($_.Exception.Message)"
+              Write-Host "EXE installer failed: $($_.Exception.Message)"
             }
             if (-not $ok) {
               $msi = "$env:TEMP\chromeremotedesktophost.msi"
@@ -315,10 +308,10 @@ jobs:
             }
           } else { Write-Host "CRD log directory not found: $logDir" }
 
-      # ============================================================
-      # 8. تحديد اسم المضيف ووقت التشغيل
-      # ============================================================
-      - name: Decide hostname + runtime
+      # --------------------------------------------
+      # 8. Hostname and Runtime
+      # --------------------------------------------
+      - name: Decide hostname and runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "bullet${{ matrix.id }}" } else { $hn = "bullet" }
           "TS_HOSTNAME=$hn" | Out-File -Append $env:GITHUB_ENV
@@ -332,9 +325,9 @@ jobs:
           "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Hostname: $hn  | Runtime: $runtime"
 
-      # ============================================================
-      # 9. حذف الأجهزة السابقة (اختياري)
-      # ============================================================
+      # --------------------------------------------
+      # 9. Purge bullet devices (optional)
+      # --------------------------------------------
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
@@ -355,10 +348,10 @@ jobs:
             Write-Host "Purge disabled."
           }
 
-      # ============================================================
-      # 10. تثبيت Tailscale
-      # ============================================================
-      - name: Install + Up Tailscale
+      # --------------------------------------------
+      # 10. Install Tailscale
+      # --------------------------------------------
+      - name: Install and Up Tailscale
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           if (-not (Test-Path $ts)) {
@@ -374,10 +367,10 @@ jobs:
           "TAILSCALE_IP=$ip4" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Tailscale IPv4: $ip4"
 
-      # ============================================================
-      # 11. تفعيل RDP
-      # ============================================================
-      - name: Enable RDP user + firewall
+      # --------------------------------------------
+      # 11. Enable RDP
+      # --------------------------------------------
+      - name: Enable RDP user and firewall
         run: |
           $u=$env:RDP_USER; $p=$env:RDP_PASS
           $sec = ConvertTo-SecureString $p -AsPlainText -Force
@@ -395,18 +388,18 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
           Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-      # ============================================================
-      # 12. تثبيت Python
-      # ============================================================
+      # --------------------------------------------
+      # 12. Install Python libs
+      # --------------------------------------------
       - name: Install Python libs
         run: |
           python -m pip install --upgrade pip
           python -m pip install --force-reinstall pyautogui pynput pillow
           python -c "import pyautogui, pynput, PIL; print('Python libs OK')"
 
-      # ============================================================
-      # 13. تثبيت RustDesk
-      # ============================================================
+      # --------------------------------------------
+      # 13. Install RustDesk
+      # --------------------------------------------
       - name: Install RustDesk
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
@@ -425,9 +418,9 @@ jobs:
           if (-not (Test-Path $rdExe)) { Write-Error "RustDesk not found after install"; exit 1 }
           Write-Host "RustDesk installed."
 
-      # ============================================================
-      # 14. فتح منافذ RustDesk
-      # ============================================================
+      # --------------------------------------------
+      # 14. Open RustDesk ports
+      # --------------------------------------------
       - name: Open RustDesk ports
         run: |
           for ($p=21115; $p -le 21119; $p++) {
@@ -439,10 +432,10 @@ jobs:
           netsh advfirewall firewall delete rule name=$udpName 2>$null
           netsh advfirewall firewall add rule name=$udpName dir=in action=allow protocol=UDP localport=21116
 
-      # ============================================================
-      # 15. تشغيل RustDesk + Screenshot
-      # ============================================================
-      - name: Launch RustDesk + Screenshot
+      # --------------------------------------------
+      # 15. Launch RustDesk and Screenshot
+      # --------------------------------------------
+      - name: Launch RustDesk and Screenshot
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
           Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
@@ -462,9 +455,9 @@ jobs:
           $json = $curlResult | ConvertFrom-Json
           if ($json.status -eq "ok") { "SCREENSHOT_URL=$($json.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV }
 
-      # ============================================================
-      # 16. البقاء على قيد الحياة
-      # ============================================================
+      # --------------------------------------------
+      # 16. Keep alive
+      # --------------------------------------------
       - name: Keep alive
         run: |
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
@@ -475,9 +468,9 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # ============================================================
-      # 17. الحفظ النهائي قبل الخروج
-      # ============================================================
+      # --------------------------------------------
+      # 17. Final sync before exit
+      # --------------------------------------------
       - name: Final sync before exit
         if: always()
         run: |
@@ -514,9 +507,9 @@ jobs:
 
           Write-Host "Final sync completed successfully!"
 
-      # ============================================================
-      # 18. تشغيل المرحلة التالية أو التوقف
-      # ============================================================
+      # --------------------------------------------
+      # 18. Dispatch next or stop
+      # --------------------------------------------
       - name: Dispatch next or stop
         if: always()
         env:
