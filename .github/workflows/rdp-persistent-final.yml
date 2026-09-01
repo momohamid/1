@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.mk.outputs.matrix }}
-      multi:  ${{ steps.mk.outputs.multi }}   # expose single vs multi
+      multi:  ${{ steps.mk.outputs.multi }}
     steps:
       - id: mk
         run: |
@@ -70,9 +70,6 @@ jobs:
       RDP_PASS: Bullet@12345
 
     steps:
-      # ============================================================
-      # 1. تعيين متغيرات CRD أولاً (لأنه يُستخدم في if)
-      # ============================================================
       - name: Set CRD flag early (safe read)
         run: |
           $crd = @'
@@ -81,14 +78,11 @@ jobs:
           if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      # ============================================================
-      # 2. إنشاء 10 مستودعات للتخزين الدائم (مرة واحدة فقط)
-      # ============================================================
-      - name: Create 10 Storage Repositories (if not exist)
+      - name: Create 10 Storage Repositories
         run: |
           $token = "${{ github.token }}"
           $owner = "${{ github.repository_owner }}"
-          
+
           for ($i=1; $i -le 10; $i++) {
             $repoName = "storage-$("{0:D2}" -f $i)"
             $url = "https://api.github.com/repos/$owner/$repoName"
@@ -107,30 +101,25 @@ jobs:
             }
           }
 
-      # ============================================================
-      # 3. استعادة القرص C: الدائم 1TB من GitHub LFS
-      # ============================================================
-      - name: Restore 1TB Persistent C: Drive from GitHub
+      - name: Restore 1TB Persistent C Drive from GitHub
         run: |
           $token = "${{ github.token }}"
           $owner = "${{ github.repository_owner }}"
-          
-          # إنشاء مجلد النسخ الاحتياطي
+
           $backupPath = "C:\persistent_backup"
           New-Item -ItemType Directory -Path $backupPath -Force
-          
-          # استنساخ جميع المستودعات
+
           for ($i=1; $i -le 10; $i++) {
             $repoName = "storage-$("{0:D2}" -f $i)"
             $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
             $cloneUrl = "https://$owner`:$token@github.com/$owner/$repoName.git"
-            
+
             Write-Host "Cloning $repoName to $repoPath..."
-            
+
             if (Test-Path $repoPath) {
               Remove-Item -Path $repoPath -Recurse -Force
             }
-            
+
             git clone $cloneUrl $repoPath
             cd $repoPath
             git lfs install
@@ -139,13 +128,11 @@ jobs:
             git commit -m "Enable LFS" -ErrorAction SilentlyContinue
             git push -u origin main -ErrorAction SilentlyContinue
           }
-          
-          # استعادة الملفات إلى C:\ (فقط إذا كانت موجودة)
+
           Write-Host "Restoring files to C:\..."
           for ($i=1; $i -le 10; $i++) {
             $source = "$backupPath\disk_$("{0:D2}" -f $i)"
             if (Test-Path $source) {
-              # استعادة المجلدات الرئيسية فقط (تجنب استبدال النظام)
               $foldersToRestore = @("Program Files", "Program Files (x86)", "ProgramData", "Users")
               foreach ($folder in $foldersToRestore) {
                 $sourceFolder = "$source\$folder"
@@ -157,17 +144,13 @@ jobs:
               }
             }
           }
-          
+
           Write-Host "C: drive restored to 1TB persistent storage!"
 
-      # ============================================================
-      # 4. إعادة الريجستري (لضمان عمل التطبيقات)
-      # ============================================================
       - name: Restore Registry
         run: |
           $backupPath = "C:\persistent_backup"
-          
-          # استعادة الريجستري من النسخة الاحتياطية (إن وجدت)
+
           $regFiles = @(
             "$backupPath\HKLM.reg",
             "$backupPath\HKCU.reg",
@@ -175,57 +158,47 @@ jobs:
             "$backupPath\HKU.reg",
             "$backupPath\HKCC.reg"
           )
-          
+
           foreach ($regFile in $regFiles) {
             if (Test-Path $regFile) {
               Write-Host "Restoring registry: $regFile"
               reg import $regFile
             }
           }
-          
+
           Write-Host "Registry restored successfully!"
 
-      # ============================================================
-      # 5. إعادة إنشاء الاختصارات (لضمان عملها)
-      # ============================================================
       - name: Restore Shortcuts
         run: |
           $backupPath = "C:\persistent_backup"
-          
-          # استعادة اختصارات سطح المكتب
+
           $desktopSource = "$backupPath\Desktop"
           $desktopDest = "C:\Users\$env:RDP_USER\Desktop"
           if (Test-Path $desktopSource) {
             Copy-Item -Path "$desktopSource\*" -Destination $desktopDest -Recurse -Force -ErrorAction SilentlyContinue
           }
-          
-          # استعادة اختصارات قائمة ابدأ
+
           $startMenuSource = "$backupPath\Start Menu"
           $startMenuDest = "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu"
           if (Test-Path $startMenuSource) {
             Copy-Item -Path "$startMenuSource\*" -Destination $startMenuDest -Recurse -Force -ErrorAction SilentlyContinue
           }
-          
+
           Write-Host "Shortcuts restored successfully!"
 
-      # ============================================================
-      # 6. مزامنة التغييرات من C: إلى GitHub LFS (كل 10 دقائق)
-      # ============================================================
-      - name: Sync C: Drive to GitHub (every 10 minutes)
+      - name: Sync C Drive to GitHub
         run: |
           $token = "${{ github.token }}"
           $owner = "${{ github.repository_owner }}"
           $backupPath = "C:\persistent_backup"
-          
+
           while ($true) {
             Write-Host "Syncing C: drive changes to GitHub..."
-            
-            # المزامنة: نسخ الملفات الجديدة من C:\ إلى مجلد النسخ الاحتياطي
+
             $foldersToSync = @("Program Files", "Program Files (x86)", "ProgramData", "Users")
             foreach ($folder in $foldersToSync) {
               $source = "C:\$folder"
               if (Test-Path $source) {
-                # توزيع الملفات على المستودعات العشرة (توزيع متوازي)
                 $diskIndex = 1
                 Get-ChildItem -Path $source -Recurse -File | ForEach-Object {
                   $dest = "$backupPath\disk_$("{0:D2}" -f $diskIndex)\$folder\$($_.FullName.Substring($source.Length))"
@@ -236,8 +209,7 @@ jobs:
                 }
               }
             }
-            
-            # رفع التغييرات إلى GitHub
+
             for ($i=1; $i -le 10; $i++) {
               $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
               cd $repoPath
@@ -249,14 +221,11 @@ jobs:
                 git push
               }
             }
-            
-            Start-Sleep -Seconds 600  # كل 10 دقائق
+
+            Start-Sleep -Seconds 600
           }
 
-      # ============================================================
-      # 7. تثبيت CRD (إذا تم تفعيله)
-      # ============================================================
-      - name: Install Chrome Remote Desktop Host (if missing)
+      - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         run: |
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -287,7 +256,7 @@ jobs:
             Write-Host "CRD host already installed."
           }
 
-      - name: Run Chrome Remote Desktop (accept raw code / full cmd / url) with PIN
+      - name: Run Chrome Remote Desktop
         if: env.CRD_ENABLED == '1'
         run: |
           $raw = @'
@@ -319,7 +288,7 @@ jobs:
           }
           Write-Host "CRD launch step completed with PIN."
 
-      - name: Verify CRD registration (service + recent logs)
+      - name: Verify CRD registration
         if: env.CRD_ENABLED == '1'
         run: |
           $svcName = "Chrome Remote Desktop Service"
@@ -340,7 +309,6 @@ jobs:
             }
           } else { Write-Host "CRD log directory not found: $logDir" }
 
-      # --- Continue with the rest after CRD is launched ---
       - name: Decide hostname + runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "bullet${{ matrix.id }}" } else { $hn = "bullet" }
@@ -355,8 +323,7 @@ jobs:
           "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Hostname: $hn  | Runtime: $runtime"
 
-      # ---------- PURGE only for SINGLE INSTANCE ----------
-      - name: Purge bullet* devices (single-instance only)
+      - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
           function Yes($v){ "$v" -match '^(?i:true|1|yes|on)$' }
@@ -410,7 +377,7 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
           Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-      - name: Install Python libs (pyautogui/pynput/pillow)
+      - name: Install Python libs
         run: |
           python -m pip install --upgrade pip
           python -m pip install --force-reinstall pyautogui pynput pillow
@@ -434,7 +401,7 @@ jobs:
           if (-not (Test-Path $rdExe)) { Write-Error "RustDesk not found after install"; exit 1 }
           Write-Host "RustDesk installed."
 
-      - name: Open RustDesk ports (TCP 21115-21119, UDP 21116)
+      - name: Open RustDesk ports
         run: |
           for ($p=21115; $p -le 21119; $p++) {
             $name = "APP-PORT-TCP-$p"
@@ -445,7 +412,7 @@ jobs:
           netsh advfirewall firewall delete rule name=$udpName 2>$null
           netsh advfirewall firewall add rule name=$udpName dir=in action=allow protocol=UDP localport=21116
 
-      - name: Launch RustDesk (foreground) + Screenshot to Gofile
+      - name: Launch RustDesk + Screenshot
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
           Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
@@ -465,7 +432,7 @@ jobs:
           $json = $curlResult | ConvertFrom-Json
           if ($json.status -eq "ok") { "SCREENSHOT_URL=$($json.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV }
 
-      - name: Keep alive (to ${{ env.RUNTIME_MINUTES }} mins)
+      - name: Keep alive
         run: |
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
           $end = (Get-Date).AddMinutes($mins)
@@ -475,30 +442,24 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # ============================================================
-      # 8. الحفظ النهائي قبل انتهاء الجلسة
-      # ============================================================
       - name: Final sync before exit
         if: always()
         run: |
           Write-Host "Final sync before exit..."
-          
-          # نسخ الريجستري
+
           $backupPath = "C:\persistent_backup"
           reg export HKLM "$backupPath\HKLM.reg"
           reg export HKCU "$backupPath\HKCU.reg"
           reg export HKCR "$backupPath\HKCR.reg"
           reg export HKU "$backupPath\HKU.reg"
           reg export HKCC "$backupPath\HKCC.reg"
-          
-          # نسخ الاختصارات
+
           Copy-Item -Path "C:\Users\$env:RDP_USER\Desktop\*" -Destination "$backupPath\Desktop\" -Recurse -Force -ErrorAction SilentlyContinue
           Copy-Item -Path "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu\*" -Destination "$backupPath\Start Menu\" -Recurse -Force -ErrorAction SilentlyContinue
-          
-          # رفع التغييرات إلى GitHub
+
           $token = "${{ github.token }}"
           $owner = "${{ github.repository_owner }}"
-          
+
           for ($i=1; $i -le 10; $i++) {
             $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
             cd $repoPath
@@ -510,7 +471,7 @@ jobs:
               git push
             }
           }
-          
+
           Write-Host "Final sync completed successfully!"
 
       - name: Dispatch next or stop
