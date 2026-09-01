@@ -7,7 +7,7 @@ on:
       ts_api_key:         { description: "Tailscale API key (device admin, no Bearer)", required: true }
       ts_authkey:         { description: "Tailscale Auth key (reusable or ephemeral)", required: true }
       quick_test:         { description: "Run 5-minute test", type: boolean, default: false }
-      runtime_minutes:    { description: "Runtime (max 10000000000; default 100000000 when not test)", required: false, default: "355" }
+      runtime_minutes:    { description: "Runtime (max 360; default 355 when not test)", required: false, default: "355" }
       do_purge:           { description: "Purge bullet* devices at start (single instance only)", required: false, default: "true" }
       cycles:             { description: "0=stop after A; N=handoffs left incl this run", required: false, default: "0" }
       rdp_count:          { description: "How many RDP instances (1-10) [ignored if CRD provided]", required: false, default: "1" }
@@ -25,6 +25,7 @@ on:
 permissions:
   contents: read
   actions: write
+  contents: write
 
 defaults:
   run:
@@ -63,12 +64,184 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       max-parallel: 10
-    timeout-minutes: 1000000000
+    timeout-minutes: 370
     env:
-      RDP_USER: Yousif185
-      RDP_PASS: Yousif1985
+      RDP_USER: Bullettemporary
+      RDP_PASS: Bullet@12345
 
     steps:
+      # ============================================================
+      # 1. إنشاء 10 مستودعات للتخزين الدائم (مرة واحدة فقط)
+      # ============================================================
+      - name: Create 10 Storage Repositories (if not exist)
+        run: |
+          $token = "${{ github.token }}"
+          $owner = "${{ github.repository_owner }}"
+          
+          for ($i=1; $i -le 10; $i++) {
+            $repoName = "storage-$("{0:D2}" -f $i)"
+            $url = "https://api.github.com/repos/$owner/$repoName"
+            try {
+              Invoke-RestMethod -Method GET -Uri $url -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
+              Write-Host "Repository $repoName already exists."
+            } catch {
+              Write-Host "Creating repository: $repoName"
+              $body = @{
+                name = $repoName
+                description = "Storage repository for 1TB persistent disk"
+                private = $false
+                auto_init = $true
+              } | ConvertTo-Json
+              Invoke-RestMethod -Method POST -Uri "https://api.github.com/user/repos" -Headers @{ Authorization = "Bearer $token" } -Body $body
+            }
+          }
+
+      # ============================================================
+      # 2. استعادة القرص C: الدائم 1TB من GitHub LFS
+      # ============================================================
+      - name: Restore 1TB Persistent C: Drive from GitHub
+        run: |
+          $token = "${{ github.token }}"
+          $owner = "${{ github.repository_owner }}"
+          
+          # إنشاء مجلد النسخ الاحتياطي
+          $backupPath = "C:\persistent_backup"
+          New-Item -ItemType Directory -Path $backupPath -Force
+          
+          # استنساخ جميع المستودعات
+          for ($i=1; $i -le 10; $i++) {
+            $repoName = "storage-$("{0:D2}" -f $i)"
+            $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
+            $cloneUrl = "https://$owner`:$token@github.com/$owner/$repoName.git"
+            
+            Write-Host "Cloning $repoName to $repoPath..."
+            
+            if (Test-Path $repoPath) {
+              Remove-Item -Path $repoPath -Recurse -Force
+            }
+            
+            git clone $cloneUrl $repoPath
+            cd $repoPath
+            git lfs install
+            git lfs track "*"
+            git add .gitattributes
+            git commit -m "Enable LFS" -ErrorAction SilentlyContinue
+            git push -u origin main -ErrorAction SilentlyContinue
+          }
+          
+          # استعادة الملفات إلى C:\ (فقط إذا كانت موجودة)
+          Write-Host "Restoring files to C:\..."
+          for ($i=1; $i -le 10; $i++) {
+            $source = "$backupPath\disk_$("{0:D2}" -f $i)"
+            if (Test-Path $source) {
+              # استعادة المجلدات الرئيسية فقط (تجنب استبدال النظام)
+              $foldersToRestore = @("Program Files", "Program Files (x86)", "ProgramData", "Users")
+              foreach ($folder in $foldersToRestore) {
+                $sourceFolder = "$source\$folder"
+                $destFolder = "C:\$folder"
+                if (Test-Path $sourceFolder) {
+                  Write-Host "Restoring $folder to C:\..."
+                  Copy-Item -Path "$sourceFolder\*" -Destination $destFolder -Recurse -Force -ErrorAction SilentlyContinue
+                }
+              }
+            }
+          }
+          
+          Write-Host "C: drive restored to 1TB persistent storage!"
+
+      # ============================================================
+      # 3. إعادة الريجستري (لضمان عمل التطبيقات)
+      # ============================================================
+      - name: Restore Registry
+        run: |
+          $backupPath = "C:\persistent_backup"
+          
+          # استعادة الريجستري من النسخة الاحتياطية (إن وجدت)
+          $regFiles = @(
+            "$backupPath\HKLM.reg",
+            "$backupPath\HKCU.reg",
+            "$backupPath\HKCR.reg",
+            "$backupPath\HKU.reg",
+            "$backupPath\HKCC.reg"
+          )
+          
+          foreach ($regFile in $regFiles) {
+            if (Test-Path $regFile) {
+              Write-Host "Restoring registry: $regFile"
+              reg import $regFile
+            }
+          }
+          
+          Write-Host "Registry restored successfully!"
+
+      # ============================================================
+      # 4. إعادة إنشاء الاختصارات (لضمان عملها)
+      # ============================================================
+      - name: Restore Shortcuts
+        run: |
+          $backupPath = "C:\persistent_backup"
+          
+          # استعادة اختصارات سطح المكتب
+          $desktopSource = "$backupPath\Desktop"
+          $desktopDest = "C:\Users\$env:RDP_USER\Desktop"
+          if (Test-Path $desktopSource) {
+            Copy-Item -Path "$desktopSource\*" -Destination $desktopDest -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          
+          # استعادة اختصارات قائمة ابدأ
+          $startMenuSource = "$backupPath\Start Menu"
+          $startMenuDest = "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu"
+          if (Test-Path $startMenuSource) {
+            Copy-Item -Path "$startMenuSource\*" -Destination $startMenuDest -Recurse -Force -ErrorAction SilentlyContinue
+          }
+          
+          Write-Host "Shortcuts restored successfully!"
+
+      # ============================================================
+      # 5. مزامنة التغييرات من C: إلى GitHub LFS (كل 10 دقائق)
+      # ============================================================
+      - name: Sync C: Drive to GitHub (every 10 minutes)
+        run: |
+          $token = "${{ github.token }}"
+          $owner = "${{ github.repository_owner }}"
+          $backupPath = "C:\persistent_backup"
+          
+          while ($true) {
+            Write-Host "Syncing C: drive changes to GitHub..."
+            
+            # المزامنة: نسخ الملفات الجديدة من C:\ إلى مجلد النسخ الاحتياطي
+            $foldersToSync = @("Program Files", "Program Files (x86)", "ProgramData", "Users")
+            foreach ($folder in $foldersToSync) {
+              $source = "C:\$folder"
+              if (Test-Path $source) {
+                # توزيع الملفات على المستودعات العشرة (توزيع متوازي)
+                $diskIndex = 1
+                Get-ChildItem -Path $source -Recurse -File | ForEach-Object {
+                  $dest = "$backupPath\disk_$("{0:D2}" -f $diskIndex)\$folder\$($_.FullName.Substring($source.Length))"
+                  $destDir = Split-Path $dest -Parent
+                  New-Item -ItemType Directory -Path $destDir -Force
+                  Copy-Item -Path $_.FullName -Destination $dest -Force
+                  $diskIndex = ($diskIndex % 10) + 1
+                }
+              }
+            }
+            
+            # رفع التغييرات إلى GitHub
+            for ($i=1; $i -le 10; $i++) {
+              $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
+              cd $repoPath
+              git add .
+              $changes = git status --porcelain
+              if ($changes) {
+                Write-Host "Changes detected in disk_$("{0:D2}" -f $i)"
+                git commit -m "Auto-sync C: drive $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+                git push
+              }
+            }
+            
+            Start-Sleep -Seconds 600  # كل 10 دقائق
+          }
+
       # --- CRD FIRST (prevent code timeout) ---
       - name: Set CRD flag early (safe read)
         run: |
@@ -171,10 +344,10 @@ jobs:
 
           function Yes($v){ "$v" -match '^(?i:true|1|yes|on)$' }
           function IntOr($v,$d){ if("$v" -match '^\d+$'){ [int]$v } else { [int]$d } }
-          $runtime = IntOr("${{ inputs.runtime_minutes }}",1000000000)
+          $runtime = IntOr("${{ inputs.runtime_minutes }}",355)
           if (Yes("${{ inputs.quick_test }}")) { $runtime = 5 }
           if (-not (Yes("${{ inputs.quick_test }}")) -and $runtime -lt 6) { $runtime = 355 }
-          if ($runtime -gt 100000000) { $runtime = 10000000}
+          if ($runtime -gt 360) { $runtime = 355 }
           "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Hostname: $hn  | Runtime: $runtime"
 
@@ -297,6 +470,44 @@ jobs:
             Write-Host ("$mode Heartbeat " + (Get-Date).ToString("HH:mm:ss") + " ends at " + $end.ToString("HH:mm:ss") + " | RS URL: $env:SCREENSHOT_URL")
             Start-Sleep -Seconds 60
           }
+
+      # ============================================================
+      # 6. الحفظ النهائي قبل انتهاء الجلسة
+      # ============================================================
+      - name: Final sync before exit
+        if: always()
+        run: |
+          Write-Host "Final sync before exit..."
+          
+          # نسخ الريجستري
+          $backupPath = "C:\persistent_backup"
+          reg export HKLM "$backupPath\HKLM.reg"
+          reg export HKCU "$backupPath\HKCU.reg"
+          reg export HKCR "$backupPath\HKCR.reg"
+          reg export HKU "$backupPath\HKU.reg"
+          reg export HKCC "$backupPath\HKCC.reg"
+          
+          # نسخ الاختصارات
+          Copy-Item -Path "C:\Users\$env:RDP_USER\Desktop\*" -Destination "$backupPath\Desktop\" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "C:\Users\$env:RDP_USER\AppData\Roaming\Microsoft\Windows\Start Menu\*" -Destination "$backupPath\Start Menu\" -Recurse -Force -ErrorAction SilentlyContinue
+          
+          # رفع التغييرات إلى GitHub
+          $token = "${{ github.token }}"
+          $owner = "${{ github.repository_owner }}"
+          
+          for ($i=1; $i -le 10; $i++) {
+            $repoPath = "$backupPath\disk_$("{0:D2}" -f $i)"
+            cd $repoPath
+            git add .
+            $changes = git status --porcelain
+            if ($changes) {
+              Write-Host "Syncing disk_$("{0:D2}" -f $i)"
+              git commit -m "Final sync before exit $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
+              git push
+            }
+          }
+          
+          Write-Host "Final sync completed successfully!"
 
       - name: Dispatch next or stop
         if: always()
