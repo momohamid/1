@@ -71,7 +71,18 @@ jobs:
 
     steps:
       # ============================================================
-      # 1. إنشاء 10 مستودعات للتخزين الدائم (مرة واحدة فقط)
+      # 1. تعيين متغيرات CRD أولاً (لأنه يُستخدم في if)
+      # ============================================================
+      - name: Set CRD flag early (safe read)
+        run: |
+          $crd = @'
+          ${{ inputs.crd_code }}
+          '@.Trim()
+          if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
+          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
+
+      # ============================================================
+      # 2. إنشاء 10 مستودعات للتخزين الدائم (مرة واحدة فقط)
       # ============================================================
       - name: Create 10 Storage Repositories (if not exist)
         run: |
@@ -97,7 +108,7 @@ jobs:
           }
 
       # ============================================================
-      # 2. استعادة القرص C: الدائم 1TB من GitHub LFS
+      # 3. استعادة القرص C: الدائم 1TB من GitHub LFS
       # ============================================================
       - name: Restore 1TB Persistent C: Drive from GitHub
         run: |
@@ -150,7 +161,7 @@ jobs:
           Write-Host "C: drive restored to 1TB persistent storage!"
 
       # ============================================================
-      # 3. إعادة الريجستري (لضمان عمل التطبيقات)
+      # 4. إعادة الريجستري (لضمان عمل التطبيقات)
       # ============================================================
       - name: Restore Registry
         run: |
@@ -175,7 +186,7 @@ jobs:
           Write-Host "Registry restored successfully!"
 
       # ============================================================
-      # 4. إعادة إنشاء الاختصارات (لضمان عملها)
+      # 5. إعادة إنشاء الاختصارات (لضمان عملها)
       # ============================================================
       - name: Restore Shortcuts
         run: |
@@ -198,7 +209,7 @@ jobs:
           Write-Host "Shortcuts restored successfully!"
 
       # ============================================================
-      # 5. مزامنة التغييرات من C: إلى GitHub LFS (كل 10 دقائق)
+      # 6. مزامنة التغييرات من C: إلى GitHub LFS (كل 10 دقائق)
       # ============================================================
       - name: Sync C: Drive to GitHub (every 10 minutes)
         run: |
@@ -242,16 +253,10 @@ jobs:
             Start-Sleep -Seconds 600  # كل 10 دقائق
           }
 
-      # --- CRD FIRST (prevent code timeout) ---
-      - name: Set CRD flag early (safe read)
-        run: |
-          $crd = @'
-          ${{ inputs.crd_code }}
-          '@.Trim()
-          if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
-          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
-
-      - name: Install Chrome Remote Desktop Host (if missing)  # EXE -> MSI fallback
+      # ============================================================
+      # 7. تثبيت CRD (إذا تم تفعيله)
+      # ============================================================
+      - name: Install Chrome Remote Desktop Host (if missing)
         if: env.CRD_ENABLED == '1'
         run: |
           $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
@@ -305,7 +310,6 @@ jobs:
             $args  = @("--code=""$code""","--redirect-url=""$redir""","--name=""$name""","--pin=""$pin""")
             Start-Process -FilePath $starter -ArgumentList $args
           } elseif ($isFull) {
-            # Last resort: run as-is (might prompt if it lacks --pin)
             $tmp = "$env:TEMP\crd_full.ps1"
             Set-Content -Path $tmp -Value $raw -Encoding UTF8
             powershell -ExecutionPolicy Bypass -File $tmp
@@ -472,7 +476,7 @@ jobs:
           }
 
       # ============================================================
-      # 6. الحفظ النهائي قبل انتهاء الجلسة
+      # 8. الحفظ النهائي قبل انتهاء الجلسة
       # ============================================================
       - name: Final sync before exit
         if: always()
