@@ -1,60 +1,29 @@
-name: RDP + Tailscale + RustDesk + CRD + Google Drive Persistent C
+name: RDP + Tailscale + RustDesk + (Optional) Chrome Remote Desktop (A)
 
 on:
-  schedule:
-    - cron: '0 */5 * * *'
-
   workflow_dispatch:
     inputs:
-      ts_tailnet:
-        description: "Tailscale tailnet"
-        required: true
-
-      ts_api_key:
-        description: "Tailscale API key"
-        required: true
-
-      ts_authkey:
-        description: "Tailscale Auth key"
-        required: true
-
-      quick_test:
-        description: "Run 5-minute test"
-        type: boolean
-        default: false
-
-      runtime_minutes:
-        description: "Runtime (max 360; default 300)"
-        required: false
-        default: "300"
-
-      do_purge:
-        description: "Purge bullet devices at start"
-        required: false
-        default: "true"
-
-      cycles:
-        description: "0=stop after A; N=handoffs left"
-        required: false
-        default: "9999"
-
-      rdp_count:
-        description: "How many RDP instances (1-10)"
-        required: false
-        default: "1"
-
+      ts_tailnet:         { description: "Tailscale tailnet (e.g. you@gmail.com)", required: true }
+      ts_api_key:         { description: "Tailscale API key (device admin, no Bearer)", required: true }
+      ts_authkey:         { description: "Tailscale Auth key (reusable or ephemeral)", required: true }
+      quick_test:         { description: "Run 5-minute test", type: boolean, default: false }
+      runtime_minutes:    { description: "Runtime (max 10000000000; default 100000000 when not test)", required: false, default: "355" }
+      do_purge:           { description: "Purge bullet* devices at start (single instance only)", required: false, default: "true" }
+      cycles:             { description: "0=stop after A; N=handoffs left incl this run", required: false, default: "0" }
+      rdp_count:          { description: "How many RDP instances (1-10) [ignored if CRD provided]", required: false, default: "1" }
       crd_code:
-        description: "Chrome Remote Desktop code/command"
+        description: >-
+          Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
+          If provided -> single instance; CRD launches first.
         required: false
         default: ""
-
       crd_pin:
-        description: "CRD PIN"
+        description: "CRD PIN (6–12 digits). Used when launching CRD to avoid interactive prompt."
         required: false
         default: "123456"
 
 permissions:
-  contents: write
+  contents: read
   actions: write
 
 defaults:
@@ -62,1458 +31,305 @@ defaults:
     shell: pwsh
 
 jobs:
-
   setup:
     runs-on: ubuntu-latest
-    continue-on-error: true
-
     outputs:
       matrix: ${{ steps.mk.outputs.matrix }}
-      multi: ${{ steps.mk.outputs.multi }}
-
+      multi:  ${{ steps.mk.outputs.multi }}   # expose single vs multi
     steps:
-
       - id: mk
-        shell: pwsh
         run: |
-          $ErrorActionPreference = "Continue"
-
+          # Safe literal read (so full commands with &, quotes, ${Env:...} don't break)
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
-          if ($crd.Length -gt 0) {
-            $n = 1
-          }
-          else {
-            $n = 1
-
-            $rawCount = @'
-          ${{ inputs.rdp_count }}
-          '@.Trim()
-
-            if ($rawCount -match '^\d+$') {
-              $n = [int]$rawCount
-            }
-
-            if ($n -lt 1) {
-              $n = 1
-            }
-
-            if ($n -gt 10) {
-              $n = 10
-            }
+          # If CRD provided -> force single; else use rdp_count (1..10)
+          if ($crd.Length -gt 0) { $n = 1 } else {
+            $n = [int]"${{ inputs.rdp_count }}"; if ($n -lt 1) { $n = 1 }; if ($n -gt 10) { $n = 10 }
           }
 
-          $inc = @()
+          $inc = @(); for ($i=1; $i -le $n; $i++){ $inc += @{ id = $i } }
+          $json = @{ include = $inc } | ConvertTo-Json -Compress
+          "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          for ($i = 1; $i -le $n; $i++) {
-            $inc += @{
-              id = $i
-            }
-          }
-
-          $json = @{
-            include = $inc
-          } | ConvertTo-Json -Compress
-
-          "matrix=$json" |
-            Out-File `
-              $env:GITHUB_OUTPUT `
-              -Append `
-              -Encoding utf8
-
-          if ($n -gt 1) {
-            $multi = '1'
-          }
-          else {
-            $multi = '0'
-          }
-
-          "multi=$multi" |
-            Out-File `
-              $env:GITHUB_OUTPUT `
-              -Append `
-              -Encoding utf8
-
+          # NEW: multi flag
+          $multi = if ($n -gt 1) { '1' } else { '0' }
+          "multi=$multi" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
   rdp:
     needs: setup
-
     runs-on: windows-latest
-    continue-on-error: true
-
     strategy:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
       max-parallel: 10
-
-    timeout-minutes: 370
-
+    timeout-minutes: 1000000000
     env:
-      RDP_USER: Yousif190
-      RDP_PASS: Yousif1990
+      RDP_USER: Yousif185
+      RDP_PASS: Yousif1985
 
     steps:
-
-      - name: Set CRD flag early
-        continue-on-error: true
+      # --- CRD FIRST (prevent code timeout) ---
+      - name: Set CRD flag early (safe read)
         run: |
-          $ErrorActionPreference = "Continue"
-
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
+          if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
+          Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-          if ($crd.Length -gt 0) {
-            "CRD_ENABLED=1" |
-              Out-File `
-                -Append `
-                $env:GITHUB_ENV
-          }
-          else {
-            "CRD_ENABLED=0" |
-              Out-File `
-                -Append `
-                $env:GITHUB_ENV
-          }
-
-
-      - name: Install Chrome Remote Desktop Host
+      - name: Install Chrome Remote Desktop Host (if missing)  # EXE -> MSI fallback
         if: env.CRD_ENABLED == '1'
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
-          $exe =
-            "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-
+          $exe = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
           if (-not (Test-Path $exe)) {
-
-            $exePath =
-              "$env:TEMP\chromeremotedesktophost.exe"
-
+            Write-Host "CRD host not found, attempting install (EXE -> MSI fallback)..."
+            $exePath = "$env:TEMP\chromeremotedesktophost.exe"
             $ok = $false
-
             try {
-              Invoke-WebRequest `
-                -Uri `
-                "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" `
-                -OutFile `
-                $exePath `
-                -ErrorAction SilentlyContinue
-
-              Start-Process `
-                -FilePath `
-                $exePath `
-                -ArgumentList "/silent","/install" `
-                -Wait
-
-              Remove-Item `
-                $exePath `
-                -Force `
-                -ErrorAction SilentlyContinue
-
+              Invoke-WebRequest -Uri "https://dl.google.com/support/remote_assistance/ChromotingHostSetup.exe" -OutFile $exePath -ErrorAction Stop
+              Start-Process -FilePath $exePath -ArgumentList "/silent","/install" -Wait
+              Remove-Item $exePath -Force
               $ok = $true
+            } catch {
+              Write-Host "EXE installer failed or missing: $($_.Exception.Message)"
             }
-            catch {
-              Write-Host `
-                "EXE installer failed: $($_.Exception.Message)"
-            }
-
             if (-not $ok) {
-
-              $msi =
-                "$env:TEMP\chromeremotedesktophost.msi"
-
+              $msi = "$env:TEMP\chromeremotedesktophost.msi"
               try {
-                Invoke-WebRequest `
-                  -Uri `
-                  "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" `
-                  -OutFile `
-                  $msi `
-                  -ErrorAction SilentlyContinue
-
-                Start-Process `
-                  msiexec.exe `
-                  -ArgumentList `
-                  "/i",`
-                  "`"$msi`"",`
-                  "/quiet",`
-                  "/norestart" `
-                  -Wait
-
-                Remove-Item `
-                  $msi `
-                  -Force `
-                  -ErrorAction SilentlyContinue
+                Invoke-WebRequest -Uri "https://dl.google.com/edgedl/chrome-remote-desktop/chromeremotedesktophost.msi" -OutFile $msi -ErrorAction Stop
+                Start-Process msiexec.exe -ArgumentList "/i","`"$msi`"","/quiet","/norestart" -Wait
+                Remove-Item $msi -Force
+              } catch {
+                Write-Error "CRD MSI fallback failed: $($_.Exception.Message)"
+                exit 1
               }
-              catch {}
             }
+          } else {
+            Write-Host "CRD host already installed."
           }
 
-
-      - name: Run Chrome Remote Desktop
+      - name: Run Chrome Remote Desktop (accept raw code / full cmd / url) with PIN
         if: env.CRD_ENABLED == '1'
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
           $raw = @'
           ${{ inputs.crd_code }}
           '@.Trim()
+          $pin = "${{ inputs.crd_pin }}".Trim()
+          if ($pin -notmatch '^\d{6,12}$') { Write-Error "crd_pin must be 6–12 digits."; exit 1 }
 
-          $pin =
-            "${{ inputs.crd_pin }}".Trim()
+          $starter = "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
+          if (-not (Test-Path $starter)) { Write-Error "remoting_start_host.exe not found."; exit 1 }
 
-          if ($pin -notmatch '^\d{6,12}$') {
-            Write-Warning "crd_pin format warning."
-          }
-
-          $starter =
-            "${Env:PROGRAMFILES(X86)}\Google\Chrome Remote Desktop\CurrentVersion\remoting_start_host.exe"
-
-          if (-not (Test-Path $starter)) {
-            Write-Warning "Chrome Remote Desktop starter not found."
-          }
-
-          $isFull = $false
-          $code = $null
-
-          if ($raw -match 'remoting_start_host\.exe') {
-            $isFull = $true
-          }
-
-          if ($raw -match '--code\s*=\s*"?([^"\s]+)') {
-
-            $code = (
-              [regex]::Match(
-                $raw,
-                '--code\s*=\s*"?([^"\s]+)'
-              )
-            ).Groups[1].Value
-          }
-          elseif ($raw -match '^4\/') {
-            $code = $raw
-          }
+          $isFull = $false; $code = $null
+          if ($raw -match 'remoting_start_host\.exe') { $isFull = $true }
+          if ($raw -match '--code\s*=\s*"?([^"\s]+)') { $code = ([regex]::Match($raw,'--code\s*=\s*"?([^"\s]+)')).Groups[1].Value }
+          elseif ($raw -match '^4\/') { $code = $raw }
 
           if ($code) {
-
-            $redir =
-              "https://remotedesktop.google.com/_/oauthredirect"
-
-            $name =
-              $Env:COMPUTERNAME
-
-            $args = @(
-              "--code=""$code""",
-              "--redirect-url=""$redir""",
-              "--name=""$name""",
-              "--pin=""$pin"""
-            )
-
-            Start-Process `
-              -FilePath $starter `
-              -ArgumentList $args `
-              -ErrorAction SilentlyContinue
+            $redir = "https://remotedesktop.google.com/_/oauthredirect"
+            $name  = $Env:COMPUTERNAME
+            $args  = @("--code=""$code""","--redirect-url=""$redir""","--name=""$name""","--pin=""$pin""")
+            Start-Process -FilePath $starter -ArgumentList $args
+          } elseif ($isFull) {
+            # Last resort: run as-is (might prompt if it lacks --pin)
+            $tmp = "$env:TEMP\crd_full.ps1"
+            Set-Content -Path $tmp -Value $raw -Encoding UTF8
+            powershell -ExecutionPolicy Bypass -File $tmp
+          } else {
+            Write-Error "Could not detect CRD code. Provide raw code (4/...), full command, or string containing --code=\"4/...\""
+            exit 1
           }
-          elseif ($isFull) {
+          Write-Host "CRD launch step completed with PIN."
 
-            $tmp =
-              "$env:TEMP\crd_full.ps1"
-
-            Set-Content `
-              -Path $tmp `
-              -Value $raw `
-              -Encoding UTF8 `
-              -ErrorAction SilentlyContinue
-
-            powershell `
-              -ExecutionPolicy Bypass `
-              -File $tmp
-          }
-          else {
-            Write-Warning "Could not detect CRD code."
-          }
-
-
-      - name: Verify CRD registration
+      - name: Verify CRD registration (service + recent logs)
         if: env.CRD_ENABLED == '1'
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
-          $deadline =
-            (Get-Date).AddSeconds(60)
-
+          $svcName = "Chrome Remote Desktop Service"
+          $deadline = (Get-Date).AddSeconds(60)
           $ok = $false
-
           while ((Get-Date) -lt $deadline) {
-
-            $svc =
-              Get-Service `
-                -Name "Chrome Remote Desktop Service" `
-                -ErrorAction SilentlyContinue
-
-            if (
-              $svc -and
-              $svc.Status -in @(
-                'Running',
-                'StartPending'
-              )
-            ) {
-              $ok = $true
-              break
-            }
-
+            $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+            if ($svc -and $svc.Status -in 'Running','StartPending') { $ok = $true; break }
             Start-Sleep -Seconds 3
           }
+          if ($ok) { Write-Host "[$svcName] status: Running or starting." } else { Write-Warning "[$svcName] not running yet." }
 
-          if ($ok) {
-            Write-Host "CRD service is running or starting."
-          }
-          else {
-            Write-Warning "CRD service not running yet."
-          }
+          $logDir = "$env:ProgramData\Google\Chrome Remote Desktop"
+          if (Test-Path $logDir) {
+            Get-ChildItem $logDir -Filter "host*.log" | Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+              Write-Host "----- LOG: $($_.FullName) -----"
+              Get-Content $_.FullName -Tail 200
+            }
+          } else { Write-Host "CRD log directory not found: $logDir" }
 
-
-      - name: Decide hostname and runtime
-        continue-on-error: true
+      # --- Continue with the rest after CRD is launched ---
+      - name: Decide hostname + runtime
         run: |
-          $ErrorActionPreference = "Continue"
+          if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "bullet${{ matrix.id }}" } else { $hn = "bullet" }
+          "TS_HOSTNAME=$hn" | Out-File -Append $env:GITHUB_ENV
 
-          $rawCount = @'
-          ${{ inputs.rdp_count }}
-          '@.Trim()
+          function Yes($v){ "$v" -match '^(?i:true|1|yes|on)$' }
+          function IntOr($v,$d){ if("$v" -match '^\d+$'){ [int]$v } else { [int]$d } }
+          $runtime = IntOr("${{ inputs.runtime_minutes }}",1000000000)
+          if (Yes("${{ inputs.quick_test }}")) { $runtime = 5 }
+          if (-not (Yes("${{ inputs.quick_test }}")) -and $runtime -lt 6) { $runtime = 355 }
+          if ($runtime -gt 100000000) { $runtime = 10000000}
+          "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
+          Write-Host "Hostname: $hn  | Runtime: $runtime"
 
-          $count = 1
-
-          if ($rawCount -match '^\d+$') {
-            $count = [int]$rawCount
-          }
-
-          if ($count -lt 1) {
-            $count = 1
-          }
-
-          if ($count -gt 10) {
-            $count = 10
-          }
-
-          if ($count -gt 1) {
-            $hn = "bullet${{ matrix.id }}"
-          }
-          else {
-            $hn = "bullet"
-          }
-
-          "TS_HOSTNAME=$hn" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          function Yes($v) {
-            "$v" -match '^(?i:true|1|yes|on)$'
-          }
-
-          function IntOr($v,$d) {
-            if ("$v" -match '^\d+$') {
-              [int]$v
-            }
-            else {
-              [int]$d
-            }
-          }
-
-          $runtime =
-            IntOr(
-              "${{ inputs.runtime_minutes }}",
-              300
-            )
-
-          if (Yes("${{ inputs.quick_test }}")) {
-            $runtime = 5
-          }
-
-          if (
-            -not (Yes("${{ inputs.quick_test }}")) -and
-            $runtime -lt 6
-          ) {
-            $runtime = 300
-          }
-
-          if ($runtime -gt 360) {
-            $runtime = 360
-          }
-
-          if ($runtime -lt 1) {
-            $runtime = 300
-          }
-
-          "RUNTIME_MINUTES=$runtime" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-          Write-Host "Hostname: $hn"
-          Write-Host "Runtime: $runtime minutes"
-
-
-      - name: Purge bullet devices
+      # ---------- PURGE only for SINGLE INSTANCE ----------
+      - name: Purge bullet* devices (single-instance only)
         if: ${{ needs.setup.outputs.multi == '0' }}
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
-          function Yes($v) {
-            "$v" -match '^(?i:true|1|yes|on)$'
-          }
-
+          function Yes($v){ "$v" -match '^(?i:true|1|yes|on)$' }
           if (Yes("${{ inputs.do_purge }}")) {
-
             try {
-
-              $auth =
-                [Convert]::ToBase64String(
-                  [Text.Encoding]::ASCII.GetBytes(
-                    "${{ inputs.ts_api_key }}:"
-                  )
-                )
-
-              $tn =
-                [uri]::EscapeDataString(
-                  "${{ inputs.ts_tailnet }}"
-                )
-
-              $list =
-                Invoke-RestMethod `
-                  -Uri `
-                  "https://api.tailscale.com/api/v2/tailnet/$tn/devices" `
-                  -Headers @{
-                    Authorization = "Basic $auth"
-                  } `
-                  -ErrorAction SilentlyContinue
-
-              foreach ($d in $list.devices) {
-
-                if ($d.hostname -match '^bullet[0-9]*$') {
-
-                  Invoke-RestMethod `
-                    -Method Delete `
-                    -Uri `
-                    "https://api.tailscale.com/api/v2/device/$($d.id)" `
-                    -Headers @{
-                      Authorization = "Basic $auth"
-                    } `
-                    -ErrorAction SilentlyContinue
+              $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("${{ inputs.ts_api_key }}:"))
+              $tn = [uri]::EscapeDataString("${{ inputs.ts_tailnet }}")
+              $list = Invoke-RestMethod -Uri "https://api.tailscale.com/api/v2/tailnet/$tn/devices" -Headers @{ Authorization = "Basic $auth" }
+              foreach($d in $list.devices){
+                if ($d.hostname -match '^bullet[0-9]*$'){
+                  Invoke-RestMethod -Method Delete -Uri "https://api.tailscale.com/api/v2/device/$($d.id)" -Headers @{ Authorization = "Basic $auth" } -ErrorAction SilentlyContinue
                 }
               }
-            }
-            catch {
-              Write-Warning `
-                "Purge warning: $($_.Exception.Message)"
-            }
+              Write-Host "Purged bullet* devices (if any)."
+            } catch { Write-Host "Purge warning: $($_.Exception.Message)" }
+          } else {
+            Write-Host "Purge disabled."
           }
-
 
       - name: Install + Up Tailscale
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
-          winget install `
-            --id Tailscale.Tailscale `
-            -e `
-            --silent `
-            --accept-package-agreements `
-            --accept-source-agreements 2>$null
-
-          Start-Sleep -Seconds 5
-
-          $ts =
-            "$env:ProgramFiles\Tailscale\tailscale.exe"
-
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
           if (-not (Test-Path $ts)) {
-            Write-Warning "Tailscale executable path check failed."
+            $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.82.0-amd64.msi"
+            $dst = "$env:TEMP\tailscale.msi"
+            Invoke-WebRequest -Uri $url -OutFile $dst
+            Start-Process msiexec.exe -ArgumentList "/i","`"$dst`"","/quiet","/norestart" -Wait
+            Remove-Item $dst -Force
           }
-
-          & $ts logout 2>$null |
-            Out-Null
-
-          & $ts up `
-            --authkey "${{ inputs.ts_authkey }}" `
-            --hostname "$env:TS_HOSTNAME" `
-            --accept-dns=true `
-            --accept-routes=true 2>$null
-
-          $ip4 =
-            & $ts ip -4 2>$null |
-            Select-Object -First 1
-
-          "TAILSCALE_IP=$ip4" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
+          & $ts logout | Out-Null
+          & $ts up --authkey "${{ inputs.ts_authkey }}" --hostname "$env:TS_HOSTNAME" --accept-dns=true --accept-routes=true
+          $ip4 = & $ts ip -4 | Select-Object -First 1
+          "TAILSCALE_IP=$ip4" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Tailscale IPv4: $ip4"
 
-
-      - name: Enable RDP user and firewall
-        continue-on-error: true
+      - name: Enable RDP user + firewall
         run: |
-          $ErrorActionPreference = "Continue"
-
-          $u = $env:RDP_USER
-          $p = $env:RDP_PASS
-
-          if ([string]::IsNullOrWhiteSpace($p)) {
-            Write-Warning "RDP_PASS secret might be empty."
+          $u=$env:RDP_USER; $p=$env:RDP_PASS
+          $sec = ConvertTo-SecureString $p -AsPlainText -Force
+          if (-not (Get-LocalUser -Name $u -EA SilentlyContinue)) {
+            New-LocalUser -Name $u -Password $sec -AccountNeverExpires
+            Add-LocalGroupMember -Group "Administrators" -Member $u
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u
+          } else {
+            Set-LocalUser -Name $u -Password $sec -AccountNeverExpires
+            Enable-LocalUser -Name $u
+            Add-LocalGroupMember -Group "Administrators" -Member $u -EA SilentlyContinue
+            Add-LocalGroupMember -Group "Remote Desktop Users" -Member $u -EA SilentlyContinue
           }
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
+          Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-          $sec =
-            ConvertTo-SecureString `
-              $p `
-              -AsPlainText `
-              -Force
-
-          if (
-            -not (
-              Get-LocalUser `
-                -Name $u `
-                -ErrorAction SilentlyContinue
-            )
-          ) {
-
-            New-LocalUser `
-              -Name $u `
-              -Password $sec `
-              -AccountNeverExpires `
-              -ErrorAction SilentlyContinue
-          }
-          else {
-
-            Set-LocalUser `
-              -Name $u `
-              -Password $sec `
-              -AccountNeverExpires `
-              -ErrorAction SilentlyContinue
-
-            Enable-LocalUser `
-              -Name $u `
-              -ErrorAction SilentlyContinue
-          }
-
-          Add-LocalGroupMember `
-            -Group "Administrators" `
-            -Member $u `
-            -ErrorAction SilentlyContinue
-
-          Add-LocalGroupMember `
-            -Group "Remote Desktop Users" `
-            -Member $u `
-            -ErrorAction SilentlyContinue
-
-          Set-ItemProperty `
-            "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
-            -Name fDenyTSConnections `
-            -Value 0 `
-            -ErrorAction SilentlyContinue
-
-          Enable-NetFirewallRule `
-            -DisplayGroup "Remote Desktop" `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          Write-Host "RDP ready."
-
-
-      - name: Install Python libraries
-        continue-on-error: true
+      - name: Install Python libs (pyautogui/pynput/pillow)
         run: |
-          $ErrorActionPreference = "Continue"
-
-          python -m pip install --upgrade pip 2>$null
-
-          python -m pip install `
-            --force-reinstall `
-            pyautogui `
-            pynput `
-            pillow 2>$null
-
-          python -c `
-            "import pyautogui,pynput,PIL; print('Python libraries OK')" 2>$null
-
-
-      - name: Install rclone
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rcloneDir =
-            "C:\Tools\rclone"
-
-          $rclone =
-            "$rcloneDir\rclone.exe"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $rcloneDir `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          if (-not (Test-Path $rclone)) {
-
-            $zip =
-              "$env:TEMP\rclone.zip"
-
-            $extract =
-              "$env:TEMP\rclone_extract"
-
-            try {
-
-              Invoke-WebRequest `
-                -Uri `
-                "https://downloads.rclone.org/rclone-current-windows-amd64.zip" `
-                -OutFile `
-                $zip `
-                -UseBasicParsing `
-                -ErrorAction SilentlyContinue
-
-              Expand-Archive `
-                -Path $zip `
-                -DestinationPath $extract `
-                -Force `
-                -ErrorAction SilentlyContinue
-
-              $found =
-                Get-ChildItem `
-                  $extract `
-                  -Recurse `
-                  -Filter "rclone.exe" |
-                Select-Object -First 1
-
-              if ($found) {
-
-                Copy-Item `
-                  $found.FullName `
-                  $rclone `
-                  -Force `
-                  -ErrorAction SilentlyContinue
-              }
-
-              Remove-Item `
-                $zip `
-                -Force `
-                -ErrorAction SilentlyContinue
-
-              Remove-Item `
-                $extract `
-                -Recurse `
-                -Force `
-                -ErrorAction SilentlyContinue
-            }
-            catch {}
-          }
-
-          if (Test-Path $rclone) {
-            & $rclone version 2>$null
-          }
-          else {
-            Write-Warning "rclone installation failed."
-          }
-
-          "RCLONE_EXE=$rclone" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-
-      - name: Prepare Google Drive configuration
-        shell: pwsh
-        continue-on-error: true
-        env:
-          DRIVE_TOKEN: ${{ secrets.DRIVE_TOKEN }}
-          DRIVE_TOKEN1: ${{ secrets.DRIVE_TOKEN1 }}
-          DRIVE_TOKEN2: ${{ secrets.DRIVE_TOKEN2 }}
-          DRIVE_TOKEN3: ${{ secrets.DRIVE_TOKEN3 }}
-          DRIVE_TOKEN4: ${{ secrets.DRIVE_TOKEN4 }}
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $configDir =
-            "C:\ProgramData\Persistent-RDP\rclone"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $configDir `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          $items = @(
-            @{
-              Secret = "DRIVE_TOKEN"
-              Token = $env:DRIVE_TOKEN
-              Name = "gdrive_g"
-            }
-            @{
-              Secret = "DRIVE_TOKEN1"
-              Token = $env:DRIVE_TOKEN1
-              Name = "gdrive_h"
-            }
-            @{
-              Secret = "DRIVE_TOKEN2"
-              Token = $env:DRIVE_TOKEN2
-              Name = "gdrive_i"
-            }
-            @{
-              Secret = "DRIVE_TOKEN3"
-              Token = $env:DRIVE_TOKEN3
-              Name = "gdrive_j"
-            }
-            @{
-              Secret = "DRIVE_TOKEN4"
-              Token = $env:DRIVE_TOKEN4
-              Name = "gdrive_k"
-            }
-          )
-
-          foreach ($item in $items) {
-
-            if ([string]::IsNullOrWhiteSpace($item.Token)) {
-              Write-Warning "$($item.Secret) is missing."
-              continue
-            }
-
-            try {
-
-              $obj =
-                $item.Token.Trim() |
-                ConvertFrom-Json
-
-              $token =
-                $obj |
-                ConvertTo-Json -Compress
-
-              $config =
-                "$configDir\$($item.Name).conf"
-
-              @(
-                "[$($item.Name)]"
-                "type = drive"
-                "scope = drive"
-                "token = $token"
-              ) |
-                Set-Content `
-                  -Path $config `
-                  -Encoding UTF8
-
-              & $rclone `
-                --config $config `
-                lsd `
-                "$($item.Name):" `
-                --timeout 60s 2>$null
-            }
-            catch {
-              Write-Warning `
-                "Config processing warning for $($item.Secret)"
-            }
-          }
-
-          "RCLONE_CONFIG_DIR=$configDir" |
-            Out-File `
-              -Append `
-              $env:GITHUB_ENV
-
-
-      - name: Restore persistent C data
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-            "$env:RCLONE_EXE"
-
-          $config =
-            "$env:RCLONE_CONFIG_DIR\gdrive_g.conf"
-
-          $remote =
-            "gdrive_g:.persistent-rdp/C-storage"
-
-          if (
-            -not (Test-Path $rclone) -or
-            -not (Test-Path $config)
-          ) {
-            Write-Warning "Persistent storage components are unavailable."
-            exit 0
-          }
-
-          Write-Host "=========================================="
-          Write-Host "RESTORING PERSISTENT C DATA"
-          Write-Host "=========================================="
-
-          & $rclone `
-            --config $config `
-            mkdir `
-            $remote 2>$null
-
-          & $rclone `
-            --config $config `
-            copy `
-            $remote `
-            "C:\" `
-            --fast-list `
-            --no-traverse `
-            --transfers 16 `
-            --checkers 32 `
-            --multi-thread-streams 16 `
-            --multi-thread-cutoff 16M `
-            --multi-thread-chunk-size 32M `
-            --buffer-size 128M `
-            --drive-chunk-size 128M `
-            --exclude "/Windows/**" `
-            --exclude "/$Recycle.Bin/**" `
-            --exclude "/System Volume Information/**" `
-            --exclude "/Recovery/**" `
-            --exclude "/PerfLogs/**" `
-            --exclude "/ProgramData/Microsoft/Windows Defender/**" `
-            --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
-            --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
-            --exclude "/ProgramData/USOShared/**" `
-            --exclude "/ProgramData/Packages/**" `
-            --exclude "/ProgramData/GitHub/**" `
-            --exclude "/ProgramData/actions/**" `
-            --exclude "/ProgramData/chocolatey/**" `
-            --exclude "/ProgramData/ssh/**" `
-            --exclude "/ProgramData/Persistent-RDP/**" `
-            --exclude "/Users/runneradmin/**" `
-            --exclude "/Users/runneradmin.AppData/**" `
-            --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
-            --exclude "/Users/*/AppData/Local/Temp/**" `
-            --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
-            --timeout 600s `
-            --contimeout 30s `
-            --retries 10 `
-            --low-level-retries 30 `
-            --ignore-errors `
-            --stats 10s `
-            --stats-one-line 2>$null
-
-          Write-Host "Persistent C data restore completed."
-
-
-      - name: Create persistent C sync script
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $base =
-            "C:\ProgramData\Persistent-RDP"
-
-          $script =
-            "$base\Sync-C.ps1"
-
-          New-Item `
-            -ItemType Directory `
-            -Path $base `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          $content = @'
-          $ErrorActionPreference = "Continue"
-
-          $rclone =
-              "C:\Tools\rclone\rclone.exe"
-
-          $config =
-              "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-
-          $root =
-              "C:\"
-
-          $remote =
-              "gdrive_g:.persistent-rdp/C-storage"
-
-          $mutexName =
-              "Global\Persistent-RDP-C-Sync"
-
-          $mutex = $null
-          $hasLock = $false
-
-          try {
-
-              $mutex =
-                  New-Object `
-                    System.Threading.Mutex(
-                      $false,
-                      $mutexName
-                    )
-
-              $hasLock =
-                  $mutex.WaitOne(
-                    0,
-                    $false
-                  )
-
-              if (-not $hasLock) {
-                  Write-Host "Another C sync is already running. Skipping."
-                  exit 0
-              }
-
-              if (
-                  -not (Test-Path $rclone) -or
-                  -not (Test-Path $config) -or
-                  -not (Test-Path $root)
-              ) {
-                  exit 0
-              }
-
-              Write-Host "=========================================="
-              Write-Host "PERSISTENT C SYNC"
-              Write-Host "=========================================="
-
-              & $rclone `
-                --config $config `
-                mkdir `
-                $remote 2>$null
-
-              & $rclone `
-                --config $config `
-                copy `
-                $root `
-                $remote `
-                --fast-list `
-                --transfers 16 `
-                --checkers 32 `
-                --multi-thread-streams 16 `
-                --multi-thread-cutoff 16M `
-                --multi-thread-chunk-size 16M `
-                --buffer-size 128M `
-                --drive-chunk-size 128M `
-                --exclude "/Windows/**" `
-                --exclude "/$Recycle.Bin/**" `
-                --exclude "/System Volume Information/**" `
-                --exclude "/Recovery/**" `
-                --exclude "/PerfLogs/**" `
-                --exclude "/ProgramData/Microsoft/Windows Defender/**" `
-                --exclude "/ProgramData/Microsoft/Windows/Power Efficiency Diagnostics/**" `
-                --exclude "/ProgramData/Microsoft/Windows/AppRepository/**" `
-                --exclude "/ProgramData/USOShared/**" `
-                --exclude "/ProgramData/Packages/**" `
-                --exclude "/ProgramData/GitHub/**" `
-                --exclude "/ProgramData/actions/**" `
-                --exclude "/ProgramData/chocolatey/**" `
-                --exclude "/ProgramData/ssh/**" `
-                --exclude "/ProgramData/Persistent-RDP/**" `
-                --exclude "/Tools/**" `
-                --exclude "/Users/runneradmin/**" `
-                --exclude "/Users/runneradmin.AppData/**" `
-                --exclude "/Users/runneradmin/AppData/Local/Temp/**" `
-                --exclude "/Users/*/AppData/Local/Temp/**" `
-                --exclude "/Users/*/AppData/Local/Microsoft/Windows/INetCache/**" `
-                --create-empty-src-dirs `
-                --timeout 600s `
-                --contimeout 30s `
-                --retries 10 `
-                --low-level-retries 30 `
-                --ignore-errors `
-                --stats 10s `
-                --stats-one-line 2>$null
-
-              Write-Host "Persistent C sync completed."
-
-          }
-          catch {
-              Write-Warning "C sync warning: $($_.Exception.Message)"
-          }
-          finally {
-
-              if ($hasLock -and $mutex) {
-                  try {
-                      $mutex.ReleaseMutex()
-                  }
-                  catch {}
-              }
-
-              if ($mutex) {
-                  $mutex.Dispose()
-              }
-          }
-          '@
-
-          Set-Content `
-            -Path $script `
-            -Value $content `
-            -Encoding UTF8 `
-            -Force
-
-
-      - name: Install persistent C background sync
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $taskName =
-            "Persistent-RDP-C-Sync"
-
-          $script =
-            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
-
-          Unregister-ScheduledTask `
-            -TaskName $taskName `
-            -Confirm:$false `
-            -ErrorAction SilentlyContinue
-
-          $action =
-            New-ScheduledTaskAction `
-              -Execute "powershell.exe" `
-              -Argument `
-              "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
-
-          $trigger =
-            New-ScheduledTaskTrigger `
-              -Once `
-              -At (Get-Date).AddMinutes(3) `
-              -RepetitionInterval (New-TimeSpan -Minutes 5) `
-              -RepetitionDuration (New-TimeSpan -Days 1)
-
-          $settings =
-            New-ScheduledTaskSettingsSet `
-              -AllowStartIfOnBatteries `
-              -DontStopIfGoingOnBatteries `
-              -ExecutionTimeLimit ([TimeSpan]::Zero) `
-              -MultipleInstances IgnoreNew
-
-          Register-ScheduledTask `
-            -TaskName $taskName `
-            -Action $action `
-            -Trigger $trigger `
-            -Settings $settings `
-            -RunLevel Highest `
-            -Force `
-            -ErrorAction SilentlyContinue |
-            Out-Null
-
-          Write-Host "Persistent C background sync installed."
-
-
-      - name: Initial persistent C sync
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $script =
-            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
-
-          if (Test-Path $script) {
-
-            Write-Host "Running initial C persistence sync..."
-
-            & powershell.exe `
-              -NoProfile `
-              -ExecutionPolicy Bypass `
-              -File $script 2>$null
-          }
-
-
-      - name: Verify persistence system
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT C SYSTEM"
-          Write-Host "=========================================="
-
-          $required = @(
-            "C:\Tools\rclone\rclone.exe"
-            "C:\ProgramData\Persistent-RDP\rclone\gdrive_g.conf"
-            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
-          )
-
-          foreach ($path in $required) {
-
-            if (Test-Path $path) {
-              Write-Host "OK: $path"
-            }
-            else {
-              Write-Warning "Missing: $path"
-            }
-          }
-
-          Write-Host "C:\ persistent application/data synchronization is configured."
-          Write-Host "Windows system files are excluded."
-          Write-Host "rclone credentials/configuration are excluded from C backup."
-          Write-Host "=========================================="
-
+          python -m pip install --upgrade pip
+          python -m pip install --force-reinstall pyautogui pynput pillow
+          python -c "import pyautogui, pynput, PIL; print('Python libs OK')"
 
       - name: Install RustDesk
-        continue-on-error: true
         run: |
-          $ErrorActionPreference = "Continue"
-
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
-
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
           if (-not (Test-Path $rdExe)) {
-
-            $installer =
-              "$env:TEMP\rustdesk.msi"
-
             try {
-
-              Invoke-WebRequest `
-                -Uri `
-                "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi" `
-                -OutFile `
-                $installer `
-                -UseBasicParsing `
-                -ErrorAction SilentlyContinue
-
-              Start-Process `
-                msiexec.exe `
-                -ArgumentList `
-                "/i",`
-                "`"$installer`"",`
-                "/quiet",`
-                "/norestart" `
-                -Wait
-
-              Remove-Item `
-                $installer `
-                -Force `
-                -ErrorAction SilentlyContinue
+              $rdUrl = "https://github.com/rustdesk/rustdesk/releases/download/1.3.1/rustdesk-1.3.1-x86_64.msi"
+              $installerPath = "$env:TEMP\rustdesk.msi"
+              Invoke-WebRequest -Uri $rdUrl -OutFile $installerPath
+              Start-Process msiexec.exe -ArgumentList "/i","`"$installerPath`"","/quiet","/norestart" -Wait
+              Remove-Item $installerPath -Force
+            } catch {
+              Write-Host "MSI install failed, trying winget…"
+              winget install --id RustDesk.RustDesk -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
             }
-            catch {}
           }
+          if (-not (Test-Path $rdExe)) { Write-Error "RustDesk not found after install"; exit 1 }
+          Write-Host "RustDesk installed."
 
-
-      - name: Open RustDesk ports
-        continue-on-error: true
+      - name: Open RustDesk ports (TCP 21115-21119, UDP 21116)
         run: |
-          $ErrorActionPreference = "Continue"
-
-          for (
-            $p = 21115;
-            $p -le 21119;
-            $p++
-          ) {
-
-            $name =
-              "APP-PORT-TCP-$p"
-
-            netsh advfirewall firewall delete rule `
-              name=$name `
-              2>$null
-
-            netsh advfirewall firewall add rule `
-              name=$name `
-              dir=in `
-              action=allow `
-              protocol=TCP `
-              localport=$p 2>$null
+          for ($p=21115; $p -le 21119; $p++) {
+            $name = "APP-PORT-TCP-$p"
+            netsh advfirewall firewall delete rule name=$name 2>$null
+            netsh advfirewall firewall add rule name=$name dir=in action=allow protocol=TCP localport=$p
           }
+          $udpName = "APP-PORT-UDP-21116"
+          netsh advfirewall firewall delete rule name=$udpName 2>$null
+          netsh advfirewall firewall add rule name=$udpName dir=in action=allow protocol=UDP localport=21116
 
-          netsh advfirewall firewall delete rule `
-            name="APP-PORT-UDP-21116" `
-            2>$null
-
-          netsh advfirewall firewall add rule `
-            name="APP-PORT-UDP-21116" `
-            dir=in `
-            action=allow `
-            protocol=UDP `
-            localport=21116 2>$null
-
-
-      - name: Launch RustDesk
-        continue-on-error: true
+      - name: Launch RustDesk (foreground) + Screenshot to Gofile
         run: |
-          $ErrorActionPreference = "Continue"
+          $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
+          Start-Process -FilePath $rdExe -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 5
 
-          $rdExe =
-            "C:\Program Files\RustDesk\rustdesk.exe"
+          $screenshotPath = "$env:TEMP\rustdesk_${{ matrix.id }}.png"
+          Add-Type -AssemblyName System.Windows.Forms
+          Add-Type -AssemblyName System.Drawing
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          $bitmap = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
+          $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+          $graphics.CopyFromScreen($bounds.Location, [System.Drawing.Point]::Empty, $bounds.Size)
+          $bitmap.Save($screenshotPath, [System.Drawing.Imaging.ImageFormat]::Png)
+          $graphics.Dispose(); $bitmap.Dispose()
 
-          if (Test-Path $rdExe) {
+          $curlResult = curl -F "file=@$screenshotPath" https://store1.gofile.io/uploadFile
+          $json = $curlResult | ConvertFrom-Json
+          if ($json.status -eq "ok") { "SCREENSHOT_URL=$($json.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV }
 
-            Start-Process `
-              -FilePath $rdExe `
-              -ErrorAction SilentlyContinue
-          }
-
-
-      - name: Display persistence status
-        continue-on-error: true
+      - name: Keep alive (to ${{ env.RUNTIME_MINUTES }} mins)
         run: |
-          Write-Host ""
-          Write-Host "=========================================="
-          Write-Host "PERSISTENT C STORAGE ACTIVE"
-          Write-Host "=========================================="
-          Write-Host "C application/data persistence: ACTIVE"
-          Write-Host "Background sync: every 5 minutes"
-          Write-Host "Early final sync: enabled"
-          Write-Host "Final sync: enabled"
-          Write-Host "=========================================="
-
-
-      - name: Keep alive with Safe Early Sync
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          $mins =
-            [int]"${{ env.RUNTIME_MINUTES }}"
-
-          if ($mins -gt 360) {
-            $mins = 360
-          }
-
-          $end =
-            (Get-Date).AddMinutes($mins)
-
-          $syncScript =
-            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
-
-          $earlySyncTriggered =
-            $false
-
+          $mins = [int]"${{ env.RUNTIME_MINUTES }}"
+          $end = (Get-Date).AddMinutes($mins)
           while ((Get-Date) -lt $end) {
-
-            $remaining =
-              ($end - (Get-Date)).TotalMinutes
-
-            if (
-              -not $earlySyncTriggered -and
-              $remaining -le 8
-            ) {
-
-              Write-Host `
-                "=== WARNING: Session ending soon! Running Safe Early Final C Sync now ==="
-
-              if (Test-Path $syncScript) {
-
-                & powershell.exe `
-                  -NoProfile `
-                  -ExecutionPolicy Bypass `
-                  -File $syncScript 2>$null
-              }
-
-              $earlySyncTriggered =
-                $true
-            }
-
-            if ("$env:CRD_ENABLED" -eq '1') {
-              $mode =
-                '[CRD+RustDesk/RDP+C-Persistence]'
-            }
-            else {
-              $mode =
-                '[RustDesk/RDP+C-Persistence]'
-            }
-
-            Write-Host (
-              "$mode Heartbeat " +
-              (Get-Date).ToString("HH:mm:ss") +
-              " | ends " +
-              $end.ToString("HH:mm:ss") +
-              " | Rem: $([math]::Round($remaining, 1))m"
-            )
-
+            $mode = if ("$env:CRD_ENABLED" -eq '1') { '[CRD+RustDesk/RDP]' } else { '[RustDesk/RDP]' }
+            Write-Host ("$mode Heartbeat " + (Get-Date).ToString("HH:mm:ss") + " ends at " + $end.ToString("HH:mm:ss") + " | RS URL: $env:SCREENSHOT_URL")
             Start-Sleep -Seconds 60
           }
 
-
-      - name: Final C persistence sync
-        if: always()
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          $ErrorActionPreference = "Continue"
-
-          Write-Host "=========================================="
-          Write-Host "ABSOLUTE FINAL C PERSISTENCE SYNC"
-          Write-Host "=========================================="
-
-          $cScript =
-            "C:\ProgramData\Persistent-RDP\Sync-C.ps1"
-
-          if (Test-Path $cScript) {
-
-            Write-Host "Executing Final C sync..."
-
-            & powershell.exe `
-              -NoProfile `
-              -ExecutionPolicy Bypass `
-              -File $cScript 2>$null
-          }
-
-          Write-Host "Final C persistence sync completed."
-
-
       - name: Dispatch next or stop
         if: always()
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $ErrorActionPreference = "Continue"
-
-          $rawCycles = @'
-          ${{ inputs.cycles }}
-          '@.Trim()
-
-          $cycles = 0
-
-          if ($rawCycles -match '^\d+$') {
-            $cycles = [int]$rawCycles
-          }
-
-          if ($cycles -le 0) {
-            Write-Host "No cycles configured. Done."
-            exit 0
-          }
-
-          $next =
-            $cycles - 1
-
-          if ($next -le 0) {
-
-            $url =
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
-
-            $headers = @{
-              Authorization =
-                "Bearer $env:GH_TOKEN"
-
-              Accept =
-                "application/vnd.github+json"
-
-              "X-GitHub-Api-Version" =
-                "2022-11-28"
+          $cycles = [int]"${{ inputs.cycles }}"
+          if ($cycles -gt 0) {
+            $next = $cycles - 1
+            if ($next -le 0) {
+              $url = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-stop.yml/dispatches"
+              $hdr = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+              $payload = @{ ts_tailnet="${{ inputs.ts_tailnet }}"; ts_api_key="${{ inputs.ts_api_key }}"; base_prefix="bullet"; max_count="10"; dry_run="false" }
+              $body = @{ ref="${{ github.ref_name }}"; inputs=$payload } | ConvertTo-Json -Depth 20
+              Invoke-WebRequest -Method POST -Uri $url -Headers $hdr -Body $body | Out-Null
+              Write-Host "Dispatched STOP."
+            } else {
+              $payload = @{
+                ts_tailnet      = "${{ inputs.ts_tailnet }}"
+                ts_api_key      = "${{ inputs.ts_api_key }}"
+                ts_authkey      = "${{ inputs.ts_authkey }}"
+                quick_test      = "${{ inputs.quick_test }}"
+                runtime_minutes = "${{ inputs.runtime_minutes }}"
+                do_purge        = "${{ inputs.do_purge }}"
+                cycles          = "$next"
+                rdp_count       = "${{ inputs.rdp_count }}"
+                crd_code        = "${{ inputs.crd_code }}"
+                crd_pin         = "${{ inputs.crd_pin }}"
+              }
+              $url2 = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-B.yml/dispatches"
+              $hdr2 = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
+              $body2 = @{ ref="${{ github.ref_name }}"; inputs=$payload } | ConvertTo-Json -Depth 20
+              Invoke-WebRequest -Method POST -Uri $url2 -Headers $hdr2 -Body $body2 | Out-Null
+              Write-Host "Dispatched Workflow B with cycles=$next"
             }
-
-            $payload = @{
-              ts_tailnet =
-                "${{ inputs.ts_tailnet }}"
-
-              ts_api_key =
-                "${{ inputs.ts_api_key }}"
-
-              base_prefix =
-                "bullet"
-
-              max_count =
-                "10"
-
-              dry_run =
-                "false"
-            }
-
-            $body =
-              @{
-                ref =
-                  "${{ github.ref_name }}"
-
-                inputs =
-                  $payload
-              } |
-              ConvertTo-Json -Depth 20
-
-            try {
-
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $url `
-                -Headers $headers `
-                -ContentType "application/json" `
-                -Body $body `
-                -ErrorAction SilentlyContinue
-
-              Write-Host "STOP workflow dispatched."
-            }
-            catch {
-              Write-Warning "Dispatch stop failed silently."
-            }
-          }
-          else {
-
-            $payload = @{
-              ts_tailnet =
-                "${{ inputs.ts_tailnet }}"
-
-              ts_api_key =
-                "${{ inputs.ts_api_key }}"
-
-              ts_authkey =
-                "${{ inputs.ts_authkey }}"
-
-              quick_test =
-                "${{ inputs.quick_test }}"
-
-              runtime_minutes =
-                "300"
-
-              do_purge =
-                "true"
-
-              cycles =
-                "$next"
-
-              rdp_count =
-                "${{ inputs.rdp_count }}"
-
-              crd_code =
-                "${{ inputs.crd_code }}"
-
-              crd_pin =
-                "${{ inputs.crd_pin }}"
-            }
-
-            $url =
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-A.yml/dispatches"
-
-            $headers = @{
-              Authorization =
-                "Bearer $env:GH_TOKEN"
-
-              Accept =
-                "application/vnd.github+json"
-
-              "X-GitHub-Api-Version" =
-                "2022-11-28"
-            }
-
-            $body =
-              @{
-                ref =
-                  "${{ github.ref_name }}"
-
-                inputs =
-                  $payload
-              } |
-              ConvertTo-Json -Depth 20
-
-            try {
-
-              Invoke-RestMethod `
-                -Method POST `
-                -Uri $url `
-                -Headers $headers `
-                -ContentType "application/json" `
-                -Body $body `
-                -ErrorAction SilentlyContinue
-
-              Write-Host "Next Workflow A dispatched."
-            }
-            catch {
-              Write-Warning "Dispatch next workflow failed silently."
-            }
-          }
+          } else { Write-Host "No cycles configured. Done." }
