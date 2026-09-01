@@ -23,9 +23,8 @@ on:
         default: "123456"
 
 permissions:
-  contents: read
-  actions: write
   contents: write
+  actions: write
 
 defaults:
   run:
@@ -40,12 +39,10 @@ jobs:
     steps:
       - id: mk
         run: |
-          # Safe literal read (so full commands with &, quotes, ${Env:...} don't break)
           $crd = @'
           ${{ inputs.crd_code }}
           '@.Trim()
 
-          # If CRD provided -> force single; else use rdp_count (1..10)
           if ($crd.Length -gt 0) { $n = 1 } else {
             $n = [int]"${{ inputs.rdp_count }}"; if ($n -lt 1) { $n = 1 }; if ($n -gt 10) { $n = 10 }
           }
@@ -54,7 +51,6 @@ jobs:
           $json = @{ include = $inc } | ConvertTo-Json -Compress
           "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
-          # NEW: multi flag
           $multi = if ($n -gt 1) { '1' } else { '0' }
           "multi=$multi" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
 
