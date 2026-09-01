@@ -1,16 +1,37 @@
-name: RDP + Tailscale + RustDesk + Persistent C: Drive (1TB)
+name: RDP + Tailscale + RustDesk + Persistent C Drive (1TB)
 
 on:
   workflow_dispatch:
     inputs:
-      ts_tailnet:         { description: "Tailscale tailnet (e.g. you@gmail.com)", required: true }
-      ts_api_key:         { description: "Tailscale API key (device admin, no Bearer)", required: true }
-      ts_authkey:         { description: "Tailscale Auth key (reusable or ephemeral)", required: true }
-      quick_test:         { description: "Run 5-minute test", type: boolean, default: false }
-      runtime_minutes:    { description: "Runtime (max 360; default 355 when not test)", required: false, default: "355" }
-      do_purge:           { description: "Purge bullet* devices at start (single instance only)", required: false, default: "true" }
-      cycles:             { description: "0=stop after A; N=handoffs left incl this run", required: false, default: "0" }
-      rdp_count:          { description: "How many RDP instances (1-10) [ignored if CRD provided]", required: false, default: "1" }
+      ts_tailnet:
+        description: "Tailscale tailnet (e.g. you@gmail.com)"
+        required: true
+      ts_api_key:
+        description: "Tailscale API key (device admin, no Bearer)"
+        required: true
+      ts_authkey:
+        description: "Tailscale Auth key (reusable or ephemeral)"
+        required: true
+      quick_test:
+        description: "Run 5-minute test"
+        type: boolean
+        default: false
+      runtime_minutes:
+        description: "Runtime (max 360; default 355 when not test)"
+        required: false
+        default: "355"
+      do_purge:
+        description: "Purge bullet* devices at start (single instance only)"
+        required: false
+        default: "true"
+      cycles:
+        description: "0=stop after A; N=handoffs left incl this run"
+        required: false
+        default: "0"
+      rdp_count:
+        description: "How many RDP instances (1-10) [ignored if CRD provided]"
+        required: false
+        default: "1"
       crd_code:
         description: >-
           Paste raw CRD code (4/0AV...), full PowerShell command, or text/URL containing --code="4/...".
@@ -35,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.mk.outputs.matrix }}
-      multi:  ${{ steps.mk.outputs.multi }}
+      multi: ${{ steps.mk.outputs.multi }}
     steps:
       - id: mk
         run: |
@@ -66,9 +87,6 @@ jobs:
       RDP_PASS: Bullet@12345
 
     steps:
-      # --------------------------------------------
-      # 1. CRD Flag
-      # --------------------------------------------
       - name: Set CRD flag early
         run: |
           $crd = @'
@@ -77,9 +95,6 @@ jobs:
           if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      # --------------------------------------------
-      # 2. Create Storage Repositories
-      # --------------------------------------------
       - name: Create Storage Repositories
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -103,9 +118,6 @@ jobs:
             }
           }
 
-      # --------------------------------------------
-      # 3. Mount 1TB Persistent Storage
-      # --------------------------------------------
       - name: Mount 1TB Persistent Storage
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -131,9 +143,6 @@ jobs:
 
           Write-Host "1TB persistent storage mounted at C:\persistent_storage"
 
-      # --------------------------------------------
-      # 4. Link C:\ to Persistent Storage
-      # --------------------------------------------
       - name: Link C Drive to Persistent Storage
         run: |
           $storagePath = "C:\persistent_storage"
@@ -162,9 +171,6 @@ jobs:
 
           Write-Host "C: drive is now linked to persistent storage!"
 
-      # --------------------------------------------
-      # 5. Restore Registry and Settings
-      # --------------------------------------------
       - name: Restore Registry and Settings
         run: |
           $storagePath = "C:\persistent_storage"
@@ -192,9 +198,6 @@ jobs:
 
           Write-Host "Registry and shortcuts restored!"
 
-      # --------------------------------------------
-      # 6. Sync Changes to GitHub
-      # --------------------------------------------
       - name: Sync Changes to GitHub
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -221,9 +224,6 @@ jobs:
             Start-Sleep -Seconds 600
           }
 
-      # --------------------------------------------
-      # 7. CRD Steps (Optional)
-      # --------------------------------------------
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         run: |
@@ -308,9 +308,6 @@ jobs:
             }
           } else { Write-Host "CRD log directory not found: $logDir" }
 
-      # --------------------------------------------
-      # 8. Hostname and Runtime
-      # --------------------------------------------
       - name: Decide hostname and runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "bullet${{ matrix.id }}" } else { $hn = "bullet" }
@@ -325,9 +322,6 @@ jobs:
           "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Hostname: $hn  | Runtime: $runtime"
 
-      # --------------------------------------------
-      # 9. Purge bullet devices (optional)
-      # --------------------------------------------
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
@@ -348,9 +342,6 @@ jobs:
             Write-Host "Purge disabled."
           }
 
-      # --------------------------------------------
-      # 10. Install Tailscale
-      # --------------------------------------------
       - name: Install and Up Tailscale
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -367,9 +358,6 @@ jobs:
           "TAILSCALE_IP=$ip4" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Tailscale IPv4: $ip4"
 
-      # --------------------------------------------
-      # 11. Enable RDP
-      # --------------------------------------------
       - name: Enable RDP user and firewall
         run: |
           $u=$env:RDP_USER; $p=$env:RDP_PASS
@@ -388,18 +376,12 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
           Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-      # --------------------------------------------
-      # 12. Install Python libs
-      # --------------------------------------------
       - name: Install Python libs
         run: |
           python -m pip install --upgrade pip
           python -m pip install --force-reinstall pyautogui pynput pillow
           python -c "import pyautogui, pynput, PIL; print('Python libs OK')"
 
-      # --------------------------------------------
-      # 13. Install RustDesk
-      # --------------------------------------------
       - name: Install RustDesk
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
@@ -418,9 +400,6 @@ jobs:
           if (-not (Test-Path $rdExe)) { Write-Error "RustDesk not found after install"; exit 1 }
           Write-Host "RustDesk installed."
 
-      # --------------------------------------------
-      # 14. Open RustDesk ports
-      # --------------------------------------------
       - name: Open RustDesk ports
         run: |
           for ($p=21115; $p -le 21119; $p++) {
@@ -432,9 +411,6 @@ jobs:
           netsh advfirewall firewall delete rule name=$udpName 2>$null
           netsh advfirewall firewall add rule name=$udpName dir=in action=allow protocol=UDP localport=21116
 
-      # --------------------------------------------
-      # 15. Launch RustDesk and Screenshot
-      # --------------------------------------------
       - name: Launch RustDesk and Screenshot
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
@@ -455,9 +431,6 @@ jobs:
           $json = $curlResult | ConvertFrom-Json
           if ($json.status -eq "ok") { "SCREENSHOT_URL=$($json.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV }
 
-      # --------------------------------------------
-      # 16. Keep alive
-      # --------------------------------------------
       - name: Keep alive
         run: |
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
@@ -468,9 +441,6 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # --------------------------------------------
-      # 17. Final sync before exit
-      # --------------------------------------------
       - name: Final sync before exit
         if: always()
         run: |
@@ -507,9 +477,6 @@ jobs:
 
           Write-Host "Final sync completed successfully!"
 
-      # --------------------------------------------
-      # 18. Dispatch next or stop
-      # --------------------------------------------
       - name: Dispatch next or stop
         if: always()
         env:
@@ -527,16 +494,16 @@ jobs:
               Write-Host "Dispatched STOP."
             } else {
               $payload = @{
-                ts_tailnet      = "${{ inputs.ts_tailnet }}"
-                ts_api_key      = "${{ inputs.ts_api_key }}"
-                ts_authkey      = "${{ inputs.ts_authkey }}"
-                quick_test      = "${{ inputs.quick_test }}"
+                ts_tailnet = "${{ inputs.ts_tailnet }}"
+                ts_api_key = "${{ inputs.ts_api_key }}"
+                ts_authkey = "${{ inputs.ts_authkey }}"
+                quick_test = "${{ inputs.quick_test }}"
                 runtime_minutes = "${{ inputs.runtime_minutes }}"
-                do_purge        = "${{ inputs.do_purge }}"
-                cycles          = "$next"
-                rdp_count       = "${{ inputs.rdp_count }}"
-                crd_code        = "${{ inputs.crd_code }}"
-                crd_pin         = "${{ inputs.crd_pin }}"
+                do_purge = "${{ inputs.do_purge }}"
+                cycles = "$next"
+                rdp_count = "${{ inputs.rdp_count }}"
+                crd_code = "${{ inputs.crd_code }}"
+                crd_pin = "${{ inputs.crd_pin }}"
               }
               $url2 = "https://api.github.com/repos/${{ github.repository }}/actions/workflows/rdp-tailscale-B.yml/dispatches"
               $hdr2 = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = "application/vnd.github+json" }
