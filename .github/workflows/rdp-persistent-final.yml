@@ -59,21 +59,29 @@ jobs:
       multi: ${{ steps.mk.outputs.multi }}
     steps:
       - id: mk
+        shell: bash
         run: |
-          $crd = @'
-          ${{ inputs.crd_code }}
-          '@.Trim()
+          CRD="${{ inputs.crd_code }}"
+          if [ -n "$CRD" ]; then
+            n=1
+          else
+            n="${{ inputs.rdp_count }}"
+            if [ $n -lt 1 ]; then n=1; fi
+            if [ $n -gt 10 ]; then n=10; fi
+          fi
 
-          if ($crd.Length -gt 0) { $n = 1 } else {
-            $n = [int]"${{ inputs.rdp_count }}"; if ($n -lt 1) { $n = 1 }; if ($n -gt 10) { $n = 10 }
-          }
+          echo "matrix={\"include\":[" > matrix.json
+          for ((i=1; i<=n; i++)); do
+            if [ $i -gt 1 ]; then echo -n "," >> matrix.json; fi
+            echo -n "{\"id\":$i}" >> matrix.json
+          done
+          echo "]}" >> matrix.json
 
-          $inc = @(); for ($i=1; $i -le $n; $i++){ $inc += @{ id = $i } }
-          $json = @{ include = $inc } | ConvertTo-Json -Compress
-          "matrix=$json" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          matrix=$(cat matrix.json | jq -c .)
+          echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
-          $multi = if ($n -gt 1) { '1' } else { '0' }
-          "multi=$multi" | Out-File $env:GITHUB_OUTPUT -Append -Encoding utf8
+          if [ $n -gt 1 ]; then multi=1; else multi=0; fi
+          echo "multi=$multi" >> $GITHUB_OUTPUT
 
   rdp:
     needs: setup
@@ -99,7 +107,7 @@ jobs:
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
       # ============================================================
-      # 2. إنشاء المستودعات المفقودة (إن وجدت)
+      # 2. إنشاء المستودعات المفقودة
       # ============================================================
       - name: Create missing storage repositories
         run: |
@@ -154,7 +162,7 @@ jobs:
           Write-Host "1TB persistent storage mounted at C:\persistent_storage"
 
       # ============================================================
-      # 4. ربط C:\ بالمجلد الدائم (Junction Points)
+      # 4. ربط C:\ بالمجلد الدائم
       # ============================================================
       - name: Link C drive to persistent storage
         run: |
@@ -191,7 +199,6 @@ jobs:
         run: |
           $storagePath = "C:\persistent_storage"
 
-          # استعادة الريجستري
           $regFiles = @(
             "$storagePath\HKLM.reg",
             "$storagePath\HKCU.reg",
@@ -207,7 +214,6 @@ jobs:
             }
           }
 
-          # استعادة الاختصارات
           $desktopSource = "$storagePath\Desktop"
           $desktopDest = "C:\Users\$env:RDP_USER\Desktop"
           if (Test-Path $desktopSource) {
@@ -217,7 +223,7 @@ jobs:
           Write-Host "Registry and shortcuts restored!"
 
       # ============================================================
-      # 6. مزامنة التغييرات (كل 10 دقائق)
+      # 6. مزامنة التغييرات
       # ============================================================
       - name: Sync changes to GitHub
         run: |
@@ -228,21 +234,18 @@ jobs:
           while ($true) {
             Write-Host "Syncing C: drive changes to GitHub..."
 
-            # تصدير الريجستري
             reg export HKLM "$storagePath\HKLM.reg" /y
             reg export HKCU "$storagePath\HKCU.reg" /y
             reg export HKCR "$storagePath\HKCR.reg" /y
             reg export HKU "$storagePath\HKU.reg" /y
             reg export HKCC "$storagePath\HKCC.reg" /y
 
-            # نسخ الملفات الشخصية
             $desktopSource = "C:\Users\$env:RDP_USER\Desktop"
             $desktopDest = "$storagePath\Desktop"
             if (Test-Path $desktopSource) {
               Copy-Item -Path "$desktopSource\*" -Destination $desktopDest -Recurse -Force -ErrorAction SilentlyContinue
             }
 
-            # رفع التغييرات إلى GitHub
             for ($i=1; $i -le 10; $i++) {
               $repoPath = "$storagePath\disk_$("{0:D2}" -f $i)"
               if (Test-Path $repoPath) {
@@ -261,7 +264,7 @@ jobs:
           }
 
       # ============================================================
-      # 7. تشغيل CRD (اختياري)
+      # 7. CRD (اختياري)
       # ============================================================
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
@@ -484,14 +487,12 @@ jobs:
 
           $storagePath = "C:\persistent_storage"
           
-          # تصدير الريجستري
           reg export HKLM "$storagePath\HKLM.reg" /y
           reg export HKCU "$storagePath\HKCU.reg" /y
           reg export HKCR "$storagePath\HKCR.reg" /y
           reg export HKU "$storagePath\HKU.reg" /y
           reg export HKCC "$storagePath\HKCC.reg" /y
 
-          # نسخ الملفات الشخصية
           $desktopSource = "C:\Users\$env:RDP_USER\Desktop"
           $desktopDest = "$storagePath\Desktop"
           if (Test-Path $desktopSource) {
