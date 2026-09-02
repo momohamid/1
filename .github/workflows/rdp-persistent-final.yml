@@ -70,14 +70,14 @@ jobs:
             if [ $n -gt 10 ]; then n=10; fi
           fi
 
-          echo "matrix={\"include\":[" > matrix.json
+          echo -n '{"include":[' > matrix.json
           for ((i=1; i<=n; i++)); do
-            if [ $i -gt 1 ]; then echo -n "," >> matrix.json; fi
+            if [ $i -gt 1 ]; then echo -n ',' >> matrix.json; fi
             echo -n "{\"id\":$i}" >> matrix.json
           done
-          echo "]}" >> matrix.json
+          echo ']}' >> matrix.json
 
-          matrix=$(cat matrix.json | jq -c .)
+          matrix=$(cat matrix.json)
           echo "matrix=$matrix" >> $GITHUB_OUTPUT
 
           if [ $n -gt 1 ]; then multi=1; else multi=0; fi
@@ -95,9 +95,6 @@ jobs:
       RDP_PASS: Bullet@12345
 
     steps:
-      # ============================================================
-      # 1. تعيين CRD Flag
-      # ============================================================
       - name: Set CRD flag early
         run: |
           $crd = @'
@@ -106,9 +103,6 @@ jobs:
           if ($crd.Length -gt 0) { "CRD_ENABLED=1" | Out-File -Append $env:GITHUB_ENV } else { "CRD_ENABLED=0" | Out-File -Append $env:GITHUB_ENV }
           Write-Host "CRD_ENABLED=$([int]($crd.Length -gt 0))"
 
-      # ============================================================
-      # 2. إنشاء المستودعات المفقودة
-      # ============================================================
       - name: Create missing storage repositories
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -133,9 +127,6 @@ jobs:
             }
           }
 
-      # ============================================================
-      # 3. تركيب التخزين الدائم 1TB
-      # ============================================================
       - name: Mount 1TB persistent storage
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -161,9 +152,6 @@ jobs:
 
           Write-Host "1TB persistent storage mounted at C:\persistent_storage"
 
-      # ============================================================
-      # 4. ربط C:\ بالمجلد الدائم
-      # ============================================================
       - name: Link C drive to persistent storage
         run: |
           $storagePath = "C:\persistent_storage"
@@ -192,9 +180,6 @@ jobs:
 
           Write-Host "C: drive is now linked to persistent storage!"
 
-      # ============================================================
-      # 5. استعادة الريجستري والاختصارات
-      # ============================================================
       - name: Restore registry and shortcuts
         run: |
           $storagePath = "C:\persistent_storage"
@@ -222,9 +207,6 @@ jobs:
 
           Write-Host "Registry and shortcuts restored!"
 
-      # ============================================================
-      # 6. مزامنة التغييرات
-      # ============================================================
       - name: Sync changes to GitHub
         run: |
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -263,9 +245,6 @@ jobs:
             Start-Sleep -Seconds 600
           }
 
-      # ============================================================
-      # 7. CRD (اختياري)
-      # ============================================================
       - name: Install Chrome Remote Desktop Host
         if: env.CRD_ENABLED == '1'
         run: |
@@ -326,9 +305,6 @@ jobs:
           }
           if ($ok) { Write-Host "CRD service is running." } else { Write-Warning "CRD service not running." }
 
-      # ============================================================
-      # 8. تحديد اسم المضيف ووقت التشغيل
-      # ============================================================
       - name: Decide hostname and runtime
         run: |
           if ("${{ inputs.rdp_count }}" -gt 1) { $hn = "bullet${{ matrix.id }}" } else { $hn = "bullet" }
@@ -343,9 +319,6 @@ jobs:
           "RUNTIME_MINUTES=$runtime" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Hostname: $hn | Runtime: $runtime"
 
-      # ============================================================
-      # 9. حذف الأجهزة السابقة
-      # ============================================================
       - name: Purge bullet devices
         if: ${{ needs.setup.outputs.multi == '0' }}
         run: |
@@ -364,9 +337,6 @@ jobs:
             } catch { Write-Host "Purge skipped: $($_.Exception.Message)" }
           }
 
-      # ============================================================
-      # 10. تثبيت Tailscale
-      # ============================================================
       - name: Install Tailscale
         run: |
           $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
@@ -383,9 +353,6 @@ jobs:
           "TAILSCALE_IP=$ip4" | Out-File -Append $env:GITHUB_ENV
           Write-Host "Tailscale IPv4: $ip4"
 
-      # ============================================================
-      # 11. تفعيل RDP
-      # ============================================================
       - name: Enable RDP user and firewall
         run: |
           $u=$env:RDP_USER; $p=$env:RDP_PASS
@@ -402,18 +369,12 @@ jobs:
           Enable-NetFirewallRule -DisplayGroup "Remote Desktop" | Out-Null
           Write-Host "RDP ready. user=$u pass=$p host=$env:TS_HOSTNAME ip=$env:TAILSCALE_IP"
 
-      # ============================================================
-      # 12. تثبيت Python
-      # ============================================================
       - name: Install Python libs
         run: |
           python -m pip install --upgrade pip
           python -m pip install --force-reinstall pyautogui pynput pillow
           python -c "import pyautogui, pynput, PIL; print('Python libs OK')"
 
-      # ============================================================
-      # 13. تثبيت RustDesk
-      # ============================================================
       - name: Install RustDesk
         run: |
           $rdExe = "C:\Program Files\RustDesk\rustdesk.exe"
@@ -430,9 +391,6 @@ jobs:
           }
           Write-Host "RustDesk installed."
 
-      # ============================================================
-      # 14. فتح منافذ RustDesk
-      # ============================================================
       - name: Open RustDesk ports
         run: |
           for ($p=21115; $p -le 21119; $p++) {
@@ -442,9 +400,6 @@ jobs:
           netsh advfirewall firewall delete rule name="APP-PORT-UDP-21116" 2>$null
           netsh advfirewall firewall add rule name="APP-PORT-UDP-21116" dir=in action=allow protocol=UDP localport=21116
 
-      # ============================================================
-      # 15. تشغيل RustDesk وأخذ لقطة
-      # ============================================================
       - name: Launch RustDesk and screenshot
         run: |
           Start-Process -FilePath "C:\Program Files\RustDesk\rustdesk.exe" -ErrorAction SilentlyContinue
@@ -464,9 +419,6 @@ jobs:
           $json = $curlResult | ConvertFrom-Json
           if ($json.status -eq "ok") { "SCREENSHOT_URL=$($json.data.downloadPage)" | Out-File -Append $env:GITHUB_ENV }
 
-      # ============================================================
-      # 16. البقاء على قيد الحياة
-      # ============================================================
       - name: Keep alive
         run: |
           $mins = [int]"${{ env.RUNTIME_MINUTES }}"
@@ -477,9 +429,6 @@ jobs:
             Start-Sleep -Seconds 60
           }
 
-      # ============================================================
-      # 17. الحفظ النهائي قبل الخروج
-      # ============================================================
       - name: Final sync before exit
         if: always()
         run: |
@@ -518,9 +467,6 @@ jobs:
 
           Write-Host "Final sync completed successfully!"
 
-      # ============================================================
-      # 18. تشغيل المرحلة التالية أو التوقف
-      # ============================================================
       - name: Dispatch next or stop
         if: always()
         env:
