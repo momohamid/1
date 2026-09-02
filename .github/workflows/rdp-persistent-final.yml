@@ -217,13 +217,64 @@ jobs:
 
       - name: Sync changes to GitHub
         run: |
-          # تحديد مسار Git
-          $gitPath = "C:\Program Files\Git\bin\git.exe"
-          if (-not (Test-Path $gitPath)) {
-            Write-Host "Git not found, installing Git..."
-            winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
-            Start-Sleep -Seconds 10
+          # العثور على Git بشكل موثوق
+          $gitPath = $null
+
+          $gitCandidates = @(
+            "C:\Program Files\Git\cmd\git.exe",
+            "C:\Program Files\Git\bin\git.exe",
+            "C:\Program Files (x86)\Git\cmd\git.exe",
+            "C:\Program Files (x86)\Git\bin\git.exe"
+          )
+
+          foreach ($candidate in $gitCandidates) {
+            if (Test-Path $candidate) {
+              $gitPath = $candidate
+              break
+            }
           }
+
+          if (-not $gitPath) {
+            $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+            if ($gitCommand) {
+              $gitPath = $gitCommand.Source
+            }
+          }
+
+          if (-not $gitPath) {
+            Write-Host "Git not found, installing Git..."
+            winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
+
+            Start-Sleep -Seconds 5
+
+            $gitCandidates = @(
+              "C:\Program Files\Git\cmd\git.exe",
+              "C:\Program Files\Git\bin\git.exe",
+              "C:\Program Files (x86)\Git\cmd\git.exe",
+              "C:\Program Files (x86)\Git\bin\git.exe"
+            )
+
+            foreach ($candidate in $gitCandidates) {
+              if (Test-Path $candidate) {
+                $gitPath = $candidate
+                break
+              }
+            }
+
+            if (-not $gitPath) {
+              $gitCommand = Get-Command git.exe -ErrorAction SilentlyContinue
+              if ($gitCommand) {
+                $gitPath = $gitCommand.Source
+              }
+            }
+          }
+
+          if (-not $gitPath) {
+            Write-Error "Git executable could not be found after installation."
+            exit 1
+          }
+
+          Write-Host "Using Git: $gitPath"
 
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
