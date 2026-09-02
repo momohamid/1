@@ -209,6 +209,14 @@ jobs:
 
       - name: Sync changes to GitHub
         run: |
+          # تأكد من وجود Git
+          $gitPath = (Get-Command git -ErrorAction SilentlyContinue).Source
+          if (-not $gitPath) {
+            Write-Host "Git not found, installing Git..."
+            winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+            $env:PATH += ";C:\Program Files\Git\bin"
+          }
+
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
           $storagePath = "C:\persistent_storage"
@@ -433,6 +441,14 @@ jobs:
         if: always()
         run: |
           Write-Host "Final sync before exit..."
+
+          # تأكد من وجود Git
+          $gitPath = (Get-Command git -ErrorAction SilentlyContinue).Source
+          if (-not $gitPath) {
+            Write-Host "Git not found, installing Git..."
+            winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+            $env:PATH += ";C:\Program Files\Git\bin"
+          }
 
           $storagePath = "C:\persistent_storage"
           
