@@ -129,6 +129,14 @@ jobs:
 
       - name: Mount 1TB persistent storage
         run: |
+          # تحديد مسار Git
+          $gitPath = "C:\Program Files\Git\bin\git.exe"
+          if (-not (Test-Path $gitPath)) {
+            Write-Host "Git not found, installing Git..."
+            winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
+            Start-Sleep -Seconds 10
+          }
+
           $token = "${{ secrets.PAT_TOKEN }}"
           $owner = "${{ github.repository_owner }}"
 
@@ -141,13 +149,13 @@ jobs:
             $cloneUrl = "https://$owner`:$token@github.com/$owner/$repoName.git"
 
             if (Test-Path $repoPath) { Remove-Item -Path $repoPath -Recurse -Force }
-            git clone $cloneUrl $repoPath
+            & $gitPath clone $cloneUrl $repoPath
             cd $repoPath
-            git lfs install
-            git lfs track "*"
-            git add .gitattributes
-            git commit -m "Init LFS" --allow-empty
-            git push -u origin main
+            & $gitPath lfs install
+            & $gitPath lfs track "*"
+            & $gitPath add .gitattributes
+            & $gitPath commit -m "Init LFS" --allow-empty
+            & $gitPath push -u origin main
           }
 
           Write-Host "1TB persistent storage mounted at C:\persistent_storage"
@@ -209,12 +217,12 @@ jobs:
 
       - name: Sync changes to GitHub
         run: |
-          # تأكد من وجود Git
-          $gitPath = (Get-Command git -ErrorAction SilentlyContinue).Source
-          if (-not $gitPath) {
+          # تحديد مسار Git
+          $gitPath = "C:\Program Files\Git\bin\git.exe"
+          if (-not (Test-Path $gitPath)) {
             Write-Host "Git not found, installing Git..."
             winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
-            $env:PATH += ";C:\Program Files\Git\bin"
+            Start-Sleep -Seconds 10
           }
 
           $token = "${{ secrets.PAT_TOKEN }}"
@@ -240,12 +248,12 @@ jobs:
               $repoPath = "$storagePath\disk_$("{0:D2}" -f $i)"
               if (Test-Path $repoPath) {
                 cd $repoPath
-                git add .
-                $changes = git status --porcelain
+                & $gitPath add .
+                $changes = & $gitPath status --porcelain
                 if ($changes) {
                   Write-Host "Changes detected in disk_$("{0:D2}" -f $i)"
-                  git commit -m "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" --allow-empty
-                  git push -u origin main
+                  & $gitPath commit -m "Auto-sync $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')" --allow-empty
+                  & $gitPath push -u origin main
                 }
               }
             }
@@ -442,12 +450,12 @@ jobs:
         run: |
           Write-Host "Final sync before exit..."
 
-          # تأكد من وجود Git
-          $gitPath = (Get-Command git -ErrorAction SilentlyContinue).Source
-          if (-not $gitPath) {
+          # تحديد مسار Git
+          $gitPath = "C:\Program Files\Git\bin\git.exe"
+          if (-not (Test-Path $gitPath)) {
             Write-Host "Git not found, installing Git..."
             winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
-            $env:PATH += ";C:\Program Files\Git\bin"
+            Start-Sleep -Seconds 10
           }
 
           $storagePath = "C:\persistent_storage"
@@ -471,12 +479,12 @@ jobs:
             $repoPath = "$storagePath\disk_$("{0:D2}" -f $i)"
             if (Test-Path $repoPath) {
               cd $repoPath
-              git add .
-              $changes = git status --porcelain
+              & $gitPath add .
+              $changes = & $gitPath status --porcelain
               if ($changes) {
                 Write-Host "Syncing disk_$("{0:D2}" -f $i)"
-                git commit -m "Final sync before exit" --allow-empty
-                git push -u origin main
+                & $gitPath commit -m "Final sync before exit" --allow-empty
+                & $gitPath push -u origin main
               }
             }
           }
