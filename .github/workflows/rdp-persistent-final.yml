@@ -31,8 +31,8 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 370
     env:
-      RDP_USER: Bullettemporary
-      RDP_PASS: Bullet@12345
+      RDP_USER: Yousif185
+      RDP_PASS: Yousif1985
 
     steps:
       - name: Restore VM Snapshot
